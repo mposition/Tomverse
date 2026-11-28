@@ -12,6 +12,7 @@ import {
   toPublicChatMessage,
 } from "@/lib/publicChatMessage";
 import { attachChatImageTurns } from "@/lib/chatImageTurnRead";
+import { attachSettledAnswerCredits } from "@/lib/chatAnswerCredits";
 import { publicChatResponseAttempt } from "@/lib/chatResponseAttemptCore";
 import { listChatResponseAttempts } from "@/lib/chatResponseAttemptPersistence";
 import { conversationSurface } from "@/lib/continuationRoutes";
@@ -283,10 +284,17 @@ export async function GET(
     ).map(toPublicChatMessage);
     // A chat turn answered with an image carries the group its card polls
     // (lib/chatImageTurn.ts).
-    const messages =
+    const withImageTurns =
       conversation.kind === "chat"
         ? await attachChatImageTurns(userId, conversationId, pageMessages)
         : pageMessages;
+    // What each answer was charged, once settled (lib/chatAnswerCredits.ts).
+    // Chat only for now; this owner read is the only place it is sent --
+    // share snapshots and exports have their own selects and never carry it.
+    const messages =
+      conversation.kind === "chat" && conversation.productKey === "chat"
+        ? await attachSettledAnswerCredits(userId, withImageTurns)
+        : withImageTurns;
 
     const selectedModels = await clampRuntimeSelectedModels(
       safeParse(conversation.selectedModels, [defaultEngine])

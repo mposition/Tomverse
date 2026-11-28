@@ -395,7 +395,8 @@ test("two different files are still both read and both priced", async () => {
       user("second", question, [stored("right")])
     )
   );
-  assert.deepEqual(world.reads, ["left", "right"]);
+  // Each file is read once; the current message is read first for the budgets.
+  assert.deepEqual([...world.reads].sort(), ["left", "right"]);
   const twoFiles = world.budgets[0] as { inputTokens: number };
 
   world = freshWorld(["left"]);
@@ -565,4 +566,64 @@ test("a retried file that storage lost is named once, on the turn being sent", a
   assert.deepEqual(payload.details?.unavailableAttachmentIds, ["gone"]);
   assert.equal(payload.details?.attachmentScope, "current_turn");
   assert.deepEqual(world.budgets, [], "nothing was priced");
+});
+
+/*
+  What the model reads of an earlier answer. The transcript is rewritten before
+  anything is measured, so the priced input is the proof of what is sent.
+*/
+const pricedTokens = async (messages: readonly unknown[]) => {
+  world = freshWorld([]);
+  await send(messages);
+  assert.equal(world.budgets.length, 1, "the turn reaches pricing");
+  return (world.budgets[0] as { inputTokens: number }).inputTokens;
+};
+
+test("a failed answer is priced as one fixed marker, whatever text it carried", async () => {
+  const question = { id: "q1", role: "user", content: "First question?" };
+  const next = { id: "q2", role: "user", content: "Second question?" };
+  const marker = await pricedTokens([question, { id: "r1", role: "assistant", content: "", status: "error" }, next]);
+  const withBody = await pricedTokens([
+    question,
+    // The localised apology a Review panel keeps as the turn's content, with an
+    // error code beside it.
+    { id: "r1", role: "assistant", content: "Sorry. ".repeat(4_000), status: "error", errorCode: "UNKNOWN_ERROR" },
+    next,
+  ]);
+  assert.equal(withBody, marker, "the apology never reaches the model");
+});
+
+test("a search answer carries the URLs behind its citations into the next turn", async () => {
+  const question = { id: "q1", role: "user", content: "What changed?" };
+  const answer = { id: "a1", role: "assistant", content: "It changed [1] and again [2].", status: "normal" };
+  const next = { id: "q2", role: "user", content: "Which source said the second?" };
+  const plain = await pricedTokens([question, answer, next]);
+  const cited = await pricedTokens([
+    question,
+    {
+      ...answer,
+      searchMetadata: {
+        executed: true,
+        citations: [
+          { url: "https://example.com/one", title: "One" },
+          { url: "https://example.com/two", title: "Two", referenceNumber: 2 },
+          { url: "javascript:alert(1)" },
+        ],
+      },
+    },
+    next,
+  ]);
+  assert.ok(cited > plain, "the sources are part of what is sent and priced");
+  // Bounded: a client cannot grow the transcript with an arbitrary list.
+  const flooded = await pricedTokens([
+    question,
+    {
+      ...answer,
+      searchMetadata: {
+        citations: Array.from({ length: 500 }, (_, index) => ({ url: `https://example.com/${"x".repeat(200)}${index}` })),
+      },
+    },
+    next,
+  ]);
+  assert.ok(flooded - plain < 1_200, `${flooded - plain} extra tokens for 500 claimed sources`);
 });

@@ -127,6 +127,106 @@ refreshes inside the run home, and the operator's own login stays as it was
 rotated by a refresh. The refresh token stays with the CLI process: the
 implement shell runs in the sidecar's jail, which has no run home.
 
+Kimi (`kimi:<worker>`, from `~/.kimi/credentials/kimi-code.json` to
+`<worker>/cli/kimi/kimi-code.json`, owner request 2026-11-28) keeps only
+the access token: a Kimi refresh rotates the refresh token, so the copy's
+refresh token is emptied and the CLI never refreshes it. A run gets the
+access token as `KIMI_API_KEY` in its environment only (no OAuth reference in
+its configuration and no sign-in file in its run home), and its bubblewrap
+view has no `/proc` to read that environment back. The copy is refused
+once `expires_at` has passed, so how long a Kimi Code access token lasts on
+the box decides how often the stage timer must run.
+
+The Kimi sidecar is off unless its unit sets `TOMVERSE_AMUX_V22_KIMI=enabled`.
+It takes every role, implement by editing files and never with a shell
+(owner request 2026-11-28): `--print` approves every tool call, its file tools
+reach any absolute path, and Shell runs without a sandbox, so the whole CLI
+runs inside the bubblewrap view below. Each run home holds an agent file
+(`extend: default`, `tools` = ReadFile, Glob, Grep, plus WriteFile and
+StrReplaceFile for implement) and an empty `--skills-dir`; the whole
+configuration (Kimi Code platform, OAuth key `oauth/kimi-code`, the route's
+model) comes from `--config`, so no user `config.toml` or hook is read. The
+CLI runs only inside a bubblewrap view (network kept): `/usr`, only the
+`/etc` files TLS and name resolution read (certificates, `resolv.conf`,
+`hosts`, `nsswitch.conf`, `localtime`; the rest of `/etc` is empty), its own
+install directory `/opt/tomverse-amux-v22/<dir>` (the CLI and its Python must
+be installed there), the guard's node and script, the checkout (writable for
+implement with its `.git` read-only, read-only otherwise) and the run home; nothing else of the
+box is visible, and where bwrap cannot start the CLI does not either. A
+`PreToolUse` hook (`lib/amux/v22KimiToolGuard.mjs`) also blocks, before a tool
+runs, any path that resolves outside the checkout (symlinks and a pattern's
+fixed directories included) and logs each decision; a run with more tool
+calls than logged decisions is refused. The
+parser refuses any other tool, any undocumented argument and any path or path
+pattern that is absolute outside the checkout, has `..`, `~` or a
+backslash. A checkout with `.kimi/`, or with any symlink (`.git` included)
+that is dangling or resolves outside the checkout, is refused before the CLI
+starts, and again after the base sync. Kimi's stream-json carries no
+usage, so the sidecar reads the session's `wire.jsonl` in the run home
+(StatusUpdate `token_usage`, one step each) before the home is removed; a
+run without exactly one readable session has unknown usage and does not
+settle. No quota reading exists for Kimi yet (`/usage` is interactive only),
+so the office card shows its row without a number.
+
+Qwen (`qwen:<worker>`, from `~/.qwen/settings.json` to
+`<worker>/cli/qwen/coding-plan-key`, owner request 2026-11-28) copies only
+`env.BAILIAN_CODING_PLAN_API_KEY`, the Alibaba Cloud Coding Plan key that
+`/auth` stores there (Qwen OAuth's free tier ended 2026-04-15). The key has
+no expiry and reaches the CLI only as `OPENAI_API_KEY` in its environment,
+with `OPENAI_BASE_URL` the plan's international endpoint
+(`https://coding-intl.dashscope.aliyuncs.com/v1`; the China endpoint is out
+of scope) and `--auth-type openai`. The Qwen sidecar is off unless its unit
+sets `TOMVERSE_AMUX_V22_QWEN=enabled`. It takes every role, implement by
+editing files and never with a shell (owner request 2026-11-28), and runs
+whole inside the same bubblewrap view as Kimi (its install directory under
+`/opt/tomverse-amux-v22/`, node from `/usr/bin`, the checkout writable for
+implement only). A read role runs `--approval-mode plan --safe-mode
+--extensions none --core-tools read_file glob grep_search`; implement runs
+`--approval-mode auto-edit` with `edit` and `write_file` added; the prompt is
+on stdin, `QWEN_HOME` in the run
+home and `general.enableAutoUpdate: false`. Qwen's read tools resolve paths
+with realpath and ask for one outside the workspace, and a headless run
+refuses every ask. The parser refuses an `init` in another approval mode, any
+other tool, a subagent's message, any path outside the checkout and a write
+into its `.git`. A checkout with `.qwen/` or a symlink out of itself is
+refused. Usage is the stream's `result.usage`; its input
+includes cache reads, so cache reads are priced as input (Copilot's rule).
+Qwen has no headless quota or model-list command yet.
+
+Z.ai (`zai`, owner decision 2026-11-28) runs Claude Code against Z.ai's
+Anthropic-compatible endpoint on the owner's GLM Coding Plan, which Z.ai
+documents as a supported tool. It is off unless its unit sets
+`TOMVERSE_AMUX_V22_ZAI=enabled`.
+
+The run is a Claude run (Claude's arguments, tools, jailed shell and result),
+so it implements as a Claude worker does. Its environment adds:
+
+- `ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`, the global endpoint
+  (open.bigmodel.cn is out of scope);
+- `ANTHROPIC_AUTH_TOKEN` and `API_TIMEOUT_MS=3000000`;
+- every model alias set to the route's GLM model;
+- Claude Code's non-essential traffic and updater turned off.
+
+The key is not staged from the operator's home. The operator puts it in
+`<worker>/cli/zai/coding-plan-key`, owned by root and group-readable by the
+worker. The sidecar refuses a link, any other owner or mode, and a malformed
+key. The run passes Claude Code deny rules (`--disallowedTools`) for `Read` and
+`Edit` on the worker's CLI directory (the key's), its home (unless the
+checkout is inside it) and `/proc` (the CLI's environment holds the key);
+Claude Code applies them before a file tool runs, and the jailed shell never
+gets the key.
+
+Each run gets a fresh `HOME` with an empty `CLAUDE_CONFIG_DIR` (removed after
+the run), so no profile setting, hook or plugin of the worker's own applies to
+a run that holds the key. A host with Claude Code managed settings
+(`/etc/claude-code/managed-settings.json`) is refused. A checkout that
+contains `.claude/settings.json` or `.claude/settings.local.json` is refused
+too, because either file could point the endpoint elsewhere or add a hook.
+
+Receipts are Claude Code's result counts recorded under `zai` (source
+`zai_claude_result`) and settled as the selected model. Z.ai documents no
+quota endpoint, so its quota stays unknown.
+
 The Antigravity sidecar runs agy (a single Go binary) from a root-owned copy
 under `/opt/tomverse-amux-v22/`, with `AGY_CLI_DISABLE_AUTO_UPDATE=true` (agy
 ignores `1`). Each run home holds a custom agent (`amux-v22-read` or

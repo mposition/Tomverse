@@ -41,6 +41,7 @@ import { estimatePreflightAttachmentTokens } from "@/lib/chatAttachmentTokens";
 import { splitPreflightImageTokens } from "@/lib/chatImageInputTokens";
 import { countableChatErrorDetails } from "@/lib/chatRequestRejectionLog";
 import { buildChatTurnSystemBlocks } from "@/lib/chatTurnSystemBlocks";
+import { chatUrlReadingEnabled, userLinksFromMessages } from "@/lib/chatUrlReadTool";
 import {
     isExternalContinuationEnabledCached,
     isImageGenerationEnabledCached,
@@ -91,6 +92,8 @@ const preflightSchema = z
             )
             .max(CHAT_MAX_ATTACHMENTS_PER_MESSAGE),
         webSearchMode: z.enum(WEB_SEARCH_MODES).optional(),
+        /** Study mode adds an instruction block to the turn, so the quote counts it. */
+        studyMode: z.boolean().optional(),
     })
     .strict();
 
@@ -444,6 +447,11 @@ export async function POST(request: Request) {
         // route reads. A quote that answered "search-capable" differently from
         // the dispatch would admit a comparison the dispatch then refuses.
         const searchBackendReadiness = resolveWebSearchBackendReadiness();
+        const urlReadCandidate =
+            chatUrlReadingEnabled() && userLinksFromMessages([
+                ...history.filter((message) => message.role === "user").map((message) => message.content),
+                payload.prompt,
+            ]).length > 0;
         const budgets = models.map((model) => {
             // Per model, because history is filtered per model: a comparison
             // turn charges each model for the branch it can actually see.
@@ -489,6 +497,7 @@ export async function POST(request: Request) {
                 // Consent may change while preflight is pending. Reserve the
                 // bounded optional context regardless; settlement uses actual input.
                 reserveLocationInput: true,
+                studyMode: payload.studyMode === true,
                 modelId: model.id,
                 provider: model.provider,
                 usageClass: model.usageClass,
@@ -501,6 +510,9 @@ export async function POST(request: Request) {
                     modelNativeSearchEnabled &&
                     modelSearchCapability.canForceExecution,
                 appManagedSearchEnabled: modelAppManagedSearchEnabled,
+                // The upper bound of the chat route's decision (it also needs a signed-in Chat
+                // turn on a verified model), so the quote is never the smaller one.
+                urlReadAvailable: urlReadCandidate,
                 turnAttachments: payload.attachments.map((attachment, index) => ({
                     handle: `att_${index + 1}`,
                     name: "",

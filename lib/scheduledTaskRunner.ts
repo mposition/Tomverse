@@ -4,7 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { ApiSecurityError, assertMessageCapacity } from "@/lib/apiSecurity";
+import { ApiSecurityError, assertConversationCapacity, assertMessageCapacity } from "@/lib/apiSecurity";
 import { resolveChatConcurrencyPlan } from "@/lib/chatConcurrencyCore";
 import { identifyChatCaller } from "@/lib/chatSecurity";
 import { createConversation } from "@/lib/conversationCreation";
@@ -484,6 +484,9 @@ async function prepareConversation(
         }
       }
       if (!conversationId) {
+        // The task's dedicated conversation is listed like any other, so a full
+        // account is skipped with storage_full instead of growing past its quota.
+        await assertConversationCapacity(tx, run.userId);
         const created = await createConversation(tx, {
           userId: run.userId,
           title: task.title,

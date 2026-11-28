@@ -43,8 +43,37 @@ test("OCR 4 sends a bounded text-only document request", async () => {
   assert.deepEqual(result, {
     text: "## Page 1\n\n# First\n\n## Page 2\n\nSecond page",
     pageCount: 2,
+    pageNumbers: [1, 2],
+    truncatedPage: null,
+    unverified: false,
+    truncated: false,
     modelId: MISTRAL_OCR_MODEL_ID,
   });
+});
+
+test("OCR 4 reads only the pages it is asked for, counted from 0 on the wire", async () => {
+  let body: { pages?: number[] } = {};
+  const fetchMock: typeof fetch = async (_input, init) => {
+    body = JSON.parse(String(init?.body));
+    return Response.json({ pages: [{ index: 2, markdown: "Scanned" }] });
+  };
+  const result = await extractPdfTextWithMistralOcr(Buffer.from("%PDF"), 1_000, {
+    fetch: fetchMock,
+    apiKey: "test-key",
+    pages: [3],
+  });
+  assert.deepEqual(body.pages, [2]);
+  assert.equal(result?.text, "## Page 3\n\nScanned");
+  assert.equal(result?.pageCount, 1);
+
+  await extractPdfTextWithMistralOcr(Buffer.from("%PDF"), 1_000, {
+    fetch: async (_input, init) => {
+      body = JSON.parse(String(init?.body));
+      return Response.json({ pages: [] });
+    },
+    apiKey: "test-key",
+  });
+  assert.equal("pages" in body, false);
 });
 
 test("OCR 4 is optional when no Mistral key is configured", async () => {
@@ -78,4 +107,101 @@ test("OCR 4 rejects provider errors without retaining their body", async () => {
       return true;
     }
   );
+});
+
+test("OCR 4 reports which of the requested pages came back with text", async () => {
+  // Pages 2 and 4 were asked for; the provider answers page 2, and page 4 empty.
+  const fetchMock: typeof fetch = async () =>
+    Response.json({
+      pages: [
+        { index: 1, markdown: "Second" },
+        { index: 3, markdown: "   " },
+        { index: 5, markdown: "Not asked for" },
+      ],
+    });
+  const result = await extractPdfTextWithMistralOcr(Buffer.from("%PDF"), 1_000, {
+    fetch: fetchMock,
+    apiKey: "test-key",
+    pages: [2, 4],
+  });
+  assert.equal(result?.text, "## Page 2\n\nSecond");
+  assert.deepEqual(result?.pageNumbers, [2]);
+  assert.equal(result?.truncated, false);
+  // What the provider billed is what it returned, not what was kept.
+  assert.equal(result?.pageCount, 3);
+});
+
+// Review r-20261128-060603-66a2ae: a response that does not number its pages cannot be
+// matched to the pages asked for, whatever its length.
+const unnumbered = async (pages: unknown[], requested: number[]) =>
+  extractPdfTextWithMistralOcr(Buffer.from("%PDF"), 1_000, {
+    fetch: (async () => Response.json({ pages })) as typeof fetch,
+    apiKey: "test-key",
+    pages: requested,
+  });
+
+test("OCR 4 reads no page as read from a response without page numbers, fewer than asked", async () => {
+  // Pages 3, 5 and 7 were asked for; the provider skipped one and numbered none.
+  const result = await unnumbered([{ markdown: "A" }, { markdown: "B" }], [3, 5, 7]);
+  assert.equal(result?.unverified, true);
+  assert.deepEqual(result?.pageNumbers, []);
+  assert.equal(result?.truncatedPage, null);
+  // The text is kept, but not under page numbers it cannot vouch for.
+  assert.match(result?.text ?? "", /A/);
+  assert.match(result?.text ?? "", /B/);
+  assert.doesNotMatch(result?.text ?? "", /## Page [0-9]/);
+});
+
+test("OCR 4 reads no page as read from a response without page numbers, as many as asked", async () => {
+  const result = await unnumbered([{ markdown: "A" }, { markdown: "B" }], [3, 7]);
+  assert.equal(result?.unverified, true);
+  assert.deepEqual(result?.pageNumbers, []);
+});
+
+test("OCR 4 treats a response in which only some pages are numbered as unverified", async () => {
+  const result = await unnumbered([{ index: 2, markdown: "A" }, { markdown: "B" }], [3, 7]);
+  assert.equal(result?.unverified, true);
+  assert.deepEqual(result?.pageNumbers, []);
+  assert.doesNotMatch(result?.text ?? "", /## Page [0-9]/);
+  // Fully numbered, it is verified.
+  const numbered = await unnumbered([{ index: 2, markdown: "A" }, { index: 6, markdown: "B" }], [3, 7]);
+  assert.equal(numbered?.unverified, false);
+  assert.deepEqual(numbered?.pageNumbers, [3, 7]);
+});
+
+test("OCR 4 says when the text was cut, which page it cut, and counts only whole pages as read", async () => {
+  const fetchMock: typeof fetch = async () =>
+    Response.json({
+      pages: [
+        { index: 0, markdown: "a".repeat(30) },
+        { index: 1, markdown: "b".repeat(30) },
+        { index: 2, markdown: "c".repeat(30) },
+      ],
+    });
+  const result = await extractPdfTextWithMistralOcr(Buffer.from("%PDF"), 60, {
+    fetch: fetchMock,
+    apiKey: "test-key",
+  });
+  assert.equal(result?.truncated, true);
+  assert.equal(result?.text.length <= 60, true);
+  // Page 1 is whole; page 2 is cut in the middle and page 3 never reached.
+  assert.deepEqual(result?.pageNumbers, [1]);
+  assert.equal(result?.truncatedPage, 2);
+  const whole = await extractPdfTextWithMistralOcr(Buffer.from("%PDF"), 10_000, {
+    fetch: fetchMock,
+    apiKey: "test-key",
+  });
+  assert.equal(whole?.truncated, false);
+  assert.deepEqual(whole?.pageNumbers, [1, 2, 3]);
+  assert.equal(whole?.truncatedPage, null);
+});
+
+test("OCR 4 gives no text for a document of empty pages", async () => {
+  const fetchMock: typeof fetch = async () => Response.json({ pages: [{ index: 0, markdown: "" }] });
+  const result = await extractPdfTextWithMistralOcr(Buffer.from("%PDF"), 100, {
+    fetch: fetchMock,
+    apiKey: "test-key",
+  });
+  assert.equal(result?.text, "");
+  assert.deepEqual(result?.pageNumbers, []);
 });

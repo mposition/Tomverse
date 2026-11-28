@@ -29,6 +29,7 @@ import type { BillingAction, BillingResult, BillingState, DesktopBillingInput } 
 import type { DesktopManagedCodeInput, ManagedCodeView } from "./managed-code-contract";
 import type { CloudExecutionView, DesktopCloudExecutionInput } from "./cloud-execution-contract";
 import type { CodeProjectInput, CodeProjectReply, CodeProjectsView } from "./code-project-contract";
+import type { LiveCliProvider } from "./provider-cli-exec-contract";
 import type { DesktopProjectAction, DesktopProjectInput, DesktopProjectOutcome } from "./project-contract";
 import type { DesktopResearchAction, DesktopResearchInput, DesktopResearchOutcome } from "./research-contract";
 import type { ReviewAction, ReviewInput, ReviewOutcome } from "./review-contract";
@@ -39,7 +40,7 @@ import type { CodeOrchestration } from "./orchestrate-contract";
 import type { Language } from "../../../lib/language";
 import type { desktopNativeCopy } from "../../../locales/desktopNative";
 import { codeExecutionMode, type CliAccount, type CliLoginOpen, type CliPathCheck, type CliScan, type CliPaths, type CliProtocolCheck, type CliProvider,
-  type CodeExecutionMode, type claudeFixtureExecution, type codexFixtureExecution, type kimiFixtureExecution, type qwenFixtureExecution, type vibeFixtureExecution, type deepSeekFixtureExecution, type zCodeFixtureExecution, type miniMaxFixtureExecution, type grokFixtureExecution, type antigravityFixtureExecution,
+  type CodeExecutionMode, type claudeFixtureExecution, type codexFixtureExecution, type kimiFixtureExecution, type qwenFixtureExecution, type vibeFixtureExecution, type deepSeekFixtureExecution, type zCodeFixtureExecution, type zaiClaudeExecution, type miniMaxFixtureExecution, type grokFixtureExecution, type antigravityFixtureExecution,
   type tomverseApiExecution } from "./code-execution";
 import type { CodeCliContinuation, CodeContinuation, CodeFallbackCliModels, CodeFallbackSettings, CodeFallbackUpdate } from "./code-fallback";
 import type { PermissionCommand, PermissionResult, PermissionsView } from "./permission-contract";
@@ -311,9 +312,11 @@ export type Task = {
   effort?: StartInput["effort"];
   actual?: StartInput["effort"];
   model?: string;
-  execution?: typeof tomverseApiExecution | typeof codexFixtureExecution | typeof claudeFixtureExecution | typeof qwenFixtureExecution | typeof kimiFixtureExecution | typeof vibeFixtureExecution | typeof deepSeekFixtureExecution | typeof zCodeFixtureExecution | typeof miniMaxFixtureExecution | typeof grokFixtureExecution | typeof antigravityFixtureExecution;
+  execution?: typeof tomverseApiExecution | typeof codexFixtureExecution | typeof claudeFixtureExecution | typeof qwenFixtureExecution | typeof kimiFixtureExecution | typeof vibeFixtureExecution | typeof deepSeekFixtureExecution | typeof zCodeFixtureExecution | typeof zaiClaudeExecution | typeof miniMaxFixtureExecution | typeof grokFixtureExecution | typeof antigravityFixtureExecution;
   nativeSession?: CodeNativeAssignment;
   nativeRuns?: CodeNativeRunEvidence[];
+  /** Run by the person's own provider CLI on this computer (no Tomverse API, no credits). */
+  liveCli?: true;
   pendingNativeApproval?: { callId: string; turnId: string };
   continuation?: CodeContinuation & { source: CodeNativeAssignment; stage: "checking" | "unavailable" | "started" };
   cliContinuation?: CodeCliContinuation & { sourceModel?: string; stage: "checking" | "unavailable" | "started" };
@@ -400,6 +403,10 @@ export type Snapshot = {
   codeFallbackCliModels: CodeFallbackCliModels;
   cliPaths: CliPaths;
   supportedCliPaths: CliProvider[];
+  /** Provider CLIs a Code task can run with now: the server names the route, and the person saved and trusted the file. Empty or absent otherwise. */
+  providerCliExec?: LiveCliProvider[];
+  /** Where the Z.ai Coding Plan key is kept: encrypted on this device, or for this session only. Absent when none is saved. */
+  zaiKey?: "device" | "session";
   cliAuthFixture: boolean;
   cliProtocolCheckAvailable: boolean;
   codexFixtureModel?: string;
@@ -443,6 +450,8 @@ export type Snapshot = {
     socialLink?: ("google" | "azure-ad")[];
     /** Remote control reports a file change's line counts and, if the person chose, a few redacted changed lines. */
     remotePreview?: boolean;
+    /** The server lets this build run a Code task with the person's own Codex or Claude Code (no Tomverse API, no credits). */
+    providerCliExec?: boolean;
   } | null;
   codeKey: CodeKeyState;
   /** Tasks that run next to the open one: the activity list and the full view of the tasks the window observes. */
@@ -531,6 +540,9 @@ export type DesktopApi = {
   chooseCliPath(provider?: CliProvider): Promise<string | null>;
   saveCliPath(input: { provider: CliProvider; path: string }): Promise<CliPathCheck>;
   removeCliPath(provider: CliProvider): Promise<void>;
+  /** Saves the Z.ai Coding Plan key; says whether it is kept on this device or for this session only. */
+  saveZaiKey(key: string): Promise<"device" | "session">;
+  removeZaiKey(): Promise<void>;
   /** Looks for installed provider CLIs in fixed places. Starts a program only for a file that matches its pinned release. */
   scanCliProviders(): Promise<CliScan>;
   /** Trusts one exact unverified file and saves it. */

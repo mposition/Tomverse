@@ -9,6 +9,7 @@ import {
   chatRuntimeKeyIdentity,
   captureChatRuntimeCompleteView,
   claimChatRuntimeLoad,
+  claimChatRuntimeRefresh,
   endChatRuntimeRun,
   getChatRuntimeLastPrompt,
   getChatRuntimeRevision,
@@ -395,4 +396,31 @@ test("a streaming key is retained however many other conversations are opened", 
     getChatRuntimeSnapshot(streaming).messages[0].content,
     "still arriving"
   );
+});
+
+test("a silent refresh claims the newest ticket without closing the view or the send barrier", () => {
+  const first = claimChatRuntimeLoad(A);
+  settleChatRuntimeLoad(A, first, { loaded: true });
+  writeChatRuntimeMessages(A, [{ id: "u1", role: "user", content: "Hi" }]);
+
+  const refresh = claimChatRuntimeRefresh(A);
+  assert.notEqual(refresh, first);
+  assert.deepEqual(
+    { isLoaded: getChatRuntimeSnapshot(A).isLoaded, loadFailed: getChatRuntimeSnapshot(A).loadFailed },
+    { isLoaded: true, loadFailed: false },
+    "the transcript on screen stays loaded: no placeholder, no closed composer"
+  );
+  assert.equal(isChatRuntimeLoadInFlight(A), false, "a refresh is not a load in flight");
+  assert.equal(isCurrentChatRuntimeLoad(A, first), false, "an older read can no longer settle");
+  assert.equal(isCurrentChatRuntimeLoad(A, refresh), true);
+});
+
+test("a full load or a send's restore supersedes a refresh that is still on the wire", () => {
+  const first = claimChatRuntimeLoad(A);
+  settleChatRuntimeLoad(A, first, { loaded: true });
+  const refresh = claimChatRuntimeRefresh(A);
+  const retry = claimChatRuntimeLoad(A);
+  assert.equal(isCurrentChatRuntimeLoad(A, refresh), false, "the refresh may no longer apply");
+  assert.equal(isCurrentChatRuntimeLoad(A, retry), true);
+  settleChatRuntimeLoad(A, retry, { loaded: true });
 });

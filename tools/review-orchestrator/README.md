@@ -252,8 +252,8 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
 `quotaProbe: "antigravity"`는 reviewer와 같은 `agy` 실행 파일로 `agy -p /usage --output-format json`을
 실행해(모델 호출 없음, 토큰 0) `quotaGroups`에 적은 그룹들의 bucket 중 가장 적게 남은 쪽을 잔액으로 봅니다
 (기본 "Gemini Models"). 그룹은 모델마다 다릅니다(agy 1.5.4, 2026-11-19 박스 실측): "Gemini Models"는
-Gemini 4 Neon·Hydrogen·3.8 Flash, "Claude and GPT models"는 Claude Opus·Sonnet 5.5와 GPT-OSS, Gemini 4 Argon은
-주간 한도가 따로인 "Gemini 4 Argon" 그룹입니다. 모델을 바꾸면 `quotaGroups`도 같이 바꿉니다. 적은 그룹이 응답에 없으면 `unknown`입니다. 리셋 시각이 지난 bucket, 형식이 다른 응답, 실패는 `unknown`입니다. AMUX는 Antigravity를
+Gemini 4 모델 전부(Argon 포함 — Argon만의 그룹은 2026-11-23까지 없어졌습니다)와 3.8 Flash, "Claude and GPT models"는
+Claude Opus·Sonnet 5.5와 GPT-OSS입니다(2026-11-28 실측). 모델을 바꾸면 `quotaGroups`도 같이 바꿉니다. 적은 그룹이 응답에 없으면 `unknown`입니다. 리셋 시각이 지난 bucket, 형식이 다른 응답, 실패는 `unknown`입니다. 아직 아무도 쓰지 않은 창은 남은 비율 1, 리셋 시각 1970-01-01로 오는데 이것은 가득 찬 창입니다(첫 요청 때 창이 시작됩니다). AMUX는 Antigravity를
 측정하지 않으므로(`measured: false`) `amux`로는 배정되지 않습니다. 이 probe는 review 계정 자신의 agy
 로그인만 읽습니다.
 
@@ -381,7 +381,7 @@ $RO status
   4. config에 예시의 `antigravity-argon` 항목을 넣고 `"enabled": true`, `quota check antigravity-argon`으로 잔액이 읽히는지 본 뒤
      drain 재시작합니다. **첫 실제 검토 한 건이 판정을 돌려주는지 확인합니다**(셸 pipe 시험만으로 판단하지 않음).
   - **모델별 lane(2026-11-19).** 같은 agy 로그인의 그룹 한도는 서로 따로 줄어들므로 모델 하나가 lane 하나입니다.
-    `antigravity-argon`(Gemini 4 Argon, "Gemini 4 Argon"), `antigravity-hydrogen`(`gemini-4-hydrogen-high`,
+    `antigravity-argon`(Gemini 4 Argon, "Gemini Models"), `antigravity-hydrogen`(`gemini-4-hydrogen-high`,
     "Gemini Models"), `antigravity-opus`(`claude-opus-5-5-high`, "Claude and GPT models"). 인자·agent 파일·deny
     규칙은 셋이 같고 `model`과 `quotaGroups`만 다릅니다. 독립성은 CLI가 아니라 모델 공급사로 정하므로 Opus lane은
     `vendor: "anthropic"`입니다: Claude가 쓴 작업은 검토하지 않고, Codex·xAI 등이 쓴 작업에서 `claude` provider와

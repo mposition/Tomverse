@@ -52,8 +52,18 @@ test("the chat route hands the injected context block to the SDK as instructions
   // only source of system messages, and nothing makes that stay true.
   assert.match(
     source,
-    /const \{ messages: sdkMessages, instructions: sdkInstructions \} =\s*splitProviderInstructions\(formattedMessages\);/,
+    /const \{ messages: splitSdkMessages, instructions: sdkInstructions \} =\s*splitProviderInstructions\(formattedMessages\);/,
     `${ROUTE} must split system blocks out of the SDK's messages unconditionally`
+  );
+  // The split result then passes through the provider role rules (Perplexity
+  // rejects adjacent same-role turns), for the primary and fallback alike.
+  assert.match(
+    source,
+    /const sdkMessages = prepareProviderMessages\(splitSdkMessages, modelConfig\.provider\);/
+  );
+  assert.match(
+    source,
+    /const fallbackSdkMessages = prepareProviderMessages\(fallbackSdkMessagesBase, plan\.provider\);/
   );
   assert.doesNotMatch(
     source,
@@ -163,4 +173,18 @@ test("the SDK still refuses system messages inside the messages array", () => {
     /When disabled, system messages must be provided through the `instructions`\s*\*\s*option\.\s*\*\s*\*\s*@default false/,
     "ai's allowSystemInMessages default changed -- re-read its prompt contract"
   );
+});
+
+test("a send without a prepared context bundle still carries the stored personal instructions", () => {
+  const source = read(ROUTE);
+  // The client sends without a bundle when preparation failed (lib/chatContextBundleClient.ts).
+  // Memory is dropped then, but the personal instructions are read from the account directly,
+  // through the same builder the bundle path uses, and priced like the bundle's share.
+  const branch = source.match(/\} else if \(\s*session\?\.user\?\.id && !contextBundle[\s\S]*?chat_personalization_without_bundle"/)?.[0] ?? "";
+  assert.ok(branch, "the no-bundle personalization branch exists");
+  assert.match(branch, /readPersonalizationTurnBlock\(session\.user\.id\)/);
+  assert.match(branch, /contextSystemPrompt = personal\.prompt;/);
+  assert.match(branch, /estimatedInputTokens \+= personal\.tokens;/);
+  assert.match(branch, /inputEstimate\.addTokens\(personal\.tokens\);/);
+  assert.doesNotMatch(branch, /memoryData\s*=/, "memory is not rebuilt here");
 });

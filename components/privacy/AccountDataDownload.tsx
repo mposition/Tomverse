@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { AlertTriangle, Check, Download, Loader2, ShieldCheck, X } from "lucide-react";
 
 import { useLanguage } from "@/components/LanguageProvider";
@@ -286,6 +287,24 @@ export function AccountDataDownload() {
             })}
           </ul>
         )}
+      </section>
+
+      {/* No switch lives here: the privacy policy already says, per provider, whether chat content is used to train models. */}
+      <section
+        className="mt-6 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60"
+        data-testid="account-data-training-notice"
+      >
+        <h2 className="text-base font-bold">{t("privacyPolicy.providerTableTitle")}</h2>
+        <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+          {t("accountDataExport.trainingNoticeBody")}
+        </p>
+        <Link
+          href="/privacy#providers"
+          className="mt-2 inline-block text-sm font-semibold text-blue-600 underline underline-offset-2 dark:text-blue-400"
+          data-testid="account-data-training-link"
+        >
+          {t("accountDataExport.trainingNoticeLink")}
+        </Link>
       </section>
     </div>
   );

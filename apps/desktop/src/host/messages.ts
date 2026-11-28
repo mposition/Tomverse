@@ -12,6 +12,8 @@ import type { TerminalReadReply } from "../../../tomverse-cli/src/terminal-read"
 import type { ReviewDiff, ReviewFile, ReviewHunk, ReviewModelResult, ReviewScope } from "../review-contract";
 import type { AgentGitAction, AgentGitResult } from "../git-actions-contract";
 import type { PickedPicture } from "./browser-pick-store";
+import type { PermissionModeId } from "../permission-contract";
+import type { LiveCliProvider } from "../provider-cli-exec-contract";
 
 /**
  * Where Code's agent engine sends its requests, and with what. `key` is a Code key, or with `session` the stable, non-secret
@@ -41,6 +43,16 @@ export type WorkerCommand =
   | (NativeFixtureTask & { type: "start-codex-fixture"; clientVersion: string;
     apiSource?: CodeCliContinuation & { scope: HistoryScope; connection: Connection } })
   | (NativeFixtureTask & { type: "start-claude-fixture" })
+  /**
+   * A task run by the person's own provider CLI: `file` is the saved, verified executable the main process resolved. No Tomverse
+   * connection or token is part of this command, and the run calls no Tomverse API.
+   */
+  | { type: "start-provider-cli"; runId: string; project: ProjectRoot; provider: LiveCliProvider; file: string; prompt: string;
+    permission: PermissionModeId; protectedRoot: string; references?: WorkspaceReference[]; history?: { id: string; directory: string };
+    /** A test runs a stand-in script through the Node binary this way; set only where fixtures are allowed. */
+    argsPrefix?: string[];
+    /** The Z.ai route only: its key and Claude Code settings folder, held in memory for this run. */
+    zai?: { key: string; configDir: string } }
   | (Omit<NativeFixtureTask, "afterQuota"> & { type: "start-structured-cli-fixture"; provider: "qwen" | "moonshot" | "mistral" | "deepseek" | "zhipu" | "minimax" | "xai" | "google"; clientVersion: string })
   | (Omit<RecordedSession, "requestId"> & { type: "resume"; runId: string; protectedRoot: string; connection: Connection; previous: Task;
     browserSnapshot?: boolean; browserAgent?: boolean; browserWeb?: boolean; computerUse?: boolean; terminalRead?: boolean; webSearch?: boolean;

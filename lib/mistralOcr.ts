@@ -37,7 +37,25 @@ export class MistralOcrError extends Error {
 
 export type MistralOcrResult = {
   text: string;
+  /** Pages the provider returned, which is what it bills. */
   pageCount: number;
+  /**
+   * 1-based pages whose whole text is in `text`: returned with content and not
+   * cut off by the character limit. A page the provider skipped or returned
+   * empty is not here, nor is the page the limit cut or any page after it, and
+   * a caller that asked for specific pages checks them against this list
+   * rather than taking any text as proof they were read.
+   */
+  pageNumbers: number[];
+  /** The text was cut at the character limit. */
+  truncated: boolean;
+  /** The page the limit cut in the middle (only part of it is in `text`), if any. */
+  truncatedPage: number | null;
+  /**
+   * The response did not number every page, so its text cannot be matched to the
+   * pages asked for: `pageNumbers` is empty and no page is reported as read.
+   */
+  unverified: boolean;
   modelId: typeof MISTRAL_OCR_MODEL_ID;
 };
 
@@ -58,6 +76,11 @@ export async function extractPdfTextWithMistralOcr(
     fetch?: typeof fetch;
     apiKey?: string;
     signal?: AbortSignal;
+    /**
+     * 1-based pages to read; the rest of the document is neither processed nor
+     * billed. Used for a PDF whose other pages already have a text layer.
+     */
+    pages?: readonly number[];
   } = {}
 ): Promise<MistralOcrResult | null> {
   const apiKey = dependencies.apiKey ?? resolveProviderApiKey("mistral");
@@ -82,6 +105,10 @@ export async function extractPdfTextWithMistralOcr(
       include_image_base64: false,
       include_blocks: false,
       table_format: "markdown",
+      // The provider counts pages from 0.
+      ...(dependencies.pages?.length
+        ? { pages: dependencies.pages.map((page) => page - 1) }
+        : {}),
     }),
     signal: dependencies.signal ?? AbortSignal.timeout(OCR_TIMEOUT_MS),
     cache: "no-store",
@@ -115,19 +142,50 @@ export async function extractPdfTextWithMistralOcr(
     throw new MistralOcrError("Mistral OCR returned an invalid response shape.");
   }
 
-  const text = validated.data.pages
-    .map((page, position) => {
-      const pageNumber = (page.index ?? position) + 1;
-      return `## Page ${pageNumber}\n\n${page.markdown.trim()}`;
-    })
-    .filter((page) => page.length > 0)
-    .join("\n\n")
-    .trim()
-    .slice(0, maxCharacters);
+  const requested = dependencies.pages?.length ? new Set(dependencies.pages) : null;
+  // A response in which any page lacks its own index cannot be matched to the
+  // pages that were asked for: guessing from the position would put the text of
+  // a page after a skipped one under the wrong number, and call it read. Its
+  // text is still returned (unnumbered), but no page is reported as read.
+  const unverified = validated.data.pages.some((page) => page.index === undefined);
+  const blocks: Array<{ pageNumber: number | null; block: string }> = [];
+  validated.data.pages.forEach((page, position) => {
+    const markdown = page.markdown.trim();
+    if (!markdown) return;
+    if (unverified || page.index === undefined) {
+      blocks.push({ pageNumber: null, block: `## Scanned text ${position + 1}\n\n${markdown}` });
+      return;
+    }
+    const pageNumber = page.index + 1;
+    if (requested && !requested.has(pageNumber)) return;
+    blocks.push({ pageNumber, block: `## Page ${pageNumber}\n\n${markdown}` });
+  });
+  const joined = blocks.map((entry) => entry.block).join("\n\n");
+  const text = joined.slice(0, maxCharacters).trim();
+  // A page counts as read only when all of it survives the cut; the page the
+  // limit lands in is reported on its own, and the pages after it are simply
+  // not here.
+  const pageNumbers: number[] = [];
+  let truncatedPage: number | null = null;
+  let offset = 0;
+  for (const entry of blocks) {
+    if (entry.pageNumber === null) break;
+    if (offset >= maxCharacters) break;
+    if (offset + entry.block.length > maxCharacters) {
+      truncatedPage = entry.pageNumber;
+      break;
+    }
+    pageNumbers.push(entry.pageNumber);
+    offset += entry.block.length + 2;
+  }
 
   return {
     text,
     pageCount: validated.data.pages.length,
+    pageNumbers,
+    truncated: joined.length > maxCharacters,
+    truncatedPage,
+    unverified,
     modelId: MISTRAL_OCR_MODEL_ID,
   };
 }
