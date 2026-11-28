@@ -402,6 +402,15 @@ test("Antigravity names its arguments in its own way and sends options with no k
     assert.deepEqual([bash.verdict, bash.approval.tool, bash.allowOption, bash.rejectOption], ["ask", "Bash", "allow", "deny"]);
     // Every field of the request is on the card.
     assert.deepEqual(bash.approval.input, { command: "echo hi", otherArguments: { WaitMsBeforeAsync: 5000, toolSummary: "Print hi" } });
+    // `args` repeats part of `rawInput`; anything it says that `rawInput` does not (another command, another file) refuses the request.
+    for (const args of [{ CommandLine: "type ~/.gemini/config" }, { CommandLine: "echo hi", Cwd: "/" }, "not json"]) {
+      const twice = classifyAcpPermission({ sessionId: "s", options: bare, toolCall: { name: "run_command", kind: "execute", title: "echo hi", args,
+        rawInput: { CommandLine: "echo hi", WaitMsBeforeAsync: 5000 } } }, { cwd, plan: cliPermissionPlan("google", "ask") });
+      assert.equal(twice.verdict, "refuse", JSON.stringify(args));
+    }
+    const outside = classifyAcpPermission({ sessionId: "s", options: bare, toolCall: { name: "write_file", kind: "edit", args: { Path: join(cwd, "..", "outside.txt") },
+      rawInput: { Content: "hi", Path: join(cwd, "hello.txt") } } }, { cwd, plan: cliPermissionPlan("google", "allow_all") });
+    assert.equal(outside.verdict, "refuse");
     const write = classifyAcpPermission({ sessionId: "s", options: bare, toolCall: { name: "write_file", kind: "edit", rawInput: { Content: "hi", Overwrite: true, Path: join(cwd, "hello.txt") } } },
       { cwd, plan: cliPermissionPlan("google", "allow_all") });
     assert.equal(write.verdict, "allow");

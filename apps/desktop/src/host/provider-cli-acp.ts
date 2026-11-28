@@ -313,6 +313,12 @@ function factsOf(call: Json, tracked?: TrackedCall): Facts {
   const oversized = (value: unknown) => typeof value === "string" && value.length > MAX_INPUT;
   if (oversized(call.rawInput) || oversized(call.args)) limited = true;
   const raw = parsedInput(call.rawInput) ?? (tracked ? streamedInput(tracked) : undefined) ?? parsedInput(call.args);
+  // A request that carries its arguments twice (Antigravity sends `rawInput` and, in `args`, part of it) is judged on `rawInput`
+  // only when `args` adds nothing: every argument there must be in `rawInput` with the same value. One that differs or is missing
+  // would be run without being checked or shown, so it refuses the request.
+  const args = parsedInput(call.args);
+  if (args && raw && raw !== args && !Object.entries(args).every(([key, value]) => Object.hasOwn(raw, key) && sameValue(raw[key], value))) limited = true;
+  if (call.args !== undefined && call.args !== null && !args) limited = true;
   if (raw && JSON.stringify(raw).length > MAX_INPUT) limited = true;
   const locations = Array.isArray(call.locations) ? call.locations : [];
   const content = Array.isArray(call.content) ? call.content : [];
