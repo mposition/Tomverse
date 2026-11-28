@@ -1,9 +1,19 @@
 import "server-only";
 
-import type { List, ListItem, Nodes, PhrasingContent, Root, RootContent, Table } from "mdast";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFromMarkdown } from "mdast-util-gfm";
 import { toString } from "mdast-util-to-string";
+
+// The syntax-tree types come from what the parser returns. `mdast` itself is a
+// types-only package with no runtime entry, so importing it is an unresolved
+// import to the app-runtime analysis (lib/agentControlPlaneSlice.ts).
+type Root = ReturnType<typeof fromMarkdown>;
+type RootContent = Root["children"][number];
+type List = Extract<RootContent, { type: "list" }>;
+type ListItem = List["children"][number];
+type Table = Extract<RootContent, { type: "table" }>;
+type PhrasingContent = Extract<RootContent, { type: "paragraph" }>["children"][number];
+type Nodes = Root | RootContent | ListItem | PhrasingContent;
 import { gfm } from "micromark-extension-gfm";
 
 import { formatExportMessageLabel, headerLineText } from "@/lib/exportConversation";

@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
 import test from "node:test";
 
 import { archivedListWhere } from "../lib/conversationArchive.ts";
@@ -308,7 +307,6 @@ test("a Korean and Chinese conversation comes back out of the PDF as text", asyn
   const rendered = renderConversationPdf(spec);
   assert.equal(rendered.ok, true);
   // Set CONVERSATION_PDF_SAMPLE to a path to keep the file and look at it.
-  if (process.env.CONVERSATION_PDF_SAMPLE) writeFileSync(process.env.CONVERSATION_PDF_SAMPLE, rendered.bytes);
   const text = (await pdfText(rendered.bytes)).replace(/\s+/g, "");
   for (const expected of ["분기보고서정리", "1분기매출을표로정리해줘.", "中文也可以吗？", "매출은12%늘었습니다.", "中文没有问题。", "1억2천만원", "print('안녕')", "User", "Assistant"]) {
     assert.ok(text.includes(expected), `missing: ${expected}`);
