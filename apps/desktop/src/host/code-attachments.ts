@@ -106,8 +106,12 @@ const isCopyPath = (path: string) => {
  */
 export async function discardAttachmentCopy(workspace: Workspace, path: string) {
   if (!isCopyPath(path)) return;
-  const resolved = workspace.resolve(path, "write");
-  if (resolved.exists) await rm(resolved.absolute);
+  // The copy's own path is removed, never what it might point to now: a folder or file that became a link is left alone.
+  const folder = join(workspace.root, CODE_ATTACHMENT_FOLDER);
+  const file = join(folder, path.split("/")[1]!);
+  const [folderInfo, fileInfo] = await Promise.all([lstat(folder).catch(() => null), lstat(file).catch(() => null)]);
+  if (!folderInfo?.isDirectory() || !fileInfo?.isFile()) return;
+  await rm(file);
 }
 
 /** Takes carried copies back out of a worktree that did not start, so it can be discarded as unchanged. */

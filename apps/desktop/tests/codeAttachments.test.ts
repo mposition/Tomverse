@@ -90,6 +90,15 @@ test("A link to a credential file and a folder Git would not ignore are refused"
     const link = join(tmp, "harmless.txt");
     const linked = await symlink(key, link, "file").then(() => true, () => false);
     if (linked) await assert.rejects(copyOutsideFile(root, link, now), "the file a link points to is checked too");
+
+    // A copy that became a link is not followed when it is taken off the draft: the file it points to stays.
+    const target = join(root, "target.txt");
+    await writeFile(target, "keep");
+    const swapped = join(root, CODE_ATTACHMENT_FOLDER, "20261128-123456-swapped.txt");
+    if (await symlink(target, swapped, "file").then(() => true, () => false)) {
+      await discardAttachmentCopy(new Workspace(root, [join(tmp, "app-data")]), CODE_ATTACHMENT_FOLDER + "/20261128-123456-swapped.txt");
+      assert.equal(await readFile(target, "utf8"), "keep");
+    }
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }

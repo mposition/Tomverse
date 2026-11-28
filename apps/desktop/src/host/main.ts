@@ -2021,12 +2021,19 @@ async function chooseCodeReferences(kind: CodeReference["kind"]) {
         try {
           // A file from outside the project is copied into the project's attachment folder (code-attachments.ts) and attached there.
           const outside = relative(root, path);
-          const copied = kind === "file" && (outside.startsWith("..") || isAbsolute(outside)) ? await copyOutsideFile(root, path) : undefined;
-          const reference = workspace.reference(copied ?? path);
+          // Outside means a parent step or another drive; a project file named "..notes.txt" is inside.
+          const copied = kind === "file" && (/^\.\.(?:[\\/]|$)/.test(outside) || isAbsolute(outside)) ? await copyOutsideFile(root, path) : undefined;
+          const copiedPath = copied ? relative(root, copied).split(sep).join("/") : undefined;
+          let reference: ReturnType<Workspace["reference"]>;
+          try { reference = workspace.reference(copied ?? path); }
+          catch (error) {
+            if (copiedPath) await discardAttachmentCopy(workspace, copiedPath).catch(() => {});
+            throw error;
+          }
           if (reference.kind !== kind || !codeReferencePath.safeParse(reference.path).success ||
               cleanText(reference.path, connection.key) !== reference.path) {
             // A copy that cannot be attached is not left behind.
-            if (copied) await discardAttachmentCopy(workspace, reference.path).catch(() => {});
+            if (copiedPath) await discardAttachmentCopy(workspace, copiedPath).catch(() => {});
             rejected++;
             continue;
           }

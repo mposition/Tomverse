@@ -795,6 +795,8 @@ function Desktop() {
     await act(async () => {
       let rejected = 0;
       for (const image of images) {
+        // What view_image reads at most (code-attachments.ts); a larger image is refused before it is read.
+        if (image.size > 3 * 1024 * 1024) { rejected++; continue; }
         const result = await window.desktop.pasteCodeImage({ name: image.name, mediaType: image.type as "image/png", bytes: new Uint8Array(await image.arrayBuffer()) })
           .catch(() => ({ references: undefined, rejected: 1 }));
         if (previousNamespace.current !== namespace) return;
@@ -1151,7 +1153,8 @@ ${text}` : text;
                 onPaste={(event) => {
                   const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
                   if (!images.length || !snapshot?.draftNamespace || !snapshot.root || snapshot.remote) return;
-                  event.preventDefault();
+                  // Copied text still pastes as text; only an image-only paste is taken over.
+                  if (!event.clipboardData.getData("text/plain")) event.preventDefault();
                   void attachPastedImages(images);
                 }}
                 onKeyDown={(event) => {
