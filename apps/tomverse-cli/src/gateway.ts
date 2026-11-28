@@ -194,10 +194,23 @@ export type GenerationHooks = {
     ended(intent: GenerationIntent, how: "complete" | "interrupted"): Promise<void>;
 };
 
+/**
+ * A credential that is not a fixed key: Tomverse Desktop's signed-in session (docs/policy/external-api.md section
+ * 11.2). `identity` is a stable, non-secret name for it -- what sessions are recorded and looked up under, as a key's
+ * prefix is -- and `bearer` the access token in force now, read on every request because the app renews it; null
+ * once the person signed out, and nothing is sent then. `headers` are what the server needs to read it as a Desktop
+ * session (its origin).
+ */
+export type GatewayCredential = {
+    identity: string;
+    bearer: () => string | null;
+    headers?: Readonly<Record<string, string>>;
+};
+
 export class Gateway {
     constructor(
         readonly endpoint: Endpoint,
-        private readonly key: string,
+        private readonly key: string | GatewayCredential,
         private readonly fetchImpl: typeof fetch = globalThis.fetch,
         private readonly client = `tomverse-cli/${CLI_VERSION}`,
         private readonly maximumKeyCreditCap?: number
@@ -207,15 +220,29 @@ export class Gateway {
         }
     }
 
-    /** The key's public prefix: lookups only find requests of this key. */
+    /** The key's public prefix (a session's identity's): lookups only find requests of this key. */
     get keyPrefix() {
-        return this.key.slice(0, 12);
+        return (typeof this.key === "string" ? this.key : this.key.identity).slice(0, 12);
     }
 
-    /** Whether text carries this key, whole or its secret part: such text is never sent anywhere but as the key itself. */
+    /** Whether text carries this key, whole or its secret part (or the session's token): such text is never sent anywhere but as the credential itself. */
     carriesKey(text: string) {
+        if (typeof this.key !== "string") {
+            const bearer = this.key.bearer();
+            return text.includes(this.key.identity) || (!!bearer && bearer.length >= 16 && text.includes(bearer));
+        }
         const secret = this.key.slice(13);
         return text.includes(this.key) || (secret.length >= 16 && text.includes(secret));
+    }
+
+    /** The Authorization value in force now; a signed-out session refuses before anything is sent or recorded. */
+    private authorization() {
+        if (typeof this.key === "string") return `Bearer ${this.key}`;
+        const bearer = this.key.bearer();
+        if (!bearer) {
+            throw new GatewayError("http", "Sign in to Tomverse Desktop to continue. Nothing was sent.", { status: 401, code: "desktop_session_required" });
+        }
+        return `Bearer ${bearer}`;
     }
 
     /** Builds a URL under the API root, refusing anything that leaves it. */
@@ -229,7 +256,8 @@ export class Gateway {
 
     private async send(url: URL, init: RequestInit & { timeoutMs?: number }) {
         const headers = new Headers(init.headers);
-        headers.set("authorization", `Bearer ${this.key}`);
+        headers.set("authorization", this.authorization());
+        if (typeof this.key !== "string") for (const [name, value] of Object.entries(this.key.headers ?? {})) headers.set(name, value);
         headers.set("user-agent", this.client);
         const signals = [init.signal, init.timeoutMs ? AbortSignal.timeout(init.timeoutMs) : undefined].filter(
             (s): s is AbortSignal => Boolean(s)
@@ -385,6 +413,8 @@ export class Gateway {
                     ...(this.maximumKeyCreditCap !== undefined ? { tomverse_max_key_credit_cap: this.maximumKeyCreditCap } : {}),
                 })
                 : init?.body;
+            // A signed-out session is refused here, before an intent is recorded: nothing was sent, so nothing is unknown.
+            this.authorization();
             const intent = await hooks.before();
             hooks.transmission?.(intent, requestBody);
             const headers = new Headers(init?.headers);

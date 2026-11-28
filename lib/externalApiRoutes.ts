@@ -5,7 +5,7 @@ import { authOptions } from "@/lib/auth";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import { externalApiAccountAccess } from "@/lib/externalApiAccess";
 import { externalApiEnabled, externalApiUserAllowed } from "@/lib/externalApiCatalogCore";
-import { authenticateExternalApiKey, type AuthenticatedExternalApiKey } from "@/lib/externalApiKeys";
+import { authenticateExternalApiCaller, type ExternalApiCaller } from "@/lib/externalApiCaller";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { externalApiErrorResponse, externalApiRefusal, positiveInteger } from "@/lib/externalApiInference";
 
@@ -28,15 +28,19 @@ export const externalApiBaseUrl = (request: Request) => {
     return `${protocol}://${host}/api/v1`;
 };
 
+/**
+ * A key request, or on the coding API's enrolled reads a Desktop session request (lib/externalApiCaller.ts): the same
+ * account check and the same read budget either way.
+ */
 export const withBearerKey = async (
     request: Request,
-    handler: (key: AuthenticatedExternalApiKey) => Promise<Response>
+    handler: (key: ExternalApiCaller) => Promise<Response>
 ) => {
     if (!externalApiEnabled(process.env)) {
         return externalApiErrorResponse(503, "The Tomverse API is not enabled.", "feature_unavailable");
     }
     try {
-        const key = await authenticateExternalApiKey(request.headers.get("authorization"));
+        const key = await authenticateExternalApiCaller(request);
         const access = await externalApiAccountAccess(key.userId);
         if (!access.allowed) return externalApiErrorResponse(403, access.message, access.code);
         // Read routes (models, usage) have their own per-account budget,

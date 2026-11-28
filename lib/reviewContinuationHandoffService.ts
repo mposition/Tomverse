@@ -2,6 +2,7 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 
+import { assertConversationCapacity } from "@/lib/apiSecurity";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { isExternalContinuationEnabled } from "@/lib/appSettings";
 import { effectivePlanModelLimit, getUserBillingPlan } from "@/lib/billingEntitlements";
@@ -437,6 +438,8 @@ export async function createReviewContinuationHandoff(input: {
         nativeReferences: source.context.native.references,
         nativeOmittedCount: source.context.native.omittedCount,
       };
+      // The comparison is a listed conversation: same quota as one made by hand.
+      await assertConversationCapacity(tx, input.userId);
       const conversation = await createConversation(
         tx,
         {

@@ -87,3 +87,26 @@ export function isInternalAddress(address: string): boolean {
   const v6 = parseIpv6(value);
   return v6 ? internalIpv6(v6) : true;
 }
+
+/**
+ * Whether an address is inside the person's own computer or network: loopback, private (RFC 1918), link-local, CGNAT (the range VPN
+ * and mesh tools use) and the IPv6 unique-local and link-local ranges. A person-typed address in the development preview browser may
+ * name such a host; the unspecified address, multicast, documentation and other reserved ranges are not a place a page is served from.
+ */
+export function isPrivateNetworkAddress(address: string): boolean {
+  const value = address.trim().toLowerCase();
+  const v4 = parseIpv4(value);
+  if (v4) return privateIpv4(v4);
+  if (value.includes("%")) return false;
+  const v6 = parseIpv6(value);
+  if (!v6) return false;
+  const zero = (from: number, to: number) => v6.slice(from, to).every((group) => group === 0);
+  if (zero(0, 7) && v6[7] === 1) return true; // ::1
+  if (zero(0, 5) && v6[5] === 0xffff) return privateIpv4([v6[6] >> 8, v6[6] & 0xff, v6[7] >> 8, v6[7] & 0xff]);
+  return (v6[0] & 0xfe00) === 0xfc00 || (v6[0] & 0xffc0) === 0xfe80; // fc00::/7 and fe80::/10
+}
+
+function privateIpv4([a, b]: number[]): boolean {
+  return a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) ||
+    (a === 100 && b >= 64 && b <= 127);
+}

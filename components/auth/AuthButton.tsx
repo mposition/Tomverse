@@ -110,6 +110,9 @@ type LoginMethod =
     | { type: "oauth"; provider: "google" | "azure-ad"; linked: boolean }
     | { type: "email"; address: string; enabled: boolean };
 
+/** How long the partial-delete message stays readable before the page reloads. */
+const PARTIAL_DELETE_RELOAD_DELAY_MS = 2_500;
+
 export function AuthButton({
     showAnalyticsCookieButton = false,
     currentProduct = "review",
@@ -1090,9 +1093,26 @@ export function AuthButton({
         try {
             const response = await fetch("/api/conversations", { method: "DELETE" });
             const data = (await response.json().catch(() => null)) as
-                | { code?: string; error?: string; scheduledFor?: string }
+                | { code?: string; error?: string; scheduledFor?: string; deleted?: number; remaining?: number }
                 | null;
             if (!response.ok) {
+                // The delete runs in batches: some may have committed before one failed.
+                if (data?.code === "CONVERSATION_DELETE_PARTIAL") {
+                    dispatchAppToast(
+                        formatCopy("auth.deleteAllChatsPartial", {
+                            deleted: String(data.deleted ?? 0),
+                            remaining: String(data.remaining ?? 0),
+                        }),
+                        "error"
+                    );
+                    // The server answers PARTIAL only once a batch has committed, even one whose rows were
+                    // already gone (deleted 0), so the list may have changed whatever the count says: reload
+                    // as the success path does. The toast gets a moment to be read first.
+                    window.setTimeout(() => {
+                        window.location.href = accountCallbackUrl;
+                    }, PARTIAL_DELETE_RELOAD_DELAY_MS);
+                    return;
+                }
                 if (response.status === 428 && data?.code === "ACCOUNT_REAUTHENTICATION_REQUIRED") {
                     dispatchAppToast(t("auth.deleteAccountReauthRequired"), "error");
                     await signOut({

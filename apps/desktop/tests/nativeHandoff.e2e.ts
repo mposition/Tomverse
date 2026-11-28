@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { once } from "node:events";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -97,14 +98,14 @@ test("Chat hands an approved excerpt only to the confirmed Code execution route"
     await page.getByRole("button", { name: "Sign in with your browser" }).click();
     await expect.poll(async () => page.evaluate(() => window.desktop.state().then(({ account }) => account.stage))).toBe("connected");
     await page.getByRole("button", { name: "Code", exact: true }).click();
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await page.evaluate(() => window.desktop.setCodeExecutionPreference("provider_cli"));
     const approve = async () => {
       await page.getByRole("button", { name: "Chat", exact: true }).click();
       await page.getByRole("button", { name: chat.title, exact: true }).click();
       await selectExcerpt(page.locator('[data-handoff-content="chat"]').filter({ hasText: excerpt }), excerpt);
       await page.getByRole("button", { name: "Use selection in Code" }).click();
-      await page.getByLabel("Code mode").selectOption("ask");
+      await selectCodeMode(page, "ask");
       return page.evaluate(() => window.desktop.state().then(({ handoff }) => handoff));
     };
     const approved = await approve();

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject } from "./code-project-fixture";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,7 +22,7 @@ test("GitHub PRs are attached to the selected saved task with accessible current
     const open = async () => {
       app = await launchNativeFixture(descriptor);
       const page = await app.firstWindow();
-      await page.getByRole("button", { name: "Open local folder" }).click();
+      await openCodeProject(page);
       return page;
     };
     const page = await open();

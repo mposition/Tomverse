@@ -13,6 +13,53 @@ import {
 
 type ApiPeriod = "minute" | "day";
 
+/*
+  The per-IP leg of consumeApiRateLimit, on top of the per-subject bucket.
+
+  The subject bucket is the accountable limit; the IP leg is only an aggregate
+  abuse ceiling, and follows the principle of the chat concurrency plan
+  (docs/policy/chat-concurrency-and-identity.md section 2, 3.2):
+
+    * Anonymous subjects (guest cookie, anonymous client key, pre-auth routes)
+      keep the original 3x ceiling for the minute and the day bucket. A guest
+      can mint a new subject by clearing a cookie, so the IP leg is the only
+      thing that bounds them.
+    * A signed-in subject gets a per-minute ceiling of 8x (the chat IP
+      concurrency multiple) and no per-day IP bucket: people behind one NAT are
+      separate accounts with separate allowances, and a shared 3x bucket made
+      colleagues throttle each other.
+
+  Classification is positive: only the shape of a real user id (Prisma cuid) or
+  the `user:` chat usage key counts as signed in. A raw IP, `guest:...`,
+  `anonymous:...` or any unknown value keeps the stricter ceiling, so a caller
+  nobody classified fails closed.
+
+  Kept in this file on purpose: it is part of the Prompt Refiner runtime source
+  closure, whose file list is pinned in a migration; a helper module would add
+  files to it.
+*/
+export const ANONYMOUS_IP_LIMIT_MULTIPLIER = 3;
+export const SIGNED_IN_IP_MINUTE_LIMIT_MULTIPLIER = 8;
+const USER_ID_PATTERN = /^c[a-z0-9]{24}$/;
+const USER_USAGE_KEY_PATTERN = /^user:[0-9a-f]{64}$/;
+
+export const isSignedInRateLimitSubject = (subject: string): boolean =>
+  USER_ID_PATTERN.test(subject) || USER_USAGE_KEY_PATTERN.test(subject);
+
+/** The limit of the per-IP bucket for one period, or null when this subject has none. */
+export const ipBucketLimit = (
+  subject: string,
+  period: ApiPeriod,
+  subjectLimit: number
+): number | null => {
+  if (!isSignedInRateLimitSubject(subject)) {
+    return subjectLimit * ANONYMOUS_IP_LIMIT_MULTIPLIER;
+  }
+  return period === "minute"
+    ? subjectLimit * SIGNED_IN_IP_MINUTE_LIMIT_MULTIPLIER
+    : null;
+};
+
 /** Pause before the single in-process retry of a transient database error. */
 const RATE_LIMIT_DATABASE_RETRY_DELAY_MS = 200;
 
@@ -133,16 +180,21 @@ export async function consumeApiRateLimit(
           1,
           limits[period]
         );
-        const ipAllowed = ipKey
-          ? await incrementBucket(
-              tx,
-              ipKey,
-              `api-${scope}-${period}`,
-              start,
-              1,
-              limits[period] * 3
-            )
-          : true;
+        // The IP leg is an aggregate abuse ceiling, not the accountable limit:
+        // signed-in subjects get a wide per-minute ceiling and no per-day IP
+        // bucket (see ipBucketLimit above); anonymous subjects keep 3x.
+        const ipLimit = ipKey ? ipBucketLimit(userId, period, limits[period]) : null;
+        const ipAllowed =
+          ipKey && ipLimit !== null
+            ? await incrementBucket(
+                tx,
+                ipKey,
+                `api-${scope}-${period}`,
+                start,
+                1,
+                ipLimit
+              )
+            : true;
         if (!allowed || !ipAllowed) {
           throw new ApiSecurityError(
             429,
@@ -328,12 +380,34 @@ export const STORAGE_LIMITS = {
     ),
 };
 
+/**
+ * The conversations a person can see in their list, as a filter (the owner's id
+ * is added by the caller). A Studio tool run and a temporary Chat are not
+ * listed, so they are not counted: a quota that counted rows the list hides
+ * would report "full" to a person looking at a list with room in it.
+ *
+ * The same condition as the list route's `NOT: STUDIO_RUN_CONVERSATION,
+ * temporaryExpiresAt: null` (lib/conversationProduct.ts). Written out here
+ * because this file is in the Prompt Refiner runtime source closure and cannot
+ * take a new import; tests/server-contract/conversation-capacity-listed.test.mjs
+ * pins the two to the same value.
+ */
+export const LISTED_CONVERSATION_WHERE = {
+  NOT: { kind: "image", messages: { some: {} } },
+  temporaryExpiresAt: null,
+} as const;
+
 export async function assertConversationCapacity(
   tx: Prisma.TransactionClient,
   userId: string
 ) {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"conversation:" + userId}))`;
-  const count = await tx.conversation.count({ where: { userId } });
+  // The conversations the person can see in their list, not every row they own:
+  // Studio tool runs and temporary Chats are hidden and swept or one-off, and
+  // counting them made a full-looking quota that the person could not clear.
+  const count = await tx.conversation.count({
+    where: { userId, ...LISTED_CONVERSATION_WHERE },
+  });
   if (count >= STORAGE_LIMITS.conversationsPerUser()) {
     throw new ApiSecurityError(
       409,

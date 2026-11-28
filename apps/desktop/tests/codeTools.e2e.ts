@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { openCodeProject } from "./code-project-fixture";
 import { fileURLToPath } from "node:url";
 import { _electron as electron, expect, type Page } from "@playwright/test";
 import { FakeGateway, fixtureInitialWorkPlan, fixtureNeedsWorkPlan, fixtureOperationResults, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
@@ -26,7 +27,7 @@ async function launch(prefix: string, gateway: FakeGateway) {
   await writeFile(descriptor, JSON.stringify({ root, profile, endpoint: gateway.base, key: TEST_KEY }));
   const app = await electron.launch({ executablePath, args: [desktopDir, "--desktop-fixture", descriptor], timeout: 20_000 });
   const page = await app.firstWindow();
-  await page.getByRole("button", { name: "Open local folder" }).click();
+  await openCodeProject(page);
   return { directory, profile, app, page };
 }
 

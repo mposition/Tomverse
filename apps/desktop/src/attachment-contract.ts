@@ -25,6 +25,10 @@ export const driveImportInput = z.object({
   remainingBytes: z.number().int().min(1).max(CHAT_MAX_TOTAL_ATTACHMENT_BYTES),
 }).strict();
 export type DriveImportInput = z.infer<typeof driveImportInput>;
+/** What a Google Drive import returns; `timedOut` means the picker window was left open until the host stopped waiting. */
+export type DriveImportResult = { files: AttachmentUpload[]; incomplete: boolean; timedOut?: true };
+/** The host tells the composer when a Drive import has left the picker window and started uploading the chosen files. */
+export type AttachmentPhaseEvent = { requestId: string; phase: "uploading" };
 
 export type AttachmentBytesInput = z.infer<typeof attachmentBytesInput>;
 export type AttachmentUpload = z.infer<typeof attachmentUpload>;

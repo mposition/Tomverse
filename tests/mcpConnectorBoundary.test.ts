@@ -83,14 +83,15 @@ test("MCP widens the existing internal cost reservation without charging specula
   assert.equal(multi.usageCredits, single.usageCredits);
   assert.equal(multi.contextInputTokens, single.inputTokens);
   assert.ok(multi.inputTokens >= single.inputTokens * 4 + multi.maxOutputTokens * 3);
-  const window = single.inputTokens + 100;
+  // Room for a real answer: CHAT_MIN_OUTPUT_TOKENS is the least a request may be left with.
+  const window = single.inputTokens + 1_500;
   const fitted = fitChatOutputToContextWindow({ contextWindowTokens: window,
-    reservedInputTokens: multi.contextInputTokens ?? multi.inputTokens, requestOutputCapTokens: 200 });
+    reservedInputTokens: multi.contextInputTokens ?? multi.inputTokens, requestOutputCapTokens: 2_000 });
   assert.equal(fitted.kind, "fitted");
-  if (fitted.kind === "fitted") assert.equal(fitted.outputTokens, 100);
+  if (fitted.kind === "fitted") assert.equal(fitted.outputTokens, 1_500);
   assert.ok(multi.contextInputTokens! > 20_000, "tool input must consume context room");
   assert.equal(fitChatOutputToContextWindow({ contextWindowTokens: window,
-    reservedInputTokens: multi.inputTokens, requestOutputCapTokens: 200 }).kind, "exceeded");
+    reservedInputTokens: multi.inputTokens, requestOutputCapTokens: 2_000 }).kind, "exceeded");
 });
 test("MCP progress split across bytes never reaches the visible answer", async () => {
   const wire = buildMcpProgressChunk("searching") + "Answer" + buildMcpProgressChunk("approval_required");

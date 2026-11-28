@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { execFile } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -33,8 +34,8 @@ test("Code retains one run across view changes and recovers evidence after suspe
   const launch = () => electron.launch({ executablePath, args: [desktopDir, "--desktop-fixture", descriptor], timeout: 25_000 });
   let application: Awaited<ReturnType<typeof launch>> | undefined = await launch();
   const open = async (page: Page) => {
-    await page.getByRole("button", { name: "Open local folder" }).click();
-    await page.getByLabel("Code mode").selectOption("ask");
+    await openCodeProject(page);
+    await selectCodeMode(page, "ask");
     await chooseCodeModel(page, { model: "fake-coder" });
   };
   const start = async (page: Page, prompt: string, expectedCount: number) => {

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import { keyCreditTotals } from "@/lib/externalApiAdmission";
+import type { ExternalApiReceiptOwner } from "@/lib/externalApiCaller";
 import { EXTERNAL_API_PLAN_REQUIRED_MESSAGE, externalApiPlanAllowed } from "@/lib/externalApiCatalogCore";
 import {
     EXTERNAL_API_KEY_LIMITS,
@@ -303,6 +304,7 @@ export const authenticateExternalApiKey = async (
 
 const receiptSelect = {
     id: true,
+    keyId: true,
     modelId: true,
     stream: true,
     protocol: true,
@@ -328,6 +330,7 @@ const receiptSelect = {
 
 type ReceiptRow = {
     id: string;
+    keyId: string | null;
     modelId: string;
     stream: boolean;
     protocol: string;
@@ -354,6 +357,8 @@ const toReceipt = (row: ReceiptRow) => {
     const held = row.reservation.status === "reserved";
     return {
         requestId: row.id,
+        // What the request came with: an API key, or Desktop Code's signed-in session (no key).
+        source: row.keyId === null ? ("desktop_session" as const) : ("api_key" as const),
         modelId: row.modelId,
         stream: row.stream,
         protocol: row.protocol,
@@ -381,9 +386,10 @@ const toReceipt = (row: ReceiptRow) => {
     };
 };
 
-export const externalApiKeyUsage = async (keyId: string, limit = 50) => {
+/** Recent receipts of one key, or of the account's Desktop session requests. */
+export const externalApiKeyUsage = async (owner: ExternalApiReceiptOwner, limit = 50) => {
     const rows = await prisma.externalApiRequest.findMany({
-        where: { keyId },
+        where: "keyId" in owner ? { keyId: owner.keyId } : { desktopUserId: owner.desktopUserId },
         orderBy: { createdAt: "desc" },
         take: Math.min(200, Math.max(1, limit)),
         select: receiptSelect,
@@ -396,21 +402,24 @@ export type ExternalApiRequestSelector =
     | { kind: "idempotency_key"; idempotencyKeyDigest: string };
 
 /**
- * One request of this key, by its receipt id or by the digest of the
+ * One request of this key (or of this account's Desktop session), by its receipt id or by the digest of the
  * Idempotency-Key the client sent with it -- the lookup a client uses to
  * recover after it lost a response, however old the request is. A read only:
  * no reservation, no dispatch, no state change. A request of another key, of
  * another account, or of nobody answers null alike.
  */
-export const externalApiRequestStatus = async (keyId: string, selector: ExternalApiRequestSelector) => {
+export const externalApiRequestStatus = async (owner: ExternalApiReceiptOwner, selector: ExternalApiRequestSelector) => {
+    const scope = "keyId" in owner ? { keyId: owner.keyId } : { desktopUserId: owner.desktopUserId };
     const row =
         selector.kind === "request_id"
             ? await prisma.externalApiRequest.findFirst({
-                  where: { id: selector.requestId, keyId },
+                  where: { id: selector.requestId, ...scope },
                   select: receiptSelect,
               })
             : await prisma.externalApiRequest.findUnique({
-                  where: { keyId_idempotencyKeyDigest: { keyId, idempotencyKeyDigest: selector.idempotencyKeyDigest } },
+                  where: "keyId" in owner
+                      ? { keyId_idempotencyKeyDigest: { keyId: owner.keyId, idempotencyKeyDigest: selector.idempotencyKeyDigest } }
+                      : { desktopUserId_idempotencyKeyDigest: { desktopUserId: owner.desktopUserId, idempotencyKeyDigest: selector.idempotencyKeyDigest } },
                   select: receiptSelect,
               });
     return row ? toReceipt(row) : null;

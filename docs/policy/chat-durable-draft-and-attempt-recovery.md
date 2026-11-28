@@ -334,10 +334,33 @@ keeps the text it already showed until a checkpoint is at least as long, shows
 the canonical Message if the attempt completes, and otherwise ends the turn
 with the same error it showed before this hand-off existed -- a cancellation
 the server made because the connection went away is not presented as the
-user's stop. A stop, a failure the server reported in the trailer, and any
-stream no panel on that conversation is polling are never handed over. The
+user's stop. A stop and a failure the server reported in the trailer are never
+handed over. A stream that breaks, or a conversation left while a hand-off is
+pending, is not ended as an error when the last panel unmounts: the record
+stays on its runtime key, the next panel mounted on the key polls it, and
+only an attempt the server ended without an answer becomes the error. The
 page becoming visible or coming back online re-checks the stream's liveness
 at once, because a suspended page runs no timers.
+
+A conversation tab keeps its transcript while the user is away, and the next
+request is built from it, so the tab re-reads the owned conversation's server
+transcript when it remounts and when it returns after being away
+(`lib/chatStreamRuntime.ts` `claimChatRuntimeRefresh`). That read never shows
+a loading state, never runs while the key streams or a send is being prepared,
+and never replaces the transcript: it folds the server's rows in by message id
+(`mergeServerTranscriptIntoLocal`), so a turn another tab or device added is
+in the next request and an answer the server finished replaces the error a
+broken stream left. Review panels and guests keep their own transcripts.
+
+What the model reads of earlier answers is rewritten on the server before the
+transcript is measured or priced (`modelContextTranscript`): a failed answer
+(`status` error, or any `errorCode`) is one fixed `[previous answer failed]`
+marker that keeps its place, a stopped or cut-off partial answer ends with an
+incomplete marker, and an answer that searched the web keeps a bounded
+`Sources: [n] url` list built from its citation URLs. The metadata is the
+client's, so each URL is re-validated (http or https, no whitespace, at most
+300 characters), de-duplicated and capped at eight URLs and 2,000 characters;
+titles are never copied.
 The direct attempt route performs a non-mutating owner lookup and conversation
 unlock check before invoking this reconciliation, so a caller without the
 unlock grant cannot cause even that bounded state transition. Destructive
@@ -360,7 +383,19 @@ installed Next.js 16 contract and are awaited promises.
   claim takes, and skips one whose attempt still holds a live lease; the send
   path refuses a new answer from the moment of expiry, so only an answer
   admitted before it can be running, and the conversation goes once that
-  attempt ends or its lease lapses.
+  attempt ends or its lease lapses. The sweep waits the same way for an
+  executing Research run (`queued`, `running`, `checkpointed`, `planning`,
+  `finalizing`, `preparing`) and for an image generation in flight (`pending`,
+  `processing` within the 12-minute stale window, `settling` within its own 15-minute
+  one, matching the recovery sweep), because both cascade with
+  the conversation. The wait is a deferral, not a reprieve: it stops
+  `TEMPORARY_CHAT_SWEEP_MAX_DEFER_MS` (7 hours, past the longest Research
+  profile) after the expiry, and a run still "executing" then is deleted with
+  the conversation. Starting new Research or image generation in an expired
+  temporary Chat is refused (`TEMPORARY_CHAT_EXPIRED`), and so is every Research
+  action that puts a run back into execution (plan, approve, resume, budget
+  extension, finish now, scope amendment, revision; Research Preview resume).
+  Pause, cancel and delete stay allowed.
 - A draft is the user's unsent content, so unified account export includes its
   text, scope, revision, and timestamps. Opaque attachment reference ids and
   internal row ids are withheld and the export manifest says so.

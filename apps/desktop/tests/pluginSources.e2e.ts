@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject } from "./code-project-fixture";
 import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -35,7 +36,7 @@ async function launch(zip: Buffer, sources: boolean) {
     env: { ...process.env, CLAUDE_CONFIG_DIR: claudeDir, TOMVERSE_HOME: tomverse },
   });
   const page = await app.firstWindow();
-  await page.getByRole("button", { name: "Open local folder" }).click();
+  await openCodeProject(page);
   await page.getByRole("button", { name: "Desktop settings" }).click();
   await page.getByRole("button", { name: "Execution and limits", exact: true }).click();
   return { app, page, tomverse, panel: page.getByTestId("plugins"), close: async () => {

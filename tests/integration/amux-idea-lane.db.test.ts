@@ -243,8 +243,10 @@ test("a run may publish only while its idea is open and its lease live, and the 
   const { leaseUntil } = await prisma.amuxIdeaLaneAttempt.findUniqueOrThrow({ where: { id: live } });
   assert.ok(leaseUntil.getTime() - now >= AMUX_IDEA_LANE_PUBLISH_FENCE_MS - 5_000,
     "the lease now outlasts the publish job");
+  // One instant for both: the raw purge bound needs rawPurgeAfter <= cancelledAt, and two `new Date()` calls can differ by a millisecond.
+  const closedAt = new Date();
   await prisma.amuxIdeaSubmission.update({ where: { id: idea },
-    data: { state: "cancelled", cancelledAt: new Date(), rawPurgeAfter: new Date() } });
+    data: { state: "cancelled", cancelledAt: closedAt, rawPurgeAfter: closedAt } });
   assert.equal(await fenceAmuxIdeaLanePublish(live), false, "a closed idea is never published");
   await removeIdeas();
 });
