@@ -12,7 +12,7 @@ import { resolveDocumentLanguage } from "@/lib/documentLanguage";
 import type { Language } from "@/lib/language";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
 import { isStrongShareToken } from "@/lib/shareTokens";
-import { artifactWorkspaceCopy, formatArtifactWorkspaceCopy } from "@/locales/artifactWorkspace";
+import { artifactWorkspaceCopy, formatArtifactShareExpiry, formatArtifactWorkspaceCopy } from "@/locales/artifactWorkspace";
 import { de } from "@/locales/de";
 import { en } from "@/locales/en";
 import { es } from "@/locales/es";
@@ -39,14 +39,6 @@ import { zhHant } from "@/locales/zhHant";
  */
 
 const DICTIONARIES: Record<Language, typeof en> = { ko, en, zh, "zh-Hant": zhHant, fr, de, es, pt };
-
-const formatDate = (lang: Language, date: Date) => {
-  try {
-    return new Intl.DateTimeFormat(lang, { dateStyle: "medium", timeZone: "UTC" }).format(date);
-  } catch {
-    return date.toISOString().slice(0, 10);
-  }
-};
 
 export async function GET(req: Request, context: { params: Promise<{ shareToken: string }> }) {
   const lang = resolveDocumentLanguage({
@@ -80,7 +72,7 @@ export async function GET(req: Request, context: { params: Promise<{ shareToken:
         title: copy.title,
         notice: copy.notice,
         report: copy.report,
-        expires: formatArtifactWorkspaceCopy(copy.expires, { date: formatDate(lang, share.expiresAt) }),
+        expires: formatArtifactWorkspaceCopy(copy.expires, { date: formatArtifactShareExpiry(lang, share.expiresAt) }),
         frameTitle: copy.frameTitle,
         gateNotice: copy.gateNotice,
         gateOpen: copy.gateOpen,

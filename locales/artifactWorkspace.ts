@@ -518,3 +518,25 @@ export const artifactWorkspaceLabels = (locale: string) => artifactWorkspaceCopy
 /** `{name}` placeholders, the same convention the main locales use. */
 export const formatArtifactWorkspaceCopy = (template: string, values: Record<string, string | number>) =>
   template.replace(/\{(\w+)\}/g, (match, key: string) => (key in values ? String(values[key]) : match));
+
+/**
+ * A link's expiry as both the owner's card and the public page show it: the
+ * instant in UTC with the zone named, so the two never show different days
+ * (the public page has no session to know a reader's zone).
+ */
+export const formatArtifactShareExpiry = (lang: string, expiresAt: Date | string) => {
+  const date = new Date(expiresAt);
+  try {
+    return new Intl.DateTimeFormat(lang, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "UTC",
+      timeZoneName: "short",
+    }).format(date);
+  } catch {
+    return `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+  }
+};

@@ -10,12 +10,16 @@ import {
   HTML_PREVIEW_MAX_BYTES,
   HTML_PREVIEW_OUTER_CSP,
   HTML_PREVIEW_SANDBOX,
+  HtmlPreviewUnavailableError,
+  TEMPLATE_SCAN_TIME_LIMIT_MS,
   buildHtmlPreviewSrcdoc,
   isHtmlPreviewSmallEnough,
   isHtmlPreviewable,
+  mentionsDeclarativeShadowRoot,
   openDeclarativeShadowRoots,
   withEmbedderNonce,
 } from "../lib/htmlArtifactPreview.ts";
+import { findTemplateStartTags } from "../lib/htmlPreviewTemplateStarts.ts";
 
 /**
  * The isolation of the generated-HTML preview, pinned as strings.
@@ -169,13 +173,25 @@ test("the guard follows every shadow root: all are open, and markup parsers that
   assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes("apply(observe, observer, [root, watch]);"));
   assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes("each(apply(selectInRoot, root, [frames]), removeNode);"));
   assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes('each(apply(selectInRoot, root, ["*"]), enter);'));
-  assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes('enter(node);\n    each(apply(select, node, ["*"]), enter);'));
-  // attachShadow reads the options once, makes the root open (a clonable closed root's copy would be out of reach)
-  // and follows it; the wrapper itself cannot be replaced.
+  assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes('enter(node);\n      each(apply(select, node, ["*"]), enter);'));
+  // What the browser reads members from later -- the observer's options and attachShadow's -- has no prototype and
+  // only own data properties, so getters or setters a page puts on Object.prototype or Array.prototype are not read.
+  assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes("var field = create(null);"));
+  assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes('var watch = create(null);\n    put(watch, "childList", true);\n    put(watch, "subtree", true);'));
+  // attachShadow reads each option the page passed once, writes the mode last as open (a clonable closed root's copy
+  // would be out of reach), and follows the root; the wrapper itself cannot be replaced.
   const wrapper = HTML_PREVIEW_GUARD_SCRIPT.slice(HTML_PREVIEW_GUARD_SCRIPT.indexOf('"attachShadow", {'));
-  assert.ok(wrapper.includes('var options = assign({}, init);\n        options.mode = "open";'));
-  assert.ok(wrapper.includes("var root = apply(attach, this, [options]);\n        follow(root);"));
+  assert.ok(wrapper.includes("var options = create(null);"));
+  assert.ok(wrapper.includes("var value = init[shadowKeys[s]];"));
+  assert.ok(wrapper.includes('put(options, "mode", "open");\n          var root = apply(attach, this, [options]);\n          follow(root);'));
+  assert.ok(!wrapper.includes(".push(") && !wrapper.includes("assign("));
   assert.match(wrapper, /writable: false, enumerable: false, configurable: false/);
+  for (const key of ["delegatesFocus", "slotAssignment", "clonable", "serializable", "customElementRegistry"]) {
+    assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes(`"${key}"`), key);
+  }
+  // A guard that cannot be set up in full stops the document before the page is parsed.
+  assert.ok(HTML_PREVIEW_GUARD_SCRIPT.startsWith("(function () {\n  try {\n"));
+  assert.ok(HTML_PREVIEW_GUARD_SCRIPT.endsWith("  } catch (error) {\n    // A guard that could not be set up in full is no guard: stop the document before the page is parsed.\n    window.stop();\n    throw error;\n  }\n})();"));
   // Every way to parse markup into a declarative shadow root without attachShadow, document.write included.
   for (const [holder, name] of [
     ["Element.prototype", "setHTMLUnsafe"], ["Element.prototype", "setHTML"],
@@ -192,60 +208,96 @@ test("the guard follows every shadow root: all are open, and markup parsers that
   assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes("lock(window.MediaDevices && window.MediaDevices.prototype, capture[c]);"));
 });
 
-test("a closed declarative root in the page's markup is made open, read the way the tokenizer reads a template start tag", () => {
-  const OPEN = " shadowrootmode=open ";
+// What the frame parses before the page; any text does for the finder's context.
+const HEAD = '<!doctype html><meta http-equiv="Content-Security-Policy" content="x"><meta http-equiv="x-dns-prefetch-control" content="off"><script>(function () {})();</script>';
+const OPEN = " shadowrootmode=open ";
+const open = (page) => openDeclarativeShadowRoots(HEAD, page, findTemplateStartTags);
+
+test("a closed declarative root is opened at the template start tags the HTML parser makes, and only there", () => {
   const opened = [
-    ['<template shadowrootmode="closed"><p>x</p></template>', `<template${OPEN} shadowrootmode="closed"><p>x</p></template>`],
-    // Any case, after a slash, unquoted, single-quoted, other whitespace.
-    ["<TEMPLATE/SHADOWROOTMODE=CLOSED>", `<TEMPLATE${OPEN}/SHADOWROOTMODE=CLOSED>`],
-    ["<template\n\tShadowRootMode='Closed'>", `<template${OPEN}\n\tShadowRootMode='Closed'>`],
-    // A `>` inside a quoted value does not end the tag; nor does a value straight after a quote.
-    ['<template title="a>b"shadowrootmode=\'closed\'>', `<template${OPEN} title="a>b"shadowrootmode='closed'>`],
-    // A character reference could spell "closed", so it is opened too.
-    ['<template shadowrootmode="&#99;losed">', `<template${OPEN} shadowrootmode="&#99;losed">`],
-    // The first of two same-named attributes is the one the browser keeps.
-    ["<template shadowrootmode=closed shadowrootmode=open>", `<template${OPEN} shadowrootmode=closed shadowrootmode=open>`],
-    // A tag the browser parses after a script or an empty comment is read even though its text follows them.
-    [`<script>var s="<template title='";</script><template shadowrootmode=closed>x'`, `<script>var s="<template title='";</script><template${OPEN} shadowrootmode=closed>x'`],
-    ["<!--><template shadowrootmode=closed>", `<!--><template${OPEN} shadowrootmode=closed>`],
+    ['<div><template shadowrootmode="closed"><p>x</p></template></div>', `<div><template${OPEN} shadowrootmode="closed"><p>x</p></template></div>`],
+    // Any case, after a slash, unquoted, single-quoted, other whitespace; a `>` inside a quoted value.
+    ["<TEMPLATE/SHADOWROOTMODE=CLOSED>x</TEMPLATE>", `<TEMPLATE${OPEN}/SHADOWROOTMODE=CLOSED>x</TEMPLATE>`],
+    ["<template\n\tShadowRootMode='Closed'>x</template>", `<template${OPEN}\n\tShadowRootMode='Closed'>x</template>`],
+    ['<template title="a>b"shadowrootmode=\'closed\'>x</template>', `<template${OPEN} title="a>b"shadowrootmode='closed'>x</template>`],
+    // A value spelled with a character reference is read decoded, as the browser reads it.
+    ['<template shadowrootmode="&#99;losed">x</template>', `<template${OPEN} shadowrootmode="&#99;losed">x</template>`],
+    // Of two same-named attributes the first is the one the browser keeps.
+    ["<template shadowrootmode=closed shadowrootmode=open>x</template>", `<template${OPEN} shadowrootmode=closed shadowrootmode=open>x</template>`],
+    // `<!-->` is a whole comment, so the template after it is a tag.
+    ["<!--><template shadowrootmode=closed>x</template>", `<!--><template${OPEN} shadowrootmode=closed>x</template>`],
+    // A script string that looks like an unclosed tag does not hide the real tag after the script.
+    [`<script>var s="<template title='";</script><template shadowrootmode=closed>x'</template>`, `<script>var s="<template title='";</script><template${OPEN} shadowrootmode=closed>x'</template>`],
+    // Inside a template's content, and inside MathML's <mi>, a template is an HTML template.
+    ["<template><div><template shadowrootmode=closed>inner</template></div></template>", `<template><div><template${OPEN} shadowrootmode=closed>inner</template></div></template>`],
+    ["<math><mi><template shadowrootmode=closed>x</template></mi></math>", `<math><mi><template${OPEN} shadowrootmode=closed>x</template></mi></math>`],
+    // Positions are in the page as written, carriage returns included.
+    ["\r\n<p>\r\n</p><template shadowrootmode=closed>x</template>", `\r\n<p>\r\n</p><template${OPEN} shadowrootmode=closed>x</template>`],
   ];
-  for (const [page, expected] of opened) assert.equal(openDeclarativeShadowRoots(page), expected, page);
-  // Left exactly as written: open roots, other values, templates without the attribute, other tags, words.
+  for (const [page, expected] of opened) assert.equal(open(page), expected, page);
+  // Left exactly as written: open roots and other values, a template without the attribute, other elements, and
+  // every text the parser does not read as a template tag -- script, style, comment, textarea, title, noscript,
+  // an attribute value, a double-escaped script, an SVG template.
   for (const page of [
     '<template shadowrootmode="open"><style>p{color:red}</style><p>x</p></template>',
-    "<template shadowrootmode=open shadowrootmode=closed>",
-    '<template shadowrootmode=" closed">',
+    "<template shadowrootmode=open shadowrootmode=closed>x</template>",
+    '<template shadowrootmode=" closed">x</template>',
     "<template><p>no root</p></template>",
-    "<templatex shadowrootmode=closed>",
-    '<div shadowrootmode="closed"></div>',
-    '<template shadowroot="closed">',
-    '<template title="shadowrootmode=closed">',
-    "<script>const shadowroot = 1; const shadowrootmode = \"shadowrootmode closed\"; host.shadowRoot;</script>",
-    "<style>.shadowrootmode::after { content: 'shadowrootmode closed'; }</style><p class=\"shadowrootmode\">shadowrootmode</p>",
+    '<div shadowrootmode="closed"></div><template shadowroot="closed">x</template>',
+    "<script>const shadowroot = 1; var s = '<template shadowrootmode=closed>'; host.shadowRoot;</script>",
+    "<style>/* <template shadowrootmode=closed> */ .shadowrootmode::after { content: 'shadowrootmode closed'; }</style>",
+    "<!-- <template shadowrootmode=closed> --><p class=\"shadowrootmode\">shadowrootmode</p>",
+    "<textarea><template shadowrootmode=closed></textarea><title><template shadowrootmode=closed></title>",
+    "<noscript><template shadowrootmode=closed></noscript>",
+    '<div title="<template shadowrootmode=closed>">x</div>',
+    "<script><!--<script></script><template shadowrootmode=closed>--></script><p>after</p>",
+    "<svg><template shadowrootmode=closed><p>x</p></template></svg>",
   ]) {
-    assert.equal(openDeclarativeShadowRoots(page), page, page);
+    assert.equal(open(page), page, page);
   }
-  // The insertion has no quote, so a literal closed tag inside a script string stays a valid string.
-  const literal = "<script>var t = \"<template shadowrootmode=closed>\";</script>";
-  assert.equal(openDeclarativeShadowRoots(literal), `<script>var t = "<template${OPEN} shadowrootmode=closed>";</script>`);
-  assert.doesNotThrow(() => new Function(openDeclarativeShadowRoots("var t = \"<template shadowrootmode=closed>\";")));
 });
 
-test("a page built so that every template read runs to its end is still handled in linear time, erring towards open", () => {
-  const page = "<template a='".repeat(80_000) + "shadowrootmode";
+test("a page that names shadowrootmode is refused, never drawn with its roots closed, when the scan is missing or fails", () => {
+  const page = "<template shadowrootmode=closed>x</template>";
+  assert.throws(() => openDeclarativeShadowRoots(HEAD, page), HtmlPreviewUnavailableError);
+  assert.throws(() => openDeclarativeShadowRoots(HEAD, page, () => { throw new Error("parser failed"); }), HtmlPreviewUnavailableError);
+  // A position that is not a template tag name in the page is a refusal too.
+  assert.throws(() => openDeclarativeShadowRoots(HEAD, page, () => [{ nameEnd: HEAD.length + 3, mode: "closed" }]), HtmlPreviewUnavailableError);
+  assert.throws(() => buildHtmlPreviewSrcdoc(page), HtmlPreviewUnavailableError);
+  // Slower than the limit is a refusal, measured around the scan.
+  const realNow = Date.now;
+  let calls = 0;
+  Date.now = () => (calls++ === 0 ? 0 : TEMPLATE_SCAN_TIME_LIMIT_MS + 1);
+  try {
+    assert.throws(() => openDeclarativeShadowRoots(HEAD, page, findTemplateStartTags), HtmlPreviewUnavailableError);
+  } finally {
+    Date.now = realNow;
+  }
+  // A page without the word needs no scan at all.
+  assert.equal(openDeclarativeShadowRoots(HEAD, "<template><p>x</p></template>"), "<template><p>x</p></template>");
+  assert.equal(mentionsDeclarativeShadowRoot("<p>ShadowRootMode</p>"), true);
+  assert.equal(mentionsDeclarativeShadowRoot("<p>shadowRoot mode</p>"), false);
+});
+
+test("a 1 MB page full of closed templates is scanned well within the limit", () => {
+  const page = '<div><template shadowrootmode="closed"><p>x</p></template></div>'.repeat(Math.floor(HTML_PREVIEW_MAX_BYTES / 62));
   const started = Date.now();
-  const out = openDeclarativeShadowRoots(page);
-  assert.ok(Date.now() - started < 2_000, `${Date.now() - started} ms`);
-  assert.ok(out.length > page.length);
+  const out = open(page);
+  assert.ok(Date.now() - started < TEMPLATE_SCAN_TIME_LIMIT_MS, `${Date.now() - started} ms`);
   // Only insertions: taking them out gives the page back.
-  assert.equal(out.split(" shadowrootmode=open ").join(""), page);
+  assert.equal(out.split(OPEN).join(""), page);
+  assert.equal(out.split(OPEN).length - 1, Math.floor(HTML_PREVIEW_MAX_BYTES / 62));
 });
 
-test("the root is opened when the frame is built, and the caller's text is left as it was", () => {
+test("the root is opened when the frame is built, in the context the frame parses the page in", () => {
   const page = '<div id="host"><template shadowrootmode="closed"><iframe srcdoc="x"></iframe></template></div><p>after</p>';
-  const { inner } = split(buildHtmlPreviewSrcdoc(page));
-  assert.ok(inner.endsWith('<div id="host"><template shadowrootmode=open  shadowrootmode="closed"><iframe srcdoc="x"></iframe></template></div><p>after</p>'));
+  const { inner } = split(buildHtmlPreviewSrcdoc(page, null, { findTemplates: findTemplateStartTags }));
+  assert.ok(inner.endsWith(`<div id="host"><template${OPEN} shadowrootmode="closed"><iframe srcdoc="x"></iframe></template></div><p>after</p>`));
   assert.ok(page.includes('<template shadowrootmode="closed">'));
+  // The finder is handed the whole inner document, so a page is read after our head, not as a document of its own.
+  let seen = null;
+  buildHtmlPreviewSrcdoc(page, null, { findTemplates: (document) => { seen = document; return findTemplateStartTags(document); } });
+  assert.ok(seen.startsWith(`<!doctype html><meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}">`) && seen.endsWith(page));
 });
 
 test("a policy the page adds cannot widen ours: ours stays first and unmodified", () => {
@@ -308,8 +360,15 @@ test("the parent document never parses or rewrites the model's HTML for resource
   const code = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   for (const source of [panel, frame, lib]) assert.ok(!source.includes("stripPreviewResourceHints"));
   assert.ok(!lib.includes("RESOURCE_HINT_SELECTOR"));
-  // The one parse that remains is the embedder-nonce rewrite, which existed before and runs only when
-  // the embedding document has a nonce; nothing else touches the page as markup.
+  // Two parses remain. The embedder-nonce rewrite, which existed before and runs only when the embedding document
+  // has a nonce; and the template scan, a spec tokenizer (parse5) that only reports where real template start tags
+  // are -- it builds and serialises nothing, and the chat loads it only for a page that names shadowrootmode.
+  const finder = read("../lib/htmlPreviewTemplateStarts.ts");
+  assert.ok(finder.includes('import { parse, type DefaultTreeAdapterMap } from "parse5";'));
+  assert.doesNotMatch(code(finder), /serialize|innerHTML|outerHTML|appendChild|insertBefore/);
+  assert.doesNotMatch(lib, /from "parse5"/);
+  assert.ok(frame.includes('import("@/lib/htmlPreviewTemplateStarts")'));
+  assert.ok(!frame.includes('from "@/lib/htmlPreviewTemplateStarts"'));
   assert.equal((panel + frame).split("new DOMParser()").length - 1, 1);
   assert.ok(frame.includes("withEmbedderNonce(html, nonce, (text) => new DOMParser()"));
   for (const source of [panel, frame, lib]) {
@@ -317,7 +376,7 @@ test("the parent document never parses or rewrites the model's HTML for resource
   }
   // No pattern over the page's markup for resource hints in the build step either.
   assert.doesNotMatch(lib, /\.replace\([^)]*<link/i);
-  // The one text change to the page is opening closed declarative roots, an insertion with no parse, made where the
-  // frame is built.
-  assert.equal(code(lib).split("openDeclarativeShadowRoots(html.replace(LEADING_DOCTYPE").length - 1, 1);
+  // The one text change to the page is opening closed declarative roots -- one attribute put into a real template
+  // start tag -- made where the frame is built.
+  assert.equal(code(lib).split('openDeclarativeShadowRoots(head, html.replace(LEADING_DOCTYPE, ""), options.findTemplates)').length - 1, 1);
 });
