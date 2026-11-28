@@ -14,6 +14,7 @@ import {
 import { isHelpAssistantEnabled } from "@/lib/helpAssistantSettings";
 import { isScheduledTasksEnabled } from "@/lib/scheduledTaskSettings";
 import { isArtifactSharingSwitchOn } from "@/lib/artifactShareSettings";
+import { isTemporaryChatEnabled } from "@/lib/temporaryChatSettings";
 import { injectableExtractionPairs } from "@/lib/memoryInjectionGate";
 import { readGuestLeadFacts } from "@/lib/guestLeadFacts";
 
@@ -71,6 +72,7 @@ export async function readPlatformSettingsPanelProps() {
     // The panel saves every switch it shows, so it must start from the stored value.
     scheduledTasksEnabled: await isScheduledTasksEnabled(),
     artifactSharingEnabled: await isArtifactSharingSwitchOn(),
+    temporaryChatEnabled: await isTemporaryChatEnabled(),
     assistantPackageImportEnabled,
     memoryExtractionEnabled,
     memoryInjectionEnabled,

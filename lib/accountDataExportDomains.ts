@@ -479,6 +479,8 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
   // What the account asked to be run on a schedule: the question, model,
   // schedule, state and the per-run credits it approved.
   { domain: "scheduledTask", publicName: "scheduled_tasks", prismaModel: "ScheduledTask", state: "included" },
+  // Prompts the account saved under a name to reuse in the composer.
+  { domain: "savedPrompt", publicName: "saved_prompts", prismaModel: "SavedPrompt", state: "included" },
   {
     domain: "scheduledTaskRun",
     publicName: "scheduled_task_runs",

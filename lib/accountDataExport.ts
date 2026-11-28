@@ -131,6 +131,8 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         // every device it signs in on, so an export without it would be
         // narrower than the screen.
         pinnedAt: true,
+        // Archiving is the same kind of arrangement as the pin.
+        archivedAt: true,
         // A temporary Chat is still held until it is deleted, so the account's
         // copy of its data includes it, with when it will be deleted. The
         // conversation's own export and the all-conversations download leave
@@ -148,6 +150,7 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
     })).map((conversation) => ({
       id: conversation.id, title: conversation.title, kind: conversation.kind,
       productKey: conversation.productKey, pinnedAt: conversation.pinnedAt,
+      archivedAt: conversation.archivedAt,
       temporaryExpiresAt: conversation.temporaryExpiresAt,
       createdAt: conversation.createdAt, updatedAt: conversation.updatedAt,
       messages: conversation.messages.map(toAccountExportMessage),
@@ -380,6 +383,14 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         createdAt: true,
         updatedAt: true,
       },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  savedPrompt: (userId) =>
+    prisma.savedPrompt.findMany({
+      where: { userId },
+      select: { id: true, title: true, body: true, sortOrder: true, createdAt: true, updatedAt: true },
       orderBy: { createdAt: "asc" },
       take: EXPORT_ROW_CAP,
     }),
