@@ -104,7 +104,7 @@ import {
     type ChatImageDecision,
 } from "@/lib/chatImageIntentCore";
 import { CHAT_IMAGE_TURN_CONTENT_PREFIX } from "@/lib/chatImageTurnCore";
-import { autoLlmRouterCandidates, previousAnswerExcerpt, withRouterRewrite } from "@/lib/autoLlmRouterCore";
+import { autoLlmRouterCandidates, previousAnswerExcerpt, previousAnswerWasCut, withRouterRewrite } from "@/lib/autoLlmRouterCore";
 import {
     consumePreviewedPromptRefinerChatExecution,
     previewPromptRefinerChatExecution,
@@ -2953,7 +2953,8 @@ async function handleChatPost(
                       // Atomic Refiner consume restores this exact preview
                       // before provider dispatch. A second rewrite would be
                       // discarded, including an explicit keep-original choice.
-                      rewriteAllowed: !importedSource && !refinerPreview && !turnCarriesAttachments(autoRoutingMessages),
+                      rewriteAllowed: !importedSource && !refinerPreview && !turnCarriesAttachments(autoRoutingMessages) &&
+                          !previousAnswerWasCut(autoRoutingMessages),
                       verifyPreparedContext: fusion ? undefined : verifyPreparedContext,
                       ...(fusion ? { locationFusion: { authoredText: latestUserPromptText(messages), scope: existingFusion ? "existing" : undefined,
                           resume: fusion.resume, searchUtcDate: fusion.searchUtcDate,
