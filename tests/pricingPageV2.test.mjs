@@ -160,6 +160,24 @@ test("the long-context note appears only while it is configured", () => {
   assert.match(page, /billing\.config\?\.appLongContext === true && billing\.config\.appInputTokenLimit\s*\?\s*fill\(copy\.calc\.longContextNote/);
 });
 
+test("the long-context note keeps its eligibility, charge floor and reservation terms in every language", () => {
+  const requiredTerms = {
+    ko: [/로그인 계정/, /실제 공급사 비용/, /적게 차감하지/, /최대 사용량을 잡아 두고/, /쓰지 않은 만큼은 돌려/],
+    en: [/signed-in accounts/i, /actual provider cost/i, /never less than/i, /held before sending/i, /unused part is returned/i],
+    zh: [/登录账户/, /实际供应商成本/, /不少于/, /发送前会先预留最大用量/, /未使用的部分会退还/],
+    "zh-Hant": [/登入帳戶/, /實際供應商成本/, /不少於/, /傳送前會先預留最大用量/, /未使用的部分會退還/],
+    fr: [/comptes connectés/i, /coût fournisseur réel/i, /jamais moins/i, /réservé avant l’envoi/i, /part non utilisée est restituée/i],
+    de: [/angemeldete Konten/i, /tatsächlichen Anbieterkosten/i, /nie weniger/i, /vor dem Senden reserviert/i, /ungenutzte Teil wird erstattet/i],
+    es: [/cuentas con sesión/i, /coste real del proveedor/i, /nunca menos/i, /se reserva el máximo antes de enviar/i, /se devuelve la parte no usada/i],
+    pt: [/contas conectadas/i, /custo real do provedor/i, /nunca menos/i, /máximo é reservado antes do envio/i, /parte não usada é devolvida/i],
+  };
+  for (const [locale, terms] of Object.entries(requiredTerms)) {
+    const note = pricingPageContent[locale].calc.longContextNote;
+    assert.deepEqual([...note.matchAll(/\{\w+\}/g)].map((match) => match[0]), ["{tokens}"], `${locale}: token placeholder`);
+    for (const term of terms) assert.match(note, term, `${locale}: required long-context term ${term}`);
+  }
+});
+
 test("the models dialog is a modal dialog element", () => {
   const dialog = source("PlanModelsDialog.tsx");
   assert.match(dialog, /<dialog /);
