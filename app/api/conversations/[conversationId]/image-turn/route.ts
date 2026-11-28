@@ -14,6 +14,7 @@ import {
   apiSecurityResponse,
   consumeApiRateLimit,
   readLimitedJson,
+  releaseApiRateLimit,
 } from "@/lib/apiSecurity";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { chatErrorResponse } from "@/lib/chatSecurity";
@@ -62,15 +63,40 @@ type Params = { params: Promise<{ conversationId: string }> };
  * panels of one turn never throttle each other. A refusal means the panel has
  * bound before; anything else is an error like any other.
  */
+const PANEL_BIND_SCOPE = "image-turn-panel-bind";
+const panelBindSubject = (userId: string, assistantMessageId: string) => `${userId}:${assistantMessageId}`;
+
 const firstBindOfPanel = async (req: Request, userId: string, assistantMessageId: string) => {
   try {
-    await consumeApiRateLimit(req, `${userId}:${assistantMessageId}`, "image-turn-panel-bind",
+    await consumeApiRateLimit(req, panelBindSubject(userId, assistantMessageId), PANEL_BIND_SCOPE,
       { minute: 1, day: 1 }, { skipIpBucket: true });
     return true;
   } catch (error) {
     if (error instanceof ApiSecurityError && error.status === 429) return false;
     throw error;
   }
+};
+
+/** The same allowance as the image workspace's own submit. */
+const consumeImageAllowance = (req: Request, userId: string) =>
+  consumeApiRateLimit(req, userId, "image-generation", { minute: 6, day: 500 });
+
+/**
+ * A bind that did not bind: its panel's one uncounted bind is given back and
+ * the failed request is counted against the image allowance in its place.
+ * Neither may replace the refusal the caller is owed, so both only log.
+ */
+const returnPanelBind = async (req: Request, userId: string, assistantMessageId: string) => {
+  const subject = panelBindSubject(userId, assistantMessageId);
+  await Promise.all([
+    releaseApiRateLimit(subject, PANEL_BIND_SCOPE, "minute"),
+    releaseApiRateLimit(subject, PANEL_BIND_SCOPE, "day"),
+  ]).catch((error) => console.error("Chat image turn panel bind release failed:", error));
+  await consumeImageAllowance(req, userId).catch((error) => {
+    if (!(error instanceof ApiSecurityError)) {
+      console.error("Chat image turn failed bind count failed:", error);
+    }
+  });
 };
 
 export async function POST(req: Request, { params }: Params) {
@@ -106,26 +132,35 @@ export async function POST(req: Request, { params }: Params) {
       await firstBindOfPanel(req, userId, body.assistantMessageId)
     );
     if (!bindsReservedGroup) {
-      await consumeApiRateLimit(req, userId, "image-generation", {
-        minute: 6,
-        day: 500,
-      });
+      await consumeImageAllowance(req, userId);
     }
 
-    const turn = await startChatImageTurn({
-      userId,
-      conversationId,
-      sourceUserMessageId: body.sourceUserMessageId,
-      assistantMessageId: body.assistantMessageId,
-      modelId: body.modelId,
-      imageModelIds: body.imageModelIds,
-      ...(body.imageGroupModelIds ? { imageGroupModelIds: body.imageGroupModelIds } : {}),
-      ...(body.imageGroupPanelModelIds ? { imageGroupPanelModelIds: body.imageGroupPanelModelIds } : {}),
-      preset: body.preset,
-      prompt: body.prompt,
-      ...(body.edit ? { edit: true } : {}),
-      request: req,
-    });
+    let turn: Awaited<ReturnType<typeof startChatImageTurn>>;
+    try {
+      turn = await startChatImageTurn({
+        userId,
+        conversationId,
+        sourceUserMessageId: body.sourceUserMessageId,
+        assistantMessageId: body.assistantMessageId,
+        modelId: body.modelId,
+        imageModelIds: body.imageModelIds,
+        ...(body.imageGroupModelIds ? { imageGroupModelIds: body.imageGroupModelIds } : {}),
+        ...(body.imageGroupPanelModelIds ? { imageGroupPanelModelIds: body.imageGroupPanelModelIds } : {}),
+        preset: body.preset,
+        prompt: body.prompt,
+        ...(body.edit ? { edit: true } : {}),
+        request: req,
+      });
+    } catch (error) {
+      // The panel's one uncounted bind is spent only by a bind that bound. A
+      // refused one (a taken answer id, an unlocked conversation, a plan
+      // change) gives it back, so the legitimate retry is still uncounted --
+      // and is itself counted against the image allowance instead, so a
+      // request that keeps failing is bounded like any other. The refusal the
+      // caller sees is the turn's own, whatever these two do.
+      if (bindsReservedGroup) await returnPanelBind(req, userId, body.assistantMessageId);
+      throw error;
+    }
 
     if (body.routingDecisionId) {
       await linkImageRoutingDecision({ decisionId: body.routingDecisionId, userId, groupId: turn.groupId });

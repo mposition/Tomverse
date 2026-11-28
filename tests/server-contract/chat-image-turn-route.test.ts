@@ -29,6 +29,8 @@ let rateLimitRefused = false;
 /** Panel ids whose one bind has been spent (`image-turn-panel-bind`), and every try. */
 const boundPanels = new Set<string>();
 const bindTries: string[] = [];
+/** Rate-limit units given back, as `scope:period:subject`. */
+const releases: string[] = [];
 /** Whether the panel's group is already reserved, and who asked. */
 let groupReserved = false;
 const groupChecks: Array<Record<string, unknown>> = [];
@@ -79,6 +81,10 @@ async function loadRoute() {
         assert.equal(scope, "image-generation");
         rateLimitCalls += 1;
         if (rateLimitRefused) throw new ApiSecurityError(429, "API_RATE_LIMITED", "Too many requests.");
+      },
+      releaseApiRateLimit: async (subject: string, scope: string, period: string) => {
+        releases.push(`${scope}:${period}:${subject}`);
+        if (scope === "image-turn-panel-bind") boundPanels.delete(subject);
       } },
     });
     const realNextServer = require("next/server") as Record<string, unknown>;
@@ -141,6 +147,7 @@ const reset = () => {
   rateLimitRefused = false;
   boundPanels.clear();
   bindTries.length = 0;
+  releases.length = 0;
   groupReserved = false;
   groupChecks.length = 0;
   pendingIds = [];
@@ -196,6 +203,39 @@ test("a repeat of a panel that has bound already is counted, and only a counted 
   assert.equal(afterCalls, 3);
   rateLimitRefused = true;
   assert.equal((await post(reviewPanel)).status, 429, "so the allowance ends the repeats");
+});
+
+/*
+  Review finding (B3, 2026-11-28, third pass): the panel's one uncounted bind
+  was spent when the request was classified, so a bind the turn then refused
+  (ASSISTANT_MESSAGE_CONFLICT and the like) left the legitimate retry to be
+  charged against the image allowance.
+*/
+test("a bind the turn refuses gives its uncounted bind back, and the retry is still uncounted", async () => {
+  reset();
+  groupReserved = true;
+  refusal = { status: 409, code: "ASSISTANT_MESSAGE_CONFLICT" };
+  const refused = await post(reviewPanel);
+  assert.equal(refused.status, 409);
+  assert.equal(refused.payload.code, "ASSISTANT_MESSAGE_CONFLICT", "the caller sees the turn's own refusal");
+  const subject = `user-1:${reviewPanel.assistantMessageId}`;
+  assert.deepEqual([...releases].sort(), [`image-turn-panel-bind:day:${subject}`, `image-turn-panel-bind:minute:${subject}`]);
+  // The refused request is counted instead, so failing repeats stay bounded.
+  assert.equal(rateLimitCalls, 1);
+
+  refusal = null;
+  assert.equal((await post(reviewPanel)).status, 202);
+  assert.equal(rateLimitCalls, 1, "the retry binds uncounted");
+  assert.equal(bindTries.length, 2);
+
+  // Even with the allowance spent at that moment, the refusal is still the one returned.
+  reset();
+  groupReserved = true;
+  rateLimitRefused = true;
+  refusal = { status: 409, code: "ASSISTANT_MESSAGE_CONFLICT" };
+  const stillRefused = await post(reviewPanel);
+  assert.equal(stillRefused.status, 409);
+  assert.equal(stillRefused.payload.code, "ASSISTANT_MESSAGE_CONFLICT");
 });
 
 test("a malformed panel id is never a bind: it is counted before the group is even looked up", async () => {
