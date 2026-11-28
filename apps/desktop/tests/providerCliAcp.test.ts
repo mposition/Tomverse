@@ -408,6 +408,12 @@ test("Antigravity names its arguments in its own way and sends options with no k
         rawInput: { CommandLine: "echo hi", WaitMsBeforeAsync: 5000 } } }, { cwd, plan: cliPermissionPlan("google", "ask") });
       assert.equal(twice.verdict, "refuse", JSON.stringify(args));
     }
+    // A rawInput that cannot be read is not replaced by a harmless args.
+    for (const rawInput of ["{not json", 42, ["CommandLine", "echo hi"]]) {
+      const unread = classifyAcpPermission({ sessionId: "s", options: bare, toolCall: { name: "run_command", kind: "execute", title: "echo hi", args: { CommandLine: "echo hi" }, rawInput } },
+        { cwd, plan: cliPermissionPlan("google", "ask") });
+      assert.equal(unread.verdict, "refuse", JSON.stringify(rawInput));
+    }
     const outside = classifyAcpPermission({ sessionId: "s", options: bare, toolCall: { name: "write_file", kind: "edit", args: { Path: join(cwd, "..", "outside.txt") },
       rawInput: { Content: "hi", Path: join(cwd, "hello.txt") } } }, { cwd, plan: cliPermissionPlan("google", "allow_all") });
     assert.equal(outside.verdict, "refuse");
