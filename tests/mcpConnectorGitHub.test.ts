@@ -58,6 +58,8 @@ test("the GitHub OAuth profile is default-off, fixed-destination and cannot clas
   // The catalog presets are offered alongside the built-in profile; only one of them may be GitHub.
   const profile = mcpServers({ ...env, MCP_CONNECTOR_PREVIEW_ENABLED: "true" }).filter(server => server.id === "github").at(0)!;
   assert.ok(profile);
+  // The kill switch turns the built-in profile off as well.
+  assert.equal(mcpServers({ ...env, MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_PROVIDERS_DISABLED: "linear, github" }).some(server => server.id === "github"), false);
   assert.equal(profile.auth, "oauth"); assert.equal(profile.oauth?.scope, "offline_access");
   assert.equal(profile.oauth?.issuer, "https://github.com/login/oauth");
   assert.equal(JSON.stringify(profile).includes("synthetic-secret"), false);

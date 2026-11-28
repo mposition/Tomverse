@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { selectedMcpProviderPolicies } from "@/lib/mcpProviderPresets";
+import { disabledMcpProviderIds, selectedMcpProviderPolicies } from "@/lib/mcpProviderPresets";
 
 export const MCP_LIMITS = Object.freeze({
   calls: 6, requestMs: 8_000, turnMs: 45_000, responseBytes: 131_072,
@@ -92,7 +92,8 @@ export function mcpServers(env: Record<string, string | undefined> = process.env
   // The catalog (config/mcp/provider-presets.json) is the only source of fixed servers; no server list variable is read.
   const configured: McpServerPolicy[] = [];
   configured.push(...selectedMcpProviderPolicies(env).map(server => mcpServerSchema.parse(server)));
-  if (env.MCP_GITHUB_OAUTH_CLIENT_ID && env.MCP_GITHUB_OAUTH_CLIENT_SECRET) {
+  // The kill switch covers the built-in GitHub profile too: "github" in MCP_CONNECTOR_PROVIDERS_DISABLED turns it off.
+  if (env.MCP_GITHUB_OAUTH_CLIENT_ID && env.MCP_GITHUB_OAUTH_CLIENT_SECRET && !disabledMcpProviderIds(env).has("github")) {
     configured.push(mcpServerSchema.parse({ id: "github", name: `GitHub · ${env.MCP_GITHUB_REPOSITORY}`,
       url: "https://api.githubcopilot.com/mcp/x/issues", auth: "oauth", readTools: ["search_issues", "issue_read"],
       sourceAdapter: "github-issues", githubRepository: env.MCP_GITHUB_REPOSITORY, githubRepositoryId: Number(env.MCP_GITHUB_REPOSITORY_ID),

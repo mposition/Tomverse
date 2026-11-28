@@ -105,7 +105,8 @@ profile is offered when it can connect without an operator secret (dynamic clien
 registration, or no auth) or when the operator has supplied its registered app and
 scope bounds (`MCP_PROVIDER_<ID>_*`); the others stay absent. Switch a misbehaving
 provider off with the comma-separated `MCP_CONNECTOR_PROVIDERS_DISABLED` (empty by
-default). `auth` is `none`, `bearer` or `oauth`; credentials are per-user encrypted
+default); `github` there also turns off the built-in GitHub profile. `auth` is `none`,
+`bearer` or `oauth`; credentials are per-user encrypted
 DB references, never environment values exposed in the provider catalog. Changes to
 endpoint/auth/read scopes invalidate the stored connection policy digest and
 require reconnection; choosing profiles from the catalog instead of a list does not
