@@ -28,14 +28,40 @@ const createdMany: Array<Record<string, unknown>> = [];
 const storedIds = new Set<string>();
 /** Rows that already hold an id, as `message.findMany` reads them. */
 let heldRows: Array<{ id: string; conversationId: string; role: string; content: string }> = [];
-/** `${userId}:${groupKey}` -> the reserved group's conversation. */
-const reservedGroups = new Map<string, { conversationId: string }>();
+/** `${userId}:${groupKey}` -> the reserved group's conversation and target count. */
+const reservedGroups = new Map<string, { conversationId: string; targets: number }>();
 let groupQueries = 0;
 let reused = false;
 let replayStatus = "pending";
 let mocksInstalled = false;
+/** Reservations whose transaction committed (the hook inside it did not throw). */
+const committedReservations: Array<Record<string, unknown>> = [];
+/**
+ * Another writer takes an id while this request runs: visible from the Nth
+ * `message.findMany` on, or only when the insert hits it.
+ */
+let takenLater: { row: { id: string; conversationId: string; role: string; content: string }; fromRead: number } | null = null;
+let takenAtInsert: string | null = null;
+let messageReads = 0;
+const uniqueViolation = () =>
+  Object.assign(new Error("duplicate key"), { name: "PrismaClientKnownRequestError", code: "P2002" });
+
+/** Runs `fn` as one transaction: a throw rolls back the rows it wrote. */
+const asTransaction = async <T>(fn: () => Promise<T>): Promise<T> => {
+  const rows = createdMany.length;
+  const ids = new Set(storedIds);
+  try {
+    return await fn();
+  } catch (error) {
+    createdMany.length = rows;
+    storedIds.clear();
+    for (const id of ids) storedIds.add(id);
+    throw error;
+  }
+};
 
 const prismaMock = {
+  $transaction: async (fn: (tx: unknown) => Promise<unknown>) => asTransaction(() => fn(prismaMock)),
   conversation: {
     findFirst: async () => conversation,
     update: async () => ({}),
@@ -45,18 +71,22 @@ const prismaMock = {
     findUnique: async () => existing,
     // What already holds those ids: rows a test placed, and rows a sibling
     // panel's request wrote.
-    findMany: async ({ where }: { where: { id: { in: string[] } } }) =>
-      [...heldRows, ...createdMany as typeof heldRows].filter((row) => where.id.in.includes(row.id)),
+    findMany: async ({ where }: { where: { id: { in: string[] } } }) => {
+      messageReads += 1;
+      const late = takenLater && messageReads >= takenLater.fromRead ? [takenLater.row] : [];
+      return [...heldRows, ...createdMany as typeof heldRows, ...late].filter((row) => where.id.in.includes(row.id));
+    },
     create: async ({ data }: { data: Record<string, unknown> }) => {
       created.push(data);
       return data;
     },
     createMany: async ({ data, skipDuplicates }: { data: Array<Record<string, unknown>>; skipDuplicates?: boolean }) => {
-      assert.equal(skipDuplicates, true, "a sibling panel may already have written its rows");
-      const fresh = data.filter((row) => !storedIds.has(String(row.id)));
-      for (const row of fresh) storedIds.add(String(row.id));
-      createdMany.push(...fresh);
-      return { count: fresh.length };
+      // Nothing is skipped: a taken id fails the insert, and its transaction.
+      assert.equal(skipDuplicates, undefined);
+      if (data.some((row) => storedIds.has(String(row.id)) || row.id === takenAtInsert)) throw uniqueViolation();
+      for (const row of data) storedIds.add(String(row.id));
+      createdMany.push(...data);
+      return { count: data.length };
     },
   },
   imageGenerationGroup: {
@@ -66,7 +96,8 @@ const prismaMock = {
     },
     findUnique: async ({ where }: { where: { userId_groupIdempotencyKey: { userId: string; groupIdempotencyKey: string } } }) => {
       const key = where.userId_groupIdempotencyKey;
-      return reservedGroups.get(`${key.userId}:${key.groupIdempotencyKey}`) ?? null;
+      const group = reservedGroups.get(`${key.userId}:${key.groupIdempotencyKey}`);
+      return group ? { conversationId: group.conversationId, _count: { targets: group.targets } } : null;
     },
   },
 };
@@ -88,6 +119,13 @@ async function load() {
       namedExports: {
         requestImageGeneration: async (input: Record<string, unknown>) => {
           requests.push(input);
+          // A new group runs the caller's hook inside its reservation
+          // transaction; a throw there rolls the reservation back with it.
+          if (!reused) {
+            const onReserved = input.onReserved as ((tx: unknown, conversationId: unknown) => Promise<unknown>) | undefined;
+            await asTransaction(async () => onReserved?.(prismaMock, input.conversationId));
+          }
+          committedReservations.push(input);
           return {
             generationId: "gen-1",
             groupId: "group-1",
@@ -122,6 +160,10 @@ const reset = () => {
   storedIds.clear();
   heldRows = [];
   reservedGroups.clear();
+  committedReservations.length = 0;
+  takenLater = null;
+  takenAtInsert = null;
+  messageReads = 0;
   groupQueries = 0;
   reused = false;
   replayStatus = "pending";
@@ -424,17 +466,22 @@ test("an older client that sends no panel list keeps one answer per request", as
   assert.deepEqual(created.map((row) => [row.id, row.modelId]), [[`${REVIEW_GROUP}_1`, "openai-chat"]]);
 });
 
-test("a group counts as reserved only for a Review panel id in its own conversation", async () => {
+test("a group counts as reserved only for a well-formed panel of it, in its own conversation", async () => {
   const { turn } = await load();
   reset();
-  reservedGroups.set(`user-1:${REVIEW_GROUP}`, { conversationId: "conv-1" });
-  const reserved = (assistantMessageId: string, conversationId = "conv-1") =>
-    turn.chatImageTurnGroupReserved({ userId: "user-1", conversationId, assistantMessageId });
+  reservedGroups.set(`user-1:${REVIEW_GROUP}`, { conversationId: "conv-1", targets: 2 });
+  const reserved = (assistantMessageId: string, conversationId = "conv-1", panelCount = 2) =>
+    turn.chatImageTurnGroupReserved({ userId: "user-1", conversationId, assistantMessageId, panelCount });
   assert.equal(await reserved(`${REVIEW_GROUP}_1`), true);
   assert.equal(await reserved(`${REVIEW_GROUP}_1`, "conv-other"), false);
   // A plain Chat answer id is never a later panel of anything.
   assert.equal(await reserved(REVIEW_GROUP), false);
   assert.equal(await reserved("6f1c1d3e-3333-4a2b-9c3d-000000000003_0"), false);
+  // Past the last panel, another spelling of one, or a panel count the group
+  // does not have: not a panel of this group.
+  assert.equal(await reserved(`${REVIEW_GROUP}_2`), false);
+  assert.equal(await reserved(`${REVIEW_GROUP}_01`), false);
+  assert.equal(await reserved(`${REVIEW_GROUP}_1`, "conv-1", 3), false);
 });
 
 /*
@@ -472,4 +519,68 @@ test("a sibling panel id that is already this conversation's image answer is a r
   assert.equal(requests.length, 1);
   // Only the free id is written; the sibling's row stays as it was.
   assert.deepEqual(createdMany.map((row) => row.id), [`${REVIEW_GROUP}_1`]);
+});
+
+/*
+  Review finding (B3, 2026-11-28, second pass): the panel ids were checked,
+  the group reserved, and the answers inserted with `skipDuplicates`, as three
+  steps. An id another writer took after the check was skipped silently, and
+  the group was reserved with no answer for that panel. The answers are now
+  written inside the reservation's own transaction, without skipping, so a
+  taken id rolls the reservation back with them.
+*/
+test("the panel answers are written inside the reservation, and a group never commits without them", async () => {
+  const { turn } = await load();
+  reset();
+  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
+  await turn.startChatImageTurn(reviewPanel(1));
+  const request = requests[0] as { onReserved?: unknown };
+  assert.equal(typeof request.onReserved, "function", "the answers ride on the reservation transaction");
+  assert.equal(committedReservations.length, 1);
+  assert.deepEqual(createdMany.map((row) => row.id).sort(), [`${REVIEW_GROUP}_0`, `${REVIEW_GROUP}_1`]);
+});
+
+test("an id taken after the early check is found inside the reservation and rolls it back", async () => {
+  const { turn } = await load();
+  reset();
+  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
+  // Free at the early check (read 1), held by a text answer by the time the
+  // reservation transaction reads (read 2).
+  takenLater = { row: { id: `${REVIEW_GROUP}_0`, conversationId: "conv-1", role: "assistant", content: "a text answer" }, fromRead: 2 };
+  await rejects(() => turn.startChatImageTurn(reviewPanel(1)), "ASSISTANT_MESSAGE_CONFLICT");
+  assert.equal(committedReservations.length, 0, "nothing was reserved");
+  assert.equal(createdMany.length, 0, "no answer row survives");
+});
+
+test("an id taken between the reservation's read and its insert fails the insert and rolls it all back", async () => {
+  const { turn } = await load();
+  reset();
+  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
+  takenAtInsert = `${REVIEW_GROUP}_0`;
+  await rejects(() => turn.startChatImageTurn(reviewPanel(1)), "ASSISTANT_MESSAGE_CONFLICT");
+  assert.equal(committedReservations.length, 0);
+  assert.equal(createdMany.length, 0);
+});
+
+test("a replay of an existing group writes the answers it lacks, all or none, and reserves nothing", async () => {
+  const { turn } = await load();
+  reset();
+  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
+  reused = true;
+  // An older client's group: only its own panel's answer was ever written.
+  heldRows = [{ id: `${REVIEW_GROUP}_1`, conversationId: "conv-1", role: "assistant", content: "[Image generated] earlier" }];
+  storedIds.add(`${REVIEW_GROUP}_1`);
+  existing = { conversationId: "conv-1", role: "assistant", content: "[Image generated] earlier" };
+  await turn.startChatImageTurn(reviewPanel(1));
+  assert.deepEqual(createdMany.map((row) => row.id), [`${REVIEW_GROUP}_0`]);
+
+  reset();
+  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
+  reused = true;
+  existing = { conversationId: "conv-1", role: "assistant", content: "[Image generated] earlier" };
+  heldRows = [{ id: `${REVIEW_GROUP}_1`, conversationId: "conv-1", role: "assistant", content: "[Image generated] earlier" }];
+  storedIds.add(`${REVIEW_GROUP}_1`);
+  takenAtInsert = `${REVIEW_GROUP}_0`;
+  await rejects(() => turn.startChatImageTurn(reviewPanel(1)), "ASSISTANT_MESSAGE_CONFLICT");
+  assert.equal(createdMany.length, 0);
 });

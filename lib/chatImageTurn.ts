@@ -2,9 +2,10 @@ import "server-only";
 
 import { Prisma } from "@prisma/client";
 import { chatImageTriageModelId } from "@/lib/chatImageIntent";
-import { CHAT_IMAGE_TURN_CONTENT_PREFIX, chatImageTurnGroupKey } from "@/lib/chatImageTurnCore";
+import { CHAT_IMAGE_TURN_CONTENT_PREFIX, chatImageTurnGroupKey, reviewPanelIndex } from "@/lib/chatImageTurnCore";
 import { ChatAccessError } from "@/lib/chatSecurity";
 import { isChatConversationKind } from "@/lib/conversationKindGuard";
+import { isUniqueConstraintDatabaseError } from "@/lib/databaseError";
 import { hasConversationUnlockGrant } from "@/lib/conversationLock";
 import {
     IMAGE_QUALITY_BY_PRESET,
@@ -65,10 +66,11 @@ export type ChatImageTurnResult = {
     content: string;
     /**
      * Generations still waiting to start; the route drives them after
-     * responding. A replay included: if the first request's executor never
-     * ran (its answer write failed, or the response was lost before after()),
-     * the retry is what starts them. The claim in processImageGeneration lets
-     * only one runner take each.
+     * responding. A counted replay included: if the first request's executor
+     * never ran (the response was lost before after()), the retry is what
+     * starts them. A Review panel's uncounted first bind to a group another
+     * panel reserved does not (the image-turn route). The claim in
+     * processImageGeneration lets only one runner take each.
      */
     pendingGenerationIds: string[];
 };
@@ -76,28 +78,83 @@ export type ChatImageTurnResult = {
 /**
  * Whether a Review panel's image group is already reserved in this
  * conversation, read before the image-turn route's rate limit: a panel that
- * only binds its answer to a group another panel reserved buys nothing, so it
- * is not counted against the submit allowance. Not a panel id (no `_<i>`
- * suffix), or another conversation's group, is not this case.
+ * only binds its answer to a group another panel reserved buys nothing. Only a
+ * well-formed panel id of a group with exactly `panelCount` targets qualifies
+ * (`reviewPanelIndex`); a plain answer id, an index past the last panel or
+ * another conversation's group does not.
  */
 export async function chatImageTurnGroupReserved(input: {
     userId: string;
     conversationId: string;
     assistantMessageId: string;
+    panelCount: number;
 }): Promise<boolean> {
-    const groupKey = chatImageTurnGroupKey(input.assistantMessageId);
-    if (groupKey === input.assistantMessageId) return false;
+    if (reviewPanelIndex(input.assistantMessageId, input.panelCount) === null) return false;
     const group = await prisma.imageGenerationGroup.findUnique({
         where: {
             userId_groupIdempotencyKey: {
                 userId: input.userId,
-                groupIdempotencyKey: groupKey,
+                groupIdempotencyKey: chatImageTurnGroupKey(input.assistantMessageId),
             },
         },
-        select: { conversationId: true },
+        select: { conversationId: true, _count: { select: { targets: true } } },
     });
-    return group?.conversationId === input.conversationId;
+    return (
+        group?.conversationId === input.conversationId &&
+        group._count.targets === input.panelCount
+    );
 }
+
+type PanelAnswer = { id: string; modelId: string };
+
+const panelAnswerConflict = () =>
+    new ChatAccessError(409, "ASSISTANT_MESSAGE_CONFLICT", "That answer id is taken.");
+
+/**
+ * Writes every Review panel's answer that is not there yet, in the caller's
+ * transaction, or refuses the whole write.
+ *
+ * Each id must be free or already this conversation's image answer (a replay,
+ * or the request that wrote them all). Nothing is skipped: the insert has no
+ * `skipDuplicates`, so a row another writer took after the read fails it, and
+ * the caller's transaction -- the image reservation itself, for a new group --
+ * rolls back with it. A reserved group therefore always has an answer for
+ * every panel. Returns how many rows it wrote.
+ */
+const writePanelAnswers = async (
+    db: Prisma.TransactionClient,
+    conversationId: string,
+    answers: readonly PanelAnswer[],
+    content: string
+): Promise<number> => {
+    const held = await db.message.findMany({
+        where: { id: { in: answers.map((answer) => answer.id) } },
+        select: { id: true, conversationId: true, role: true, content: true },
+    });
+    if (held.some((row) =>
+        row.conversationId !== conversationId ||
+        row.role !== "assistant" ||
+        !row.content.startsWith(CHAT_IMAGE_TURN_CONTENT_PREFIX))) {
+        throw panelAnswerConflict();
+    }
+    const missing = answers.filter((answer) => !held.some((row) => row.id === answer.id));
+    if (missing.length === 0) return 0;
+    try {
+        await db.message.createMany({
+            data: missing.map((answer) => ({
+                id: answer.id,
+                conversationId,
+                role: "assistant",
+                content,
+                modelId: answer.modelId,
+            })),
+        });
+    } catch (error) {
+        if (isUniqueConstraintDatabaseError(error)) throw panelAnswerConflict();
+        throw error;
+    }
+    return missing.length;
+};
 
 /** What the answer's text says: read by later turns and by exports. */
 export const chatImageTurnContent = (prompt: string) =>
@@ -195,12 +252,11 @@ export async function startChatImageTurn(
         throw new ChatAccessError(400, "IMAGE_MODEL_SELECTION_INVALID", "Invalid comparison image selection.");
     }
     // Every panel's answer id has to be free, or already this conversation's
-    // image answer (a sibling panel or a replay wrote it), before anything is
-    // reserved. The write below skips a row that exists, so a panel id held by
-    // a text answer or by another conversation would otherwise leave that
-    // panel's image paid for with no answer to show it. This request's own id
-    // was checked above; the others are checked the same way here. The
-    // conversation is this user's (checked at the top), so its rows are too.
+    // image answer, before anything is held: an early refusal for the ordinary
+    // case. It is not the guarantee -- `writePanelAnswers` re-reads inside the
+    // reservation transaction and inserts without skipping, so a row taken in
+    // between rolls the reservation back. The conversation is this user's
+    // (checked at the top), so its rows are too.
     if (panelAnswers) {
         const held = await prisma.message.findMany({
             where: { id: { in: panelAnswers.map((answer) => answer.id) } },
@@ -210,9 +266,10 @@ export async function startChatImageTurn(
             row.conversationId !== input.conversationId ||
             row.role !== "assistant" ||
             !row.content.startsWith(CHAT_IMAGE_TURN_CONTENT_PREFIX))) {
-            throw new ChatAccessError(409, "ASSISTANT_MESSAGE_CONFLICT", "That answer id is taken.");
+            throw panelAnswerConflict();
         }
     }
+    let panelAnswersWritten = 0;
     // An edit starts from the question's own photo, looked up from the saved
     // message so a request can never point an edit at another file.
     let editSource: { attachmentId: string } | undefined;
@@ -252,6 +309,27 @@ export async function startChatImageTurn(
         modelIds: input.imageGroupModelIds ?? (input.imageModelIds.length > 0 ? input.imageModelIds : undefined),
         chatTurnHost: true,
         ...(editSource ? { editSource } : {}),
+        /*
+          The group is reserved for every panel at once, so every panel's
+          answer is written in that same transaction: a conflict rolls the
+          reservation back with it, and a group that exists has an answer for
+          each panel. Before this, each panel wrote only its own answer after
+          the reservation committed, and a panel whose request was refused (a
+          rate limit) or never sent -- or whose id another row took -- left its
+          image charged and nowhere in the conversation (lib/chatImageTurnRead.ts
+          shows a group's image only beside its `<group>_<i>` answer). Runs
+          after the reservation's account and scope locks and takes none of its
+          own.
+        */
+        ...(panelAnswers
+            ? {
+                  onReserved: async (tx: Prisma.TransactionClient) => {
+                      panelAnswersWritten = await writePanelAnswers(
+                          tx, input.conversationId, panelAnswers, chatImageTurnContent(prompt)
+                      );
+                  },
+              }
+            : {}),
     });
 
     if (result.conversationId !== input.conversationId || (input.imageGroupModelIds &&
@@ -260,26 +338,15 @@ export async function startChatImageTurn(
     }
     const content = existing?.content ?? chatImageTurnContent(prompt);
     if (panelAnswers) {
-        /*
-          The group is reserved for every panel at once, so every panel's
-          answer is written at once too -- by whichever panel's request gets
-          here first; the rest find their rows and write nothing. Before this,
-          each panel wrote only its own answer, and a panel whose request was
-          refused (a rate limit) or never sent left its image charged and
-          nowhere in the conversation (lib/chatImageTurnRead.ts shows a
-          group's image only beside its `<group>_<i>` answer).
-        */
-        const created = await prisma.message.createMany({
-            data: panelAnswers.map((answer) => ({
-                id: answer.id,
-                conversationId: input.conversationId,
-                role: "assistant",
-                content: chatImageTurnContent(prompt),
-                modelId: answer.modelId,
-            })),
-            skipDuplicates: true,
-        });
-        if (created.count > 0) {
+        // A replay of a group that already existed: this request reserved
+        // nothing, and writes only answers an older client's group never got,
+        // all or none.
+        if (result.reused) {
+            panelAnswersWritten = await prisma.$transaction((tx) =>
+                writePanelAnswers(tx, input.conversationId, panelAnswers, chatImageTurnContent(prompt))
+            );
+        }
+        if (panelAnswersWritten > 0) {
             await prisma.conversation.update({
                 where: { id: input.conversationId },
                 data: { updatedAt: new Date() },

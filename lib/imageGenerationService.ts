@@ -280,7 +280,9 @@ export type ImageGenerationRequestInput = {
   editSource?: { attachmentId: string } | { bindAttachment: (tx: Prisma.TransactionClient, conversationId: string) => Promise<string> };
   /**
    * Server-only: runs once inside the reservation transaction of a new request, with the conversation
-   * it belongs to, and rolls back with it. Studio records a photo-less request here.
+   * it belongs to, and rolls back with it. Studio records a photo-less request here; a Review image
+   * turn writes every panel's answer here, so a group never commits without them (lib/chatImageTurn.ts).
+   * Runs after the account and scope locks and must not take another.
    */
   onReserved?: (tx: Prisma.TransactionClient, conversationId: string) => Promise<unknown>;
   /**

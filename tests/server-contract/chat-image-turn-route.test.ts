@@ -26,9 +26,15 @@ let cookieReads = 0;
 /** Image allowance consumptions, and whether the next one is refused. */
 let rateLimitCalls = 0;
 let rateLimitRefused = false;
+/** Panel ids whose one bind has been spent (`image-turn-panel-bind`), and every try. */
+const boundPanels = new Set<string>();
+const bindTries: string[] = [];
 /** Whether the panel's group is already reserved, and who asked. */
 let groupReserved = false;
 const groupChecks: Array<Record<string, unknown>> = [];
+/** What the turn leaves pending, and how often work was queued after the response. */
+let pendingIds: string[] = [];
+let afterCalls = 0;
 
 async function loadRoute() {
   if (!mocksInstalled) {
@@ -54,10 +60,30 @@ async function loadRoute() {
       ApiSecurityError: new (status: number, code: string, message: string) => Error;
     };
     mock.module(mod("lib/apiSecurity.ts"), {
-      namedExports: { ...realApiSecurity, consumeApiRateLimit: async () => {
+      namedExports: { ...realApiSecurity, consumeApiRateLimit: async (
+        _request: Request,
+        subject: string,
+        scope: string,
+        limits: { minute: number; day: number },
+        options?: { skipIpBucket?: boolean },
+      ) => {
+        if (scope === "image-turn-panel-bind") {
+          // A bucket of one per panel id, never on the caller's IP.
+          assert.deepEqual(limits, { minute: 1, day: 1 });
+          assert.equal(options?.skipIpBucket, true);
+          bindTries.push(subject);
+          if (boundPanels.has(subject)) throw new ApiSecurityError(429, "API_RATE_LIMITED", "Too many requests.");
+          boundPanels.add(subject);
+          return;
+        }
+        assert.equal(scope, "image-generation");
         rateLimitCalls += 1;
         if (rateLimitRefused) throw new ApiSecurityError(429, "API_RATE_LIMITED", "Too many requests.");
       } },
+    });
+    const realNextServer = require("next/server") as Record<string, unknown>;
+    mock.module("next/server", {
+      namedExports: { ...realNextServer, after: () => { afterCalls += 1; } },
     });
     mock.module(mod("lib/chatImageTurn.ts"), {
       namedExports: {
@@ -72,7 +98,7 @@ async function loadRoute() {
             groupId: "group-1",
             imageModelIds: ["gpt-image-2"],
             content: "[Image generated] cat",
-            pendingGenerationIds: [],
+            pendingGenerationIds: pendingIds,
           };
         },
       },
@@ -113,8 +139,12 @@ const reset = () => {
   turns.length = 0;
   rateLimitCalls = 0;
   rateLimitRefused = false;
+  boundPanels.clear();
+  bindTries.length = 0;
   groupReserved = false;
   groupChecks.length = 0;
+  pendingIds = [];
+  afterCalls = 0;
 };
 
 const reviewPanel = {
@@ -124,27 +154,73 @@ const reviewPanel = {
   imageGroupPanelModelIds: ["google-chat", "gpt-6-luna"],
 };
 
-test("a later Review panel of a reserved group binds without spending the image allowance", async () => {
+test("a later Review panel's first bind to a reserved group spends no image allowance and queues no work", async () => {
   reset();
   groupReserved = true;
+  pendingIds = ["gen-1", "gen-2"];
   const { status } = await post(reviewPanel);
   assert.equal(status, 202);
   assert.equal(rateLimitCalls, 0, "binding to a reserved group buys nothing, so it is not counted");
   assert.deepEqual(groupChecks, [{ userId: "user-1", conversationId: "conv-1",
-    assistantMessageId: reviewPanel.assistantMessageId }]);
+    assistantMessageId: reviewPanel.assistantMessageId, panelCount: 2 }]);
+  assert.deepEqual(bindTries, [`user-1:${reviewPanel.assistantMessageId}`]);
   assert.deepEqual(turns[0].imageGroupPanelModelIds, reviewPanel.imageGroupPanelModelIds);
+  // The panel that reserved the group queued its work; an uncounted bind
+  // must not be a way to queue it again.
+  assert.equal(afterCalls, 0);
 
-  // Even with the allowance spent, it still binds: its image is paid for.
+  // Even with the allowance spent, a first bind still binds: its image is paid for.
   reset();
   groupReserved = true;
   rateLimitRefused = true;
   assert.equal((await post(reviewPanel)).status, 202);
 });
 
+/*
+  Review finding (B3, 2026-11-28, second pass): anyone who knew a reserved
+  group's panel ids could repeat a request, valid or not, outside the image
+  allowance -- each a database round and, for a valid one, the group's pending
+  work queued again.
+*/
+test("a repeat of a panel that has bound already is counted, and only a counted request queues work", async () => {
+  reset();
+  groupReserved = true;
+  pendingIds = ["gen-1"];
+  assert.equal((await post(reviewPanel)).status, 202);
+  assert.equal(rateLimitCalls, 0);
+  for (let repeat = 1; repeat <= 3; repeat += 1) {
+    assert.equal((await post(reviewPanel)).status, 202);
+    assert.equal(rateLimitCalls, repeat, "every repeat draws on the image allowance");
+  }
+  // A counted retry may still start work that never ran.
+  assert.equal(afterCalls, 3);
+  rateLimitRefused = true;
+  assert.equal((await post(reviewPanel)).status, 429, "so the allowance ends the repeats");
+});
+
+test("a malformed panel id is never a bind: it is counted before the group is even looked up", async () => {
+  for (const assistantMessageId of [
+    "6f1c1d3e-2222-4a2b-9c3d-000000000002_2", // past the last of two panels
+    "6f1c1d3e-2222-4a2b-9c3d-000000000002_01", // another spelling of panel 1
+    "not-a-uuid-group-at-all_1",
+    "6f1c1d3e-2222-4a2b-9c3d-000000000002", // no panel index
+  ]) {
+    reset();
+    groupReserved = true;
+    await post({ ...reviewPanel, assistantMessageId });
+    assert.equal(groupChecks.length, 0, assistantMessageId);
+    assert.equal(bindTries.length, 0, assistantMessageId);
+    assert.equal(rateLimitCalls, 1, assistantMessageId);
+  }
+});
+
 test("the panel that reserves a group, and every plain turn, still spend the image allowance", async () => {
   reset();
+  pendingIds = ["gen-1", "gen-2"];
   assert.equal((await post(reviewPanel)).status, 202);
   assert.equal(rateLimitCalls, 1);
+  assert.equal(bindTries.length, 0, "no group yet, so no bind is spent");
+  assert.equal(afterCalls, 1, "the reserving request queues the group's work");
   reset();
   assert.equal((await post(body)).status, 202);
   assert.equal(rateLimitCalls, 1);
