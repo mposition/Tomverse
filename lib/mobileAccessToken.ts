@@ -50,8 +50,15 @@ import {
 } from "@/lib/mobileAccessTokenCore";
 
 type Environment = Record<string, string | undefined>;
-const tokenAudience = (environment: Environment, client?: "desktop") =>
-  mobileTokenAudience(environment) + (client === "desktop" ? "/desktop" : "");
+/**
+ * Which client a token is for, by its audience. `desktop` is Tomverse Desktop's session token. `desktop-code` is the
+ * short token Desktop Code's runtimes carry (docs/policy/external-api.md section 11.2): the same session, accepted only
+ * on the coding API calls the agent engine makes, so a runtime never holds the token Desktop's Chat and account
+ * routes take. Each is refused wherever the other is expected.
+ */
+export type AccessTokenClient = "desktop" | "desktop-code";
+const tokenAudience = (environment: Environment, client?: AccessTokenClient) =>
+  mobileTokenAudience(environment) + (client === "desktop" ? "/desktop" : client === "desktop-code" ? "/desktop/code" : "");
 
 const encodeSegment = (value: Buffer | string) =>
   Buffer.from(value as never).toString("base64url");
@@ -227,7 +234,7 @@ export const mintMobileAccessToken = (
     userId: string;
     deviceId: string;
     familyId: string;
-    client?: "desktop";
+    client?: AccessTokenClient;
     now?: Date;
   },
   environment: Environment = process.env
@@ -319,7 +326,7 @@ export const parseCompactJws = (token: string): ParsedCompactJws | null => {
  */
 export const verifyMobileAccessTokenString = (
   token: string,
-  options: { now?: Date; environment?: Environment; client?: "desktop" } = {}
+  options: { now?: Date; environment?: Environment; client?: AccessTokenClient } = {}
 ): MobileAccessTokenVerdict => {
   const environment = options.environment ?? process.env;
   const parsed = parseCompactJws(token);

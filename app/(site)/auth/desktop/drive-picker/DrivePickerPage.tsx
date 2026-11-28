@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { HardDrive } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
-  DESKTOP_DRIVE_CALLBACK, desktopDriveLink, driveCipher, driveEncode, driveKeyPair, driveProof,
+  desktopDriveLink, driveAbandonRequest, driveCallbackUrl, driveCipher, driveEncode, driveKeyPair, driveProof,
 } from "@/lib/desktopDrivePickerContract";
 import { loadGoogleDrivePicker, type GooglePickerConfig } from "@/lib/googleDrivePickerClient";
 
@@ -15,6 +15,7 @@ export function DrivePickerPage({ config }: { config: GooglePickerConfig }) {
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
   const fragment = useRef<string>(undefined);
+  const settled = useRef(false);
   useEffect(() => {
     fragment.current ??= window.location.hash.slice(1);
     const parsed = desktopDriveLink.safeParse(Object.fromEntries(new URLSearchParams(fragment.current)));
@@ -30,9 +31,29 @@ export function DrivePickerPage({ config }: { config: GooglePickerConfig }) {
   const target = link?.success ? link.data : null;
   function callback() {
     if (!target) throw new Error("Google Drive selection expired.");
-    const url = new URL(DESKTOP_DRIVE_CALLBACK, "http://127.0.0.1:" + target.port);
-    url.searchParams.set("state", target.state);
-    return url;
+    return driveCallbackUrl(target);
+  }
+
+  // Closing this window without choosing tells Desktop to stop waiting. Best effort: the policy admits this one loopback request
+  // (lib/csp.ts), but a browser that asks permission before a site reaches this computer may refuse it, so the Cancel button
+  // in Desktop and its own time limit end the wait too. Leaving through the callback below (a choice or Cancel) must not send it twice.
+  const port = target?.port;
+  const state = target?.state;
+  useEffect(() => {
+    if (port === undefined || state === undefined) return;
+    const abandon = () => {
+      if (settled.current) return;
+      settled.current = true;
+      const { url, init } = driveAbandonRequest({ port, state });
+      try { void fetch(url, init).catch(() => {}); } catch { /* the window is closing; nothing more to do */ }
+    };
+    window.addEventListener("pagehide", abandon);
+    return () => window.removeEventListener("pagehide", abandon);
+  }, [port, state]);
+
+  function leave(url: URL) {
+    settled.current = true;
+    window.location.replace(url.href);
   }
 
   async function select() {
@@ -52,7 +73,7 @@ export function DrivePickerPage({ config }: { config: GooglePickerConfig }) {
         url.searchParams.set("iv", driveEncode(iv));
         url.searchParams.set("payload", driveEncode(new Uint8Array(payload)));
       }
-      window.location.replace(url.href);
+      leave(url);
     } catch {
       setError(true);
       setBusy(false);
@@ -67,7 +88,7 @@ export function DrivePickerPage({ config }: { config: GooglePickerConfig }) {
       <button type="button" className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50"
         disabled={!picker || !target || busy} onClick={() => void select()}>{t("chat.attachGoogleDrive")}</button>
       {target && <button type="button" className="rounded-lg border border-zinc-400 px-4 py-2 text-sm"
-        onClick={() => window.location.replace(callback().href)}>{t("auth.cancel")}</button>}
+        onClick={() => leave(callback())}>{t("auth.cancel")}</button>}
     </div>
   </main>;
 }

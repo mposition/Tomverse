@@ -522,7 +522,7 @@ export async function handleNativeGeneration(
         }
         const idempotencyKeyDigest = idempotencyHeader ? sha256Hex(idempotencyHeader) : null;
         if (idempotencyKeyDigest) {
-            const replay = await idempotentReplay(key.keyId, idempotencyKeyDigest, requestDigest, render);
+            const replay = await idempotentReplay({ keyId: key.keyId }, idempotencyKeyDigest, requestDigest, render);
             if (replay) return replay;
         }
 
@@ -599,7 +599,7 @@ export async function handleNativeGeneration(
                 source: "external_api",
                 withinReservationTransaction: externalApiAdmissionHook({
                     requestId,
-                    keyId: key.keyId,
+                    credential: { keyId: key.keyId },
                     userId: key.userId,
                     modelId: model.id,
                     stream: prepared.stream,
@@ -623,7 +623,7 @@ export async function handleNativeGeneration(
             // A twin of a request already recorded under this key gets its
             // receipt, and does not pause the key's router calls.
             if (idempotencyKeyDigest && (isChatAccessError(error) || error instanceof ApiSecurityError)) {
-                const replay = await idempotentReplay(key.keyId, idempotencyKeyDigest, requestDigest, render);
+                const replay = await idempotentReplay({ keyId: key.keyId }, idempotencyKeyDigest, requestDigest, render);
                 if (replay) return replay;
             }
             // As on Chat Completions: no router call for this key for a while.

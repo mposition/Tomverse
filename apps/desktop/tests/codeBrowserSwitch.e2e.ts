@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { fileURLToPath } from "node:url";
 import { _electron as electron, expect } from "@playwright/test";
 import { FakeGateway, fixtureWorkAnalysis, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
@@ -51,8 +52,8 @@ test("the browser panel needs no fixture flag, the agent's browser tools are the
   const app = await electron.launch({ executablePath: electronPath, args: [desktopDir, "--desktop-fixture", descriptor], timeout: 20_000 });
   try {
     const page = await app.firstWindow();
-    await page.getByRole("button", { name: "Open local folder" }).click();
-    await page.getByLabel("Code mode").selectOption("agent");
+    await openCodeProject(page);
+    await selectCodeMode(page, "agent");
 
     // The panel is there and shows a local page, with the agent's tools still off.
     assert.equal((await page.evaluate(() => window.desktop.state())).codeBrowserAgent, false);

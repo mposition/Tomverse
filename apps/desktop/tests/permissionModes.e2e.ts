@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,11 +21,10 @@ test("permission modes: read-only refuses a change, Allow all asks first and sta
   const previousHome = process.env.TOMVERSE_HOME;
   const gateway = await new FakeGateway({
     script(body, index) {
-      if (index === 0) return fixtureInitialWorkPlan;
-      if (index === 1) return patch("before", "after");
-      if (index === 2) return { text: "Read-only: nothing was changed." };
-      if (index === 3) return fixtureInitialWorkPlan;
-      if (index === 4) return patch("before", "everything");
+      // Read only is a read-and-answer task: no work plan and no file tools are offered, so the change cannot even be proposed.
+      if (index === 0) return { text: "Read-only: nothing was changed." };
+      if (index === 1) return fixtureInitialWorkPlan;
+      if (index === 2) return patch("before", "everything");
       return { text: "Allow all: the change was made." };
     },
   }).start();
@@ -37,8 +37,8 @@ test("permission modes: read-only refuses a change, Allow all asks first and sta
     await writeFile(descriptor, JSON.stringify({ root, profile, endpoint: gateway.base, key: TEST_KEY }));
     app = await launchNativeFixture(descriptor);
     const page: Page = await app.firstWindow();
-    await page.getByRole("button", { name: "Open local folder" }).click();
-    await page.getByLabel("Code mode").selectOption("agent");
+    await openCodeProject(page);
+    await selectCodeMode(page, "agent");
 
     const openPermissions = async () => {
       await page.getByRole("button", { name: "Desktop settings" }).click();
@@ -53,7 +53,6 @@ test("permission modes: read-only refuses a change, Allow all asks first and sta
     // The default is to ask, and the screen says nothing extra.
     await openPermissions();
     await expect(page.getByRole("radio", { name: /^Ask each time/ })).toBeChecked();
-    await expect(page.getByTestId("permission-mode-badge")).toHaveCount(0);
 
     // Read-only: the change is refused without an approval window, and the model is told.
     await page.getByRole("radio", { name: /^Read only/ }).check();
@@ -62,8 +61,8 @@ test("permission modes: read-only refuses a change, Allow all asks first and sta
     await sendRequest("Change the sample file");
     await expect(page.getByText("Read-only: nothing was changed.", { exact: true })).toBeVisible();
     assert.equal(await readFile(join(root, "sample.txt"), "utf8"), "before\n");
-    const refused = (gateway.completions[2]?.body.messages as Array<{ role: string; content: unknown }>).filter(({ role }) => role === "tool").at(-1)?.content;
-    assert.match(String(refused), /Read-only mode/);
+    assert.equal((await page.evaluate(() => window.desktop.state())).task?.readOnly, true);
+    assert.doesNotMatch(JSON.stringify(gateway.completions[0]?.body.tools ?? []), /apply_patch|run_command/, "a Read only request is not offered the tools that change files or run commands");
 
     // A rule is added from settings and saved in the CLI's user folder.
     await openPermissions();
@@ -87,7 +86,7 @@ test("permission modes: read-only refuses a change, Allow all asks first and sta
     await page.getByRole("alertdialog").getByRole("button", { name: "Allow all", exact: true }).click();
     await expect(page.getByRole("radio", { name: /^Allow all/ })).toBeChecked();
     await closeSettings();
-    await expect(page.getByTestId("permission-mode-badge")).toHaveText("Allow all is on");
+    await expect(page.getByTestId("permission-picker")).toContainText("Allow all is on");
 
     // With Allow all the change goes ahead with no approval window.
     await sendRequest("Change the sample file again");

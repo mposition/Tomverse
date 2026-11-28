@@ -605,6 +605,8 @@ export const ko = {
         locationErrordenied: "위치 권한이 거부되었습니다. 브라우저나 기기 설정에서 허용한 뒤 다시 시도해 주세요.",
         locationErrortimeout: "위치 확인 시간이 초과되어 위치 없이 대화를 계속합니다. + 도구에서 다시 시도할 수 있습니다.",
         locationErrorunavailable: "현재 위치를 확인할 수 없어 위치 없이 대화를 계속합니다. 장소를 직접 입력해도 됩니다.",
+        locationWindowsOff: "Windows 위치가 꺼져 있어 현재 위치를 확인할 수 없습니다. 장소를 직접 입력해도 됩니다.",
+        locationOpenWindowsSettings: "Windows 위치 설정 열기",
         toolsWebSearchOffDescription: "웹을 검색하지 않고 답합니다.",
         toolsWebSearchOnDescription: "최신 정보나 출처가 필요하면 자동으로 웹을 검색합니다.",
         toolsWebSearchCostNote: "검색이 실행된 모델마다 {credits}크레딧이 추가됩니다. 검색하지 않으면 추가 크레딧이 없습니다.",

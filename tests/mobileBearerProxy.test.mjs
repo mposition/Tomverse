@@ -114,6 +114,41 @@ test("Desktop read tokens reach shared routes while native Chat and parity are e
   }
 });
 
+test("Desktop Code's session is verified at the edge on the engine's coding paths, and a key request is untouched", async () => {
+  const flags = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_CODE_SESSION_ENABLED"];
+  const originalFlags = flags.map((name) => process.env[name]);
+  for (const name of flags) process.env[name] = "true";
+  try {
+    const desktop = { origin: DESKTOP_APP_ORIGIN, authorization: validBearer("desktop-code") };
+    const key = { authorization: "Bearer tvk_abcdefgh_" + "A".repeat(43) };
+    const calls = [["GET", "/api/code/v1/models"], ["GET", "/api/code/v1/usage"], ["GET", "/api/code/v1/requests/status"],
+      ["POST", "/api/code/v1/chat/completions"], ["POST", "/api/code/v1/web-search"]];
+    for (const [method, path] of calls) {
+      const url = "https://tomverse.app" + path;
+      const send = (headers) => (method === "GET" ? get(headers, url) : post(headers, url));
+      const allowed = await send(desktop);
+      assert.equal(allowed.headers.get("x-middleware-next"), "1", path);
+      assert.equal(allowed.headers.get("x-middleware-request-authorization"), desktop.authorization, path);
+      // Only the Code token: the Desktop session token itself, a mobile token, a broken bearer or a cookie beside it is refused.
+      assert.equal((await send({ ...desktop, authorization: validBearer("desktop") })).status, 401, path);
+      assert.equal((await send({ ...desktop, authorization: validBearer() })).status, 401, path);
+      assert.equal((await send({ ...desktop, authorization: "Bearer not-a-token" })).status, 401, path);
+      assert.equal((await send({ ...desktop, cookie: "session=synthetic" })).status, 401, path);
+      // A key request (no Desktop origin) is not read as a session here; the route checks the key as before.
+      assert.equal((await send(key)).headers.get("x-middleware-next"), "1", path);
+    }
+    // And the Code token reaches no other Desktop route: it is useless for Chat, history or capabilities.
+    for (const path of ["/api/conversations", "/api/products/chat/capabilities"]) {
+      assert.equal((await get(desktop, "https://tomverse.app" + path)).status, 401, path);
+    }
+  } finally {
+    flags.forEach((name, index) => {
+      if (originalFlags[index] === undefined) delete process.env[name];
+      else process.env[name] = originalFlags[index];
+    });
+  }
+});
+
 // --- 1. a bearer header never buys anything by existing ------------------
 
 test("a bearer header does not skip the mutation-origin check", async () => {

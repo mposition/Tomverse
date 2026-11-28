@@ -51,6 +51,11 @@ type Copy = {
   tool: string;
   pattern: string;
   scope: string;
+  composerLabel: string;
+  appliesNext: string;
+  apiOnly: string;
+  projectRemembered: string;
+  readOnlyRoute: string;
 };
 
 export const desktopPermissionsCopy = {
@@ -80,6 +85,9 @@ export const desktopPermissionsCopy = {
     trustApply: "Apply these rules", trustRevoke: "Stop applying this project's allow rules",
     saveFailed: "The change could not be saved.", problems: "A rules file has a problem",
     newRule: "New rule", effect: "Effect", tool: "Applies to", pattern: "Pattern", scope: "Where",
+    composerLabel: "Permissions", appliesNext: "From the next tool call of the running task.", apiOnly: "Only when Code uses the Tomverse API.",
+    projectRemembered: "Saved for this project and used by its next conversations.",
+    readOnlyRoute: "This provider route can only read for now.",
   },
   ko: {
     modeHeading: "권한 모드",
@@ -107,6 +115,9 @@ export const desktopPermissionsCopy = {
     trustApply: "이 규칙 적용", trustRevoke: "이 프로젝트의 허용 규칙 적용 중단",
     saveFailed: "변경을 저장하지 못했습니다.", problems: "규칙 파일에 문제가 있습니다",
     newRule: "새 규칙", effect: "동작", tool: "대상", pattern: "패턴", scope: "범위",
+    composerLabel: "권한", appliesNext: "실행 중인 작업에서는 다음 도구 호출부터 적용됩니다.", apiOnly: "Code가 Tomverse API를 쓸 때만 고를 수 있습니다.",
+    projectRemembered: "이 프로젝트에 저장되어 다음 대화에도 쓰입니다.",
+    readOnlyRoute: "이 공급자 경로는 지금은 읽기만 할 수 있습니다.",
   },
   zh: {
     modeHeading: "权限模式",
@@ -134,6 +145,9 @@ export const desktopPermissionsCopy = {
     trustApply: "应用这些规则", trustRevoke: "停止应用此项目的允许规则",
     saveFailed: "无法保存更改。", problems: "规则文件有问题",
     newRule: "新规则", effect: "操作", tool: "适用于", pattern: "模式", scope: "范围",
+    composerLabel: "权限", appliesNext: "对正在运行的任务，从下一次工具调用起生效。", apiOnly: "仅在 Code 使用 Tomverse API 时可选。",
+    projectRemembered: "已为此项目保存，下次对话将沿用。",
+    readOnlyRoute: "此提供方路径目前只能读取。",
   },
   "zh-Hant": {
     modeHeading: "權限模式",
@@ -161,6 +175,9 @@ export const desktopPermissionsCopy = {
     trustApply: "套用這些規則", trustRevoke: "停止套用此專案的允許規則",
     saveFailed: "無法儲存變更。", problems: "規則檔案有問題",
     newRule: "新規則", effect: "操作", tool: "適用於", pattern: "模式", scope: "範圍",
+    composerLabel: "權限", appliesNext: "對執行中的任務，從下一次工具呼叫起生效。", apiOnly: "僅在 Code 使用 Tomverse API 時可選。",
+    projectRemembered: "已為此專案儲存，下次對話將沿用。",
+    readOnlyRoute: "此供應商路徑目前只能讀取。",
   },
   fr: {
     modeHeading: "Mode d'autorisation",
@@ -188,6 +205,9 @@ export const desktopPermissionsCopy = {
     trustApply: "Appliquer ces règles", trustRevoke: "Ne plus appliquer les règles d'autorisation de ce projet",
     saveFailed: "La modification n'a pas pu être enregistrée.", problems: "Un fichier de règles pose problème",
     newRule: "Nouvelle règle", effect: "Effet", tool: "S'applique à", pattern: "Motif", scope: "Portée",
+    composerLabel: "Autorisations", appliesNext: "Pour une tâche en cours, à partir du prochain appel d’outil.", apiOnly: "Disponible seulement quand Code utilise l’API Tomverse.",
+    projectRemembered: "Enregistré pour ce projet et repris par ses prochaines conversations.",
+    readOnlyRoute: "Cette voie de fournisseur ne peut que lire pour l’instant.",
   },
   de: {
     modeHeading: "Berechtigungsmodus",
@@ -215,6 +235,9 @@ export const desktopPermissionsCopy = {
     trustApply: "Diese Regeln anwenden", trustRevoke: "Erlauben-Regeln dieses Projekts nicht mehr anwenden",
     saveFailed: "Die Änderung konnte nicht gespeichert werden.", problems: "Eine Regeldatei hat ein Problem",
     newRule: "Neue Regel", effect: "Wirkung", tool: "Gilt für", pattern: "Muster", scope: "Bereich",
+    composerLabel: "Berechtigungen", appliesNext: "Bei einer laufenden Aufgabe ab dem nächsten Werkzeugaufruf.", apiOnly: "Nur wählbar, wenn Code die Tomverse-API nutzt.",
+    projectRemembered: "Für dieses Projekt gespeichert und in seinen nächsten Unterhaltungen verwendet.",
+    readOnlyRoute: "Diese Anbieterroute kann derzeit nur lesen.",
   },
   es: {
     modeHeading: "Modo de permisos",
@@ -242,6 +265,9 @@ export const desktopPermissionsCopy = {
     trustApply: "Aplicar estas reglas", trustRevoke: "Dejar de aplicar las reglas de permitir de este proyecto",
     saveFailed: "No se pudo guardar el cambio.", problems: "Un archivo de reglas tiene un problema",
     newRule: "Nueva regla", effect: "Efecto", tool: "Se aplica a", pattern: "Patrón", scope: "Ámbito",
+    composerLabel: "Permisos", appliesNext: "En una tarea en curso, desde la siguiente llamada a una herramienta.", apiOnly: "Solo disponible cuando Code usa la API de Tomverse.",
+    projectRemembered: "Se guarda para este proyecto y lo usan sus próximas conversaciones.",
+    readOnlyRoute: "Esta ruta de proveedor solo puede leer por ahora.",
   },
   pt: {
     modeHeading: "Modo de permissões",
@@ -269,5 +295,8 @@ export const desktopPermissionsCopy = {
     trustApply: "Aplicar estas regras", trustRevoke: "Parar de aplicar as regras de permitir deste projeto",
     saveFailed: "Não foi possível salvar a alteração.", problems: "Um arquivo de regras tem um problema",
     newRule: "Nova regra", effect: "Efeito", tool: "Vale para", pattern: "Padrão", scope: "Escopo",
+    composerLabel: "Permissões", appliesNext: "Numa tarefa em execução, a partir da próxima chamada de ferramenta.", apiOnly: "Disponível apenas quando o Code usa a API da Tomverse.",
+    projectRemembered: "Guardado para este projeto e usado nas suas próximas conversas.",
+    readOnlyRoute: "Esta via de fornecedor só pode ler por agora.",
   },
 } as const satisfies Record<Language, Copy>;

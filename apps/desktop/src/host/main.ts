@@ -1,4 +1,4 @@
-import { selectDriveFiles } from "./drive-picker";
+import { DriveSelectionTimeout, selectDriveFiles } from "./drive-picker";
 import { desktopResearchAnswerId } from "../../../../lib/desktopResearchAnswerId";
 import { DEEP_RESEARCH_MODEL_ID } from "../../../../lib/deepResearchModel";
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Notification, powerMonitor, protocol, safeStorage, screen, session, shell, utilityProcess } from "electron";
@@ -9,15 +9,19 @@ import { dictationClip } from "../dictation-contract";
 import { voiceRequestInput } from "../voice-contract";
 import { createVoiceHost } from "./voice-host";
 import { createCodeBrowserView } from "./code-browser-view";
+import { admitTypedAddress, browserProfile } from "./code-browser-policy";
+import { flushBrowserProfiles, openBrowserProfile } from "./code-browser-profile";
 import { createBrowserAgentBridge } from "./browser-agent-bridge";
 import { pictureFor } from "./browser-pick-store";
 import { createDesktopComputer } from "./computer-wiring";
 import { createFixtureBackend } from "./computer-fixture-backend";
 import type { ComputerBackend } from "./computer-backend";
 import { createWebViewHost } from "./web-view-host";
-import { browserCommand, classifyBrowserAddress, MAX_CODE_BROWSER_TABS, type BrowserState } from "../browser-contract";
+import { browserCommand, classifyBrowserAddress, MAX_CODE_BROWSER_TABS, type BrowserKind, type BrowserState } from "../browser-contract";
 import { createAccountSettingsApi } from "./account-settings-api";
 import { createConnectorApi } from "./connector-api";
+import { createPluginCatalog } from "./plugin-catalog";
+import { PLUGIN_LOGO_ROUTE } from "../plugin-catalog-contract";
 import { openConnectorOAuthWindow } from "./connector-oauth-window";
 import { connectorInput } from "../connector-contract";
 import { desktopConnectorCopy } from "../../../../locales/desktopConnectors";
@@ -42,7 +46,7 @@ import { createCloudExecutionClient } from "./cloud-execution-client";
 import { createCloudExecutionHost, type CloudExecutionHost, type CloudProject } from "./cloud-execution-host";
 import { createCloudOriginStore, type CloudOriginStore } from "./cloud-origins";
 import { createBillingWindowHost } from "./billing-window";
-import { desktopBillingInput, type BillingState } from "../billing-contract";
+import { desktopBillingInput, isTomverseUrl, type BillingState } from "../billing-contract";
 import { desktopBillingCopy } from "../../../../locales/desktopBilling";
 import { solveEmailLoginChallenge } from "./login-challenge";
 import { desktopIdentityProvider, desktopLoginEmail, type DesktopEmailResult, type DesktopLoginEmail } from "../login-contract";
@@ -50,7 +54,9 @@ import { link, open, readFile, realpath, unlink } from "node:fs/promises";
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
+import { execFile } from "node:child_process";
 import { z } from "zod";
+import { readOsLocationStatus, WINDOWS_LOCATION_SETTINGS_URI, type OsLocationStatus } from "./os-location";
 import { Journal, deleteSession, listSessions, Workspace, writeFileAtomic } from "../../../tomverse-cli/src/runtime.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
 import { permissionCommand } from "../permission-contract";
@@ -62,11 +68,14 @@ import { codePermissionProfile, codeReferenceKind, codeReferencePath, decisions,
   type Decision, type ForkTurnResult, type RecoveryResult, type RewindTurnResult, type Snapshot, type Task, type UndoChangeResult, type WorkspaceHandoff, type WorkspaceHandoffInput } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, cliFilePath, cliPathInput, cliProvider, cliProviders, cliUsesInstallationFolder, cliUsesReleaseArchive, codexFixtureExecution, codeExecutionMode, codeRouteFor, isCliProtocolProvider, kimiFixtureExecution, qwenFixtureExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, supportsIsolatedCliAccount, tomverseApiExecution, unknownCliAccount,
   type NativeFixtureProvider,
-  type CliPaths, type CliProtocolCheck, type CliProvider, type CodeExecutionMode, type SavedCliPath } from "../code-execution";
+  type CliLoginOpen, type CliPathCheck, type CliPaths, type CliProtocolCheck, type CliProvider, type CodeExecutionMode, type SavedCliPath } from "../code-execution";
 import { codeFallbackModelAvailable, codeCliContinuation, codeContinuation, codeFallbackSettings, codeFallbackUpdate, defaultCodeFallbackSettings, updateCodeFallbackSettings,
   type CodeCliContinuation, type CodeFallbackSettings, type CodeFallbackUpdate } from "../code-fallback";
 import { desktopProviderCliCopy } from "../../../../locales/desktopProviderCli";
-import { cliPathStillMatches, inspectCliPath, releaseArchiveName, supportsCliPath, watchVerifiedCliPath } from "./provider-cli-path";
+import { desktopProviderCliScanCopy } from "../../../../locales/desktopProviderCliScan";
+import { cliPathStillMatches, inspectCliPath, releaseArchiveName, supportsCliPath, applyCliReleaseFixture, watchVerifiedCliPath } from "./provider-cli-path";
+import { createProviderCliHost } from "./provider-cli-host";
+import { loginShellKind } from "./provider-cli-login";
 import { probeIsolatedClaudeAccount } from "./claude-account";
 import { probeIsolatedAcpAccount, probeIsolatedCliProtocol, probeIsolatedCodexAccount } from "./cli-protocol";
 import {
@@ -86,7 +95,7 @@ import { same } from "../../../tomverse-cli/src/runtime.js";
 import { createRequire } from "node:module";
 import { TerminalHost } from "./terminal-host";
 import { createTerminalApi } from "./terminal-api";
-import { createTerminalLaunch } from "./terminal-session";
+import { createTerminalLaunch, defaultShell } from "./terminal-session";
 import { terminalEnv } from "./terminal-env";
 import { codeMemoryView } from "./code-memory";
 import { createReviewActions, type ReviewTarget } from "./review-host";
@@ -96,6 +105,9 @@ import { localExtensionsCommand } from "../local-extensions-contract";
 import { codeSandboxInput } from "../code-sandbox-contract";
 import { codeSandboxView, readCodeSandboxSettings } from "./code-sandbox";
 import { remoteProjectInput } from "../remote-contract";
+import { createCodeProjectHost, runWslList } from "./code-project-host";
+import { codeProjectFile, foldersFromHistory } from "./code-project-store";
+import { desktopCodeProjectsCopy } from "../../../../locales/desktopCodeProjects";
 import { createRemoteProjectHost } from "./remote-project-host";
 import { isRemoteShadow, setRemoteShadowBase, sshEnvironmentForRuntime, sshRunnerFor } from "./remote-project";
 import type { SandboxFacts } from "../schedule-policy";
@@ -125,7 +137,8 @@ import {
 import { createCodeKeyVault, createSessionVault, type StorageMode, type StoredDesktopSession } from "./session-vault";
 import { readDesktopCapabilities } from "./desktop-capabilities";
 import { prepareRefinedTurn, refinerEligible, type RefinerAttempt } from "./prompt-refiner";
-import { CodeKeyRefused, readCopiedCodeKey, verifyCodeKey } from "./code-key";
+import { CodeKeyRefused, readCopiedCodeKey, requestCodeToken, verifyCodeKey } from "./code-key";
+import { codeSessionConnection } from "./code-session";
 import { DESKTOP_LIVE_ORIGIN, type DesktopIdentityProvider } from "../../../../lib/desktopAuthContract";
 import { DESKTOP_APP_ORIGIN } from "../../../../lib/desktopReadApiContract";
 import { DesktopChatContextChanged, desktopChatApi } from "./chat-api";
@@ -134,7 +147,10 @@ import { CHAT_MAX_MESSAGE_CHARACTERS } from "../../../../lib/chatRequestLimits";
 import { imageRequest } from "../images-contract";
 import { imageDownloadExtension, imageDownloadFilename } from "../../../../lib/imageAssetDownload";
 import { IMAGE_QUALITY_BY_PRESET } from "../../../../lib/imageGenerationPricing";
-import { attachmentBytesInput, driveImportInput, type AttachmentBytesInput, type AttachmentUpload, type DriveImportInput } from "../attachment-contract";
+import {
+  attachmentBytesInput, driveImportInput, type AttachmentBytesInput, type AttachmentPhaseEvent, type AttachmentUpload, type DriveImportInput,
+  type DriveImportResult,
+} from "../attachment-contract";
 import { CHAT_MAX_TOTAL_ATTACHMENT_BYTES } from "../../../../lib/chatAttachmentLimits";
 import { requireArtifactFormat, sanitizeArtifactFilename } from "../../../../lib/generatedArtifactCore";
 import { isLanguage, SUPPORTED_LANGUAGES, type Language } from "../../../../lib/language";
@@ -183,10 +199,17 @@ const fixtureSchema = z.object({
   browserInspection: z.boolean().optional(),
   /** A test chooses this folder where the Plugins screen would open a folder dialog. */
   pluginFolder: z.string().min(1).optional(),
+  /** Folders a test picks, one per folder dialog of the project picker (the fixture root when none is left), and where a new folder is made. */
+  projectFolders: z.array(z.string().min(1)).max(16).optional(),
+  projectParent: z.string().min(1).optional(),
+  /** Distributions `wsl.exe -l -q` would list. */
+  wslDistributions: z.array(z.string().min(1).max(100)).max(8).optional(),
   /** A test chooses this zip file where the Plugins screen would open a file dialog, and plays the server's plugin-sources switch. */
   pluginZip: z.string().min(1).optional(),
   pluginSources: z.boolean().optional(),
   browserAgent: z.boolean().optional(),
+  /** A test names the folder a browser-panel download is saved in, where the system's save dialog would ask (no test clicks a native dialog). */
+  browserDownloads: z.string().min(1).optional(),
   /** A test lets the agent open public https sites (the person's second browser switch). */
   browserWeb: z.boolean().optional(),
   /** A test runs the computer tools against a fake desktop (two windows and a picture). */
@@ -238,7 +261,8 @@ function readFixture() {
         isAbsolute(child) || !statSync(canonical).isDirectory()) throw new Error("Desktop fixtures require temporary folders.");
     return canonical;
   }
-  return { ...descriptor, root: temporaryDirectory(descriptor.root), profile: temporaryDirectory(descriptor.profile) };
+  return { ...descriptor, root: temporaryDirectory(descriptor.root), profile: temporaryDirectory(descriptor.profile),
+    projectFolders: descriptor.projectFolders?.map(temporaryDirectory), projectParent: descriptor.projectParent ? temporaryDirectory(descriptor.projectParent) : undefined };
 }
 if (fixture) app.setPath("userData", fixture.profile);
 
@@ -247,6 +271,8 @@ let loginWindow: BrowserWindow | null = null;
 let accountWindowsReady = false;
 let approvalWindow: BrowserWindow | null = null;
 let worker: Electron.UtilityProcess | null = null;
+/** Every Code runtime process alive now (the open task's and each parallel lane's): each hears the Desktop session's token. */
+const codeRuntimes = new Set<Electron.UtilityProcess>();
 let runId: string | null = null;
 let discardedRunId: string | null = null;
 let pendingFollowUp: { requestId: string; resolve: (queued: boolean) => void } | null = null;
@@ -300,8 +326,19 @@ let chatTurn: AbortController | null = null;
 let attachmentTransfer: { requestId: string; controller: AbortController } | null = null;
 const attachmentReceipts = new Map<string, AttachmentUpload>();
 let linkedCode: { accountId: string; connection: Connection } | null = null;
+/**
+ * The short Code token of the session connection (host/code-key.ts requestCodeToken): what the Code runtimes carry.
+ * The Desktop session token itself never leaves the main process.
+ */
+let codeToken: { accountId: string; token: string; expiresAt: number } | null = null;
+let codeTokenRequest: Promise<boolean> | null = null;
 let linkAttempt: AbortController | null = null;
 let catalogRequest: string | null = null;
+// Tests give a stand-in CLI a pinned release of its own. Packaged builds drop this branch.
+if (DESKTOP_FIXTURE_ALLOWED && process.env.TOMVERSE_DESKTOP_CLI_RELEASE_FIXTURE) {
+  applyCliReleaseFixture(z.partialRecord(cliProvider, z.object({ version: z.string().min(1), bytes: z.number().int().positive(), sha256: z.string().regex(/^[0-9a-f]{64}$/) }))
+    .parse(JSON.parse(process.env.TOMVERSE_DESKTOP_CLI_RELEASE_FIXTURE)));
+}
 const state: Snapshot = {
   root: null, project: null, draftNamespace: null, handoff: null, models: [], task: null, history: [], moreHistory: false, busy: false,
   localFixture: fixture !== null, version: app.getVersion(), language: null, update: { stage: "unavailable" },
@@ -520,6 +557,7 @@ function broadcast() {
   state.codeTerminal = { available: terminalProjectOpen(), enabled: codeTerminalEnabled };
   state.remote = remoteHost.snapshot();
   state.remoteEnabled = remoteHost.enabled();
+  state.codeProjects = codeProjectHost.view();
   // A task that was deleted or left behind (another project or account, or a session-only task) takes its terminals with it.
   void terminalHost.retainTasks(new Set([...historyStorage.keys(), ...(state.task?.id ? [state.task.id] : [])]));
   state.dictationAvailable = dictationAllowed();
@@ -642,18 +680,24 @@ async function saveCliPath({ provider, path }: z.infer<typeof cliPathInput>) {
   let saved: SavedCliPath | undefined;
   let changed = false;
   try {
-    let inspection = await inspectCliPath(provider, path);
-    if (inspection.status === "pathVerified") {
+    let inspection: Awaited<ReturnType<typeof inspectCliPath>> | { status: "userTrusted"; file: string; fileStamp: string } = await inspectCliPath(provider, path);
+    if (inspection.status === "versionUnverified") {
+      // A file the person trusted stays usable while it is exactly the file they trusted.
+      const trusted = await providerCli.trustedFile(provider, path);
+      if (trusted) inspection = { status: "userTrusted", ...trusted };
+    }
+    if (inspection.status === "pathVerified" || inspection.status === "userTrusted") {
       watching = watchVerifiedCliPath(provider, path, inspection.file, () => {
         changed = true;
         if (saved) invalidateCliPath(provider, saved);
       });
       if (!await cliPathStillMatches(provider, path, inspection) || changed) inspection = { status: "checkFailed" };
     }
-    const result = inspection.status === "pathVerified" ? { status: inspection.status, version: inspection.version } : inspection;
+    const result: CliPathCheck = inspection.status === "pathVerified" ? { status: inspection.status, version: inspection.version }
+      : inspection.status === "userTrusted" ? { status: "userTrusted" } : inspection;
     if (closing) return { status: "checkFailed" } as const;
-    if (result.status === "pathVerified" || result.status === "versionUnverified") {
-      saved = result.status === "pathVerified" ? { path, ...result } : { path, status: "versionUnverified" };
+    if (result.status === "pathVerified" || result.status === "versionUnverified" || result.status === "userTrusted") {
+      saved = result.status === "pathVerified" ? { path, ...result } : { path, status: result.status };
       delete state.codeFallbackCliModels[provider];
       writeCliPaths({ ...state.cliPaths, [provider]: saved });
       if (watching) {
@@ -669,6 +713,23 @@ async function saveCliPath({ provider, path }: z.infer<typeof cliPathInput>) {
     watching?.();
     configuringCli = false;
   }
+}
+
+// Trusting records the exact file first, then saves it like any other path: the save finds the record and keeps the file usable.
+async function trustCliPath({ provider, path }: z.infer<typeof cliPathInput>) {
+  const window = mainWindow;
+  if (!window || window.isDestroyed() || configuringCli || closing) throw new Error("The CLI settings are busy.");
+  configuringCli = true;
+  let outcome: Awaited<ReturnType<typeof providerCli.trust>>;
+  try {
+    // The person's own answer, asked by the app and not by the window: a window cannot trust a file for them.
+    const copy = desktopProviderCliScanCopy[state.language ?? "en"];
+    const answer = await dialog.showMessageBox(window, { type: "question", title: copy.trustAndUse, message: copy.trustDetail, detail: path,
+      buttons: [copy.trustAndUse, copy.cancel], defaultId: 1, cancelId: 1, noLink: true });
+    if (answer.response !== 0 || closing) return { status: "versionUnverified" } as const;
+    outcome = await providerCli.trust(provider, path);
+  } finally { configuringCli = false; }
+  return outcome === "stored" || outcome === "verified" ? saveCliPath({ provider, path }) : outcome;
 }
 
 function removeCliPath(provider: CliProvider) {
@@ -849,7 +910,7 @@ async function confirmWorkspaceHandoff(input: WorkspaceHandoffInput): Promise<Wo
 
   confirmingHandoff = true;
   try {
-    if (!projectRoot && input.target === "code") await chooseRoot();
+    if (!projectRoot && input.target === "code") await codeProjectHost.run({ action: "add-existing" });
     const project = projectRoot;
     const scope = currentHistoryScope();
     if (!project || !scope || session.aborted || connection !== codeConnection() || owner !== mainWindow || owner.isDestroyed()) return null;
@@ -1163,7 +1224,7 @@ function onWorkerMessage(event: WorkerEvent) {
     catalogRequest = null;
     canRestartWorker = true;
     state.models = event.type === "catalog" ? event.models : [];
-    state.codeCatalog = event.type === "catalog" ? "ready" : "failed";
+    state.codeCatalog = event.type === "catalog" ? "ready" : event.reason === "plan" ? "planRequired" : "failed";
   } else if (event.runId === runId) {
     const discarded = event.runId === discardedRunId;
     if (discarded && event.type !== "finished") return;
@@ -1217,7 +1278,8 @@ function onWorkerMessage(event: WorkerEvent) {
       refreshHistory();
       if (!discarded) void pullLinker.flush(event.task.id);
       if (!discarded) notifyCodeResult(event.task.status);
-      if (discarded && browserSession && !linkedCode && !fixture) void restoreCodeKey(browserSession);
+      // A Code connection change that waited for this task (or the discarded task's own account clear) happens now.
+      if (browserSession && !fixture && ((discarded && !linkedCode) || codeConnectionSwitchPending())) syncCodeConnection(browserSession);
       if (closing) app.quit();
     } else {
       const task = activeContinuation ? continuationView(activeContinuation, event.task)
@@ -1406,6 +1468,11 @@ async function chooseRemote(project: ProjectRoot) {
     if (state.root !== project.path || projectRoot?.identity !== project.identity) {
       codeReferences.clear();
       workspaceHandoff = null;
+      // Allow all never follows the person to another project, a remote one included.
+      if (permissionHost.current === "allow_all" && permissionHost.run({ action: "set-mode", mode: "ask" }).ok) {
+        worker?.postMessage(permissionHost.runtimeMessage());
+        parallel.permissionChanged();
+      }
     }
     projectRoot = project;
     codeGitProject = null;
@@ -1422,16 +1489,190 @@ async function chooseRemote(project: ProjectRoot) {
   }
 }
 
+function codeProjectOwner() {
+  const connection = codeConnection();
+  return connection && linkedCode?.connection === connection ? linkedCode.accountId : browserSession?.accountId ?? null;
+}
+
+/** The register of Code projects (Desktop > Code > project picker): per account, on this computer only. */
+const codeProjectHost = createCodeProjectHost({
+  file: () => {
+    const owner = codeProjectOwner();
+    return owner || fixture ? codeProjectFile(app.getPath("userData"), owner) : null;
+  },
+  now: () => Date.now(),
+  newId: () => randomUUID(),
+  canChange: () => !state.busy && !pendingMutation && !choosing && !closing && !signingOut && !suspended,
+  pickFolder: async (kind) => {
+    if (fixture) return kind === "parent" ? fixture.projectParent ?? fixture.root : fixture.projectFolders?.shift() ?? fixture.root;
+    if (!mainWindow) return null;
+    const copy = desktopCodeProjectsCopy[state.language ?? "en"];
+    const picked = await dialog.showOpenDialog(mainWindow, {
+      title: kind === "parent" ? copy.dialogParent : kind === "relocate" ? copy.dialogRelocate : copy.dialogExisting,
+      properties: kind === "parent" ? ["openDirectory", "createDirectory"] : ["openDirectory"],
+    });
+    return picked.filePaths[0] ?? null;
+  },
+  open: (folder) => chooseRoot(folder),
+  current: () => (projectRoot && !projectRoot.remote ? projectRoot.path : null),
+  permission: () => permissionHost.current,
+  setPermission: (mode) => {
+    if (permissionHost.run({ action: "set-mode", mode }).ok) {
+      worker?.postMessage(permissionHost.runtimeMessage());
+      parallel.permissionChanged();
+    }
+  },
+  historyFolders: () => {
+    const connection = codeConnection();
+    if (!connection) return null;
+    const owner = linkedCode?.connection === connection ? linkedCode.accountId : null;
+    return foldersFromHistory(app.getPath("userData"), (folder) => {
+      const scope = codeHistoryScope(app.getPath("userData"), owner, bindProjectRoot(folder), connection);
+      return [scope.home, scope.legacyHome];
+    });
+  },
+  wslList: async () => (fixture?.wslDistributions ? new TextEncoder().encode(fixture.wslDistributions.join("\n")) : runWslList()),
+  platform: process.platform,
+  changed: () => broadcast(),
+});
+
 /** One Code runtime process. The open task and every task that runs next to it each get one of their own. */
 function forkRunner() {
   const env = Object.fromEntries(Object.entries(process.env).filter(([name, value]) =>
     value !== undefined && /^(PATH|PATHEXT|SYSTEMROOT|WINDIR|TEMP|TMP|TMPDIR|LANG|LC_ALL)$/i.test(name),
   )) as Record<string, string>;
-  return utilityProcess.fork(join(__dirname, "runner-process.cjs"), [], {
+  const child = utilityProcess.fork(join(__dirname, "runner-process.cjs"), [], {
     env: { ...env, TOMVERSE_DESKTOP_PROJECT_LOCKS: codeProjectLocks(), TOMVERSE_DESKTOP_CODE_MEMORY: codeMemoryDirectory(), ...extensionWorkerEnv(),
       TOMVERSE_DESKTOP_GIT_AGENT_SWITCH: gitIntegration.switchFile, TOMVERSE_DESKTOP_CODE_SANDBOX: codeSandboxDirectory(), ...remoteWorkerEnvironment() },
     stdio: "ignore", serviceName: "Tomverse Code Runtime",
   });
+  // The Desktop session's token reaches a runtime only as a message, before any task: never its environment (above).
+  codeRuntimes.add(child);
+  child.once("exit", () => codeRuntimes.delete(child));
+  child.postMessage(codeSessionMessage());
+  return child;
+}
+
+/**
+ * What every Code runtime is told about the Desktop session (host/code-session.ts): the token in force for the
+ * session connection's identity, or null -- signed out, signing out, expired, another account, or no session
+ * connection at all. Sent on every renewal and every change, so a runtime never keeps a token the app has dropped.
+ */
+function codeSessionMessage(): WorkerCommand {
+  const linked = linkedCode?.connection.session ? linkedCode : null;
+  const session = browserSession;
+  const token = codeToken;
+  const live = !!linked && !!session && session.accountId === linked.accountId && !signingOut && !invalidatingSession &&
+    !!token && token.accountId === linked.accountId && token.expiresAt > Date.now();
+  return { type: "desktop-session", identity: linked?.connection.key ?? "", token: live ? token.token : null };
+}
+
+/**
+ * A fresh Code token for the session connection, asked for with the session token in force. Done when Code adopts the
+ * session, after every renewal of the session token and before the current Code token runs out; one request at a time.
+ */
+function refreshCodeToken(owner: StoredDesktopSession): Promise<boolean> {
+  if (codeTokenRequest) return codeTokenRequest;
+  const linked = linkedCode;
+  if (!linked?.connection.session || linked.accountId !== owner.accountId || browserSession !== owner || signingOut) return Promise.resolve(false);
+  const request = (async () => {
+    try {
+      const minted = await requestCodeToken(owner.accessToken, AbortSignal.timeout(10_000), accountOrigin);
+      if (linkedCode !== linked || browserSession?.accountId !== owner.accountId || signingOut || invalidatingSession) return false;
+      codeToken = { accountId: owner.accountId, ...minted };
+      pushCodeSession();
+      return true;
+    } catch {
+      return false;
+    } finally {
+      codeTokenRequest = null;
+    }
+  })();
+  codeTokenRequest = request;
+  return request;
+}
+
+const codeTokenDue = () => !!linkedCode?.connection.session && (!codeToken || codeToken.accountId !== linkedCode.accountId ||
+  codeToken.expiresAt - Date.now() <= 60_000);
+
+function pushCodeSession() {
+  const message = codeSessionMessage();
+  for (const child of codeRuntimes) {
+    try { child.postMessage(message); } catch { /* The runtime ended. */ }
+  }
+}
+
+/**
+ * Code on the signed-in Desktop session, when the server says so (desktopCodeSession): no Code key is connected or
+ * used. The switch happens only while no task depends on the current connection; the stored Code key file is removed,
+ * and the key itself stays valid on the server for the person's other tools.
+ */
+function adoptCodeSession(owner: StoredDesktopSession) {
+  if (fixture || browserSession !== owner || signingOut || invalidatingSession || closing) return;
+  if (linkedCode?.connection.session && linkedCode.accountId === owner.accountId) {
+    if (state.codeKey.stage !== "account") state.codeKey = { stage: "account" };
+    pushCodeSession();
+    return;
+  }
+  if (state.busy || pendingMutation || parallel.lanes.busy()) return;
+  linkAttempt?.abort();
+  linkAttempt = null;
+  pendingInspection?.settle(null);
+  codeReferences.clear();
+  workspaceHandoff = null;
+  const linked = { accountId: owner.accountId, connection: codeSessionConnection(owner.accountId, accountOrigin ?? DESKTOP_LIVE_ORIGIN) };
+  linkedCode = linked;
+  codeToken = null;
+  state.codeKey = { stage: "account" };
+  void codeKeyVault(owner.accountId).clear().catch(() => {});
+  pushCodeSession();
+  discardTransientTask(state.task);
+  state.task = null;
+  refreshHistory();
+  state.models = [];
+  state.codeCatalog = "loading";
+  void refreshCodeToken(owner).then(() => {
+    if (linkedCode !== linked) return;
+    requestCodeCatalog();
+    broadcast();
+  });
+}
+
+/** The server stopped offering Code on the session: back to the Code key path, once no task depends on the session. */
+function dropCodeSession() {
+  if (!linkedCode?.connection.session || state.busy || pendingMutation || parallel.lanes.busy()) return;
+  pendingInspection?.settle(null);
+  codeReferences.clear();
+  workspaceHandoff = null;
+  linkedCode = null;
+  codeToken = null;
+  state.codeKey = { stage: "missing" };
+  pushCodeSession();
+  discardTransientTask(state.task);
+  state.task = null;
+  refreshHistory();
+  requestCodeCatalog();
+}
+
+/** The server's answer and Code's connection disagree: a switch adoptCodeSession or dropCodeSession put off while busy. */
+function codeConnectionSwitchPending() {
+  const capabilities = state.capabilities;
+  if (fixture || !capabilities || !browserSession) return false;
+  return capabilities.codeSession ? !(linkedCode?.connection.session && linkedCode.accountId === browserSession.accountId)
+    : !!linkedCode?.connection.session;
+}
+
+/** Code's connection for this account: the session where the server offers it, else a stored Code key (older servers). */
+function syncCodeConnection(owner: StoredDesktopSession) {
+  if (fixture || browserSession !== owner || signingOut || closing) return;
+  const capabilities = state.capabilities;
+  if (capabilities?.codeSession) {
+    adoptCodeSession(owner);
+    return;
+  }
+  // Unknown capabilities (the read failed) change nothing; a server that answered without the signal does.
+  if (capabilities && linkedCode?.connection.session) dropCodeSession();
+  if (!linkedCode) void restoreCodeKey(owner);
 }
 
 function bootWorker() {
@@ -1480,7 +1721,7 @@ function bootWorker() {
       canRestartWorker = false;
       bootWorker();
     }
-    if (browserSession && !linkedCode && !fixture) void restoreCodeKey(browserSession);
+    if (browserSession && !linkedCode && !fixture) syncCodeConnection(browserSession);
     broadcast();
   });
   if (DESKTOP_FIXTURE_ALLOWED && fixture) send({ type: "clean-deleted-history", protectedRoot: app.getPath("userData") });
@@ -1498,19 +1739,30 @@ function requestCodeCatalog() {
 function retryCodeCatalog() {
   if (!codeConnection() || state.busy || state.codeCatalog === "loading" || state.models.length ||
       signingOut || invalidatingSession || linkAttempt || suspended || closing || state.update.stage === "installing") return;
+  if (browserSession && codeTokenDue()) {
+    const linked = linkedCode;
+    state.codeCatalog = "loading";
+    void refreshCodeToken(browserSession).then(() => {
+      if (linkedCode !== linked) return;
+      if (worker) requestCodeCatalog();
+      else bootWorker();
+      broadcast();
+    });
+    broadcast();
+    return;
+  }
   if (worker) requestCodeCatalog();
   else bootWorker();
   broadcast();
 }
 
-async function chooseRoot() {
+/** Opens a folder of the register as the project. The folder dialogs are the register's (code-project-host.ts). */
+async function chooseRoot(target: string) {
   if (state.busy || pendingMutation || choosing) return false;
   choosing = true;
   const owner = browserSession?.accountId;
   try {
-    const chosen = fixture
-      ? fixture.root
-      : (await dialog.showOpenDialog(mainWindow!, { title: nativeCopy().openFolder, properties: ["openDirectory"] })).filePaths[0];
+    const chosen = target;
     if (!chosen || state.busy || pendingMutation || browserSession?.accountId !== owner) return false;
     const project = bindProjectRoot(chosen);
     const root = project.path;
@@ -2241,6 +2493,7 @@ async function refreshDesktopCapabilities(session: StoredDesktopSession, { keepC
   const capabilities = await readDesktopCapabilities(session.accessToken, AbortSignal.timeout(5_000), accountOrigin).catch(() => null);
   if (browserSession !== session || signingOut || closing || (keepCurrentOnFailure && !capabilities)) return;
   state.capabilities = capabilities;
+  syncCodeConnection(session);
   broadcast();
 }
 
@@ -2250,8 +2503,11 @@ function setBrowserSession(account: BrowserAccount, saved: StoredDesktopSession,
   state.language = deviceLanguage ?? account.language ?? null;
   state.account = { stage: "connected", label: account.email ?? account.name ?? "Tomverse account", storage,
     draftNamespace: createHash("sha256").update(saved.accountId).digest("hex") };
-  if (!linkedCode && !fixture) void restoreCodeKey(saved);
-  else if (fixture && state.codeCatalog === "unavailable") requestCodeCatalog();
+  // A renewed session token mints a fresh Code token for every Code runtime. Code's connection itself is settled once
+  // the capabilities say whether this server runs Code on the session (refreshDesktopCapabilities, syncCodeConnection).
+  pushCodeSession();
+  if (linkedCode?.connection.session && linkedCode.accountId === saved.accountId) void refreshCodeToken(saved);
+  if (fixture && state.codeCatalog === "unavailable") requestCodeCatalog();
   void refreshDesktopCapabilities(saved);
   scheduleSessionCheck(Math.max(0, Math.min(15_000, saved.expiresAt - Date.now() - 30_000)));
 }
@@ -2288,12 +2544,15 @@ function clearAccountWorkspace() {
   linkAttempt?.abort();
   linkAttempt = null;
   linkedCode = null;
+  codeToken = null;
   state.codeKey = { stage: "missing" };
+  pushCodeSession();
   requestCodeCatalog();
 }
 
 async function linkCodeKey(key: string, owner: StoredDesktopSession, persist: boolean) {
-  if (linkAttempt || signingOut || state.busy || browserSession?.accountId !== owner.accountId) return;
+  // A server that runs Code on the session takes no key from Desktop (adoptCodeSession).
+  if (linkAttempt || signingOut || state.busy || browserSession?.accountId !== owner.accountId || state.capabilities?.codeSession) return;
   const attempt = new AbortController();
   linkAttempt = attempt;
   const previous = state.codeKey;
@@ -2317,7 +2576,7 @@ async function linkCodeKey(key: string, owner: StoredDesktopSession, persist: bo
       storage = await vault.save({ accountId: owner.accountId, key }, signal);
     }
     signal.throwIfAborted();
-    if (browserSession?.accountId !== owner.accountId) return;
+    if (browserSession?.accountId !== owner.accountId || state.capabilities?.codeSession || linkedCode?.connection.session) return;
     pendingInspection?.settle(null);
     if (codeConnection()?.key !== key) {
       codeReferences.clear();
@@ -2344,13 +2603,14 @@ async function linkCodeKey(key: string, owner: StoredDesktopSession, persist: bo
 }
 
 async function restoreCodeKey(owner: StoredDesktopSession) {
+  if (state.capabilities?.codeSession) return;
   const saved = await codeKeyVault(owner.accountId).read();
-  if (saved && !linkedCode && browserSession === owner) await linkCodeKey(saved.key, owner, false);
+  if (saved && !linkedCode && browserSession === owner && !state.capabilities?.codeSession) await linkCodeKey(saved.key, owner, false);
 }
 
 async function connectCopiedCodeKey() {
   const owner = browserSession;
-  if (!owner || signingOut || state.busy || linkAttempt) return;
+  if (!owner || signingOut || state.busy || linkAttempt || state.capabilities?.codeSession || linkedCode?.connection.session) return;
   const key = readCopiedCodeKey(await clipboard.readText());
   if (browserSession?.accountId !== owner.accountId || signingOut) return;
   if (!key) {
@@ -2366,6 +2626,7 @@ async function expireAccount() {
   invalidatingSession = true;
   clearTimeout(sessionExpiry);
   browserSession = null;
+  pushCodeSession();
   state.account = { stage: "expired" };
   clearAccountWorkspace();
   await sessionVault().clear().catch(() => {});
@@ -2417,6 +2678,11 @@ async function checkBrowserSession() {
     await renewBrowserSession(active);
     return;
   }
+  if (codeTokenDue()) void refreshCodeToken(active);
+  // Capabilities that could not be read are read again, and a Code connection change that waited for a running task
+  // is made once nothing depends on the old connection (a parallel lane finishing included).
+  if (!state.capabilities) void refreshDesktopCapabilities(active, { keepCurrentOnFailure: true });
+  else if (codeConnectionSwitchPending()) { syncCodeConnection(active); broadcast(); }
   try {
     const account = await readBrowserAccount(active.accessToken, AbortSignal.timeout(5_000), accountOrigin);
     if (browserSession === active && !signingOut && account.id !== active.accountId) await expireAccount();
@@ -2539,7 +2805,7 @@ async function uploadAttachment(input: AttachmentBytesInput) {
   }
 }
 
-async function importDriveAttachments(input: DriveImportInput) {
+async function importDriveAttachments(input: DriveImportInput): Promise<DriveImportResult> {
   if (!state.capabilities?.attachments || !state.capabilities.googleDrive || !browserSession || signingOut ||
       closing || attachmentTransfer || chatWriting || state.update.stage === "installing") {
     throw new Error("Google Drive attachments are unavailable.");
@@ -2550,12 +2816,21 @@ async function importDriveAttachments(input: DriveImportInput) {
   const files: AttachmentUpload[] = [];
   attachmentTransfer = transfer;
   try {
-    const selection = await selectDriveFiles({
-      origin: accountOrigin ?? DESKTOP_LIVE_ORIGIN, language: state.language ?? "en", slots: input.slots, signal,
-      openExternal: (url) => shell.openExternal(url),
-    });
+    let selection: Awaited<ReturnType<typeof selectDriveFiles>>;
+    try {
+      selection = await selectDriveFiles({
+        origin: accountOrigin ?? DESKTOP_LIVE_ORIGIN, language: state.language ?? "en", slots: input.slots, signal,
+        openExternal: (url) => shell.openExternal(url),
+      });
+    } catch (error) {
+      if (error instanceof DriveSelectionTimeout) return { files, incomplete: false, timedOut: true };
+      throw error;
+    }
     signal.throwIfAborted();
     if (!selection) return { files, incomplete: false };
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send("attachment:phase", { requestId: input.requestId, phase: "uploading" } satisfies AttachmentPhaseEvent);
+    }
     const active = browserSession;
     if (!active) throw new Error("The Desktop account changed.");
     if (active.expiresAt <= Date.now() + 60_000) await renewBrowserSession(active);
@@ -2652,7 +2927,7 @@ const browserAgent = createBrowserAgentBridge({
   }),
   tab: (id) => codeBrowser?.tabs.get(id),
   tabs: () => [...(codeBrowser?.tabs ?? [])],
-  open: (tab, url) => runCodeBrowser({ type: "open", tab, url }),
+  open: (tab, url) => runCodeBrowser({ type: "open", tab, url }, "agent"),
   publish: (browserState) => { if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send("desktop:code-browser-state", browserState); },
   publishPick: (pick) => { if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send("desktop:code-browser-pick", pick); },
   reply: (replyRunId, requestId, reply) => { if (worker && runId === replyRunId) send({ type: "browser-agent-result", runId: replyRunId, requestId, reply }); },
@@ -2722,7 +2997,58 @@ function closeCodeBrowserTab(tab: string, announce = false) {
   }
 }
 
-async function runCodeBrowser(value: unknown) {
+/** The saved data of the project the panel is in now, for the account it is open for (see browserProfile in code-browser-policy.ts). */
+function codeBrowserProfile() {
+  return openBrowserProfile(browserProfile(browserSession?.accountId ?? null, projectRoot?.path ?? null), {
+    directory: () => join(app.getPath("userData"), "code-browser-permissions"),
+    copy: nativeCopy,
+  });
+}
+
+/** Tomverse's own origins: a page there is not signed in to the Tomverse account, and the panel says so. */
+const tomverseOrigins = () => [...new Set([accountOrigin ?? DESKTOP_LIVE_ORIGIN, webOrigin].map((value) => new URL(value).origin))];
+
+/**
+ * A tab's profile is the one it was opened in: what a person types into the address box uses the project the panel is in now, and a
+ * page's own new tab uses its opener's, so a page of one project never reaches the cookies of another after the project changes.
+ */
+function createBrowserTab(browser: CodeBrowser, owner: BrowserWindow, tabId: string, target: { kind: BrowserKind; origin: string },
+  profile: ReturnType<typeof codeBrowserProfile>, opener?: string) {
+  const view = createCodeBrowserView(owner, target, tabId, (next) => {
+    if (browser.grant?.tab === tabId && (next.url !== browser.grant.url || next.loading || next.failed)) browser.grant = undefined;
+    if (codeBrowser?.tabs.get(tabId) === view && !owner.isDestroyed() && !owner.webContents.isDestroyed()) {
+      owner.webContents.send("desktop:code-browser-state", browserAgent.decorate(next));
+    }
+  }, {
+    profile,
+    limitHosts: () => browserAgent.hostsFor(tabId),
+    agentHolds: () => browserAgent.holds(tabId),
+    isTomverse: (address) => isTomverseUrl(address, tomverseOrigins()),
+    openTab: (address) => openPopupTab(tabId, address),
+    downloads: {
+      // The save dialog starts in the download folder; a system without one starts in the home folder.
+      directory: () => { try { return app.getPath("downloads"); } catch { return app.getPath("home"); } },
+      testDirectory: () => DESKTOP_FIXTURE_ALLOWED ? fixture?.browserDownloads ?? null : null,
+      title: (from) => from === "agent" ? nativeCopy().browserDownloadAgentTitle : nativeCopy().browserDownloadTitle,
+    },
+    ...(opener ? { opener } : {}),
+  });
+  browser.tabs.set(tabId, view);
+  return view;
+}
+
+/** A page's link or window.open opens a tab of the panel: the same profile, kind and origin rules as the tab that opened it. */
+function openPopupTab(openerTab: string, address: string): boolean {
+  const browser = codeBrowser;
+  const opener = browser?.tabs.get(openerTab);
+  const owner = mainWindow;
+  if (!browser || !opener || !owner || owner.isDestroyed() || browser.tabs.size >= MAX_CODE_BROWSER_TABS) return false;
+  const view = createBrowserTab(browser, owner, randomUUID(), { kind: opener.kind, origin: opener.origin }, opener.profile, openerTab);
+  void view.load(address);
+  return true;
+}
+
+async function runCodeBrowser(value: unknown, by: "person" | "agent" = "person") {
   const command = browserCommand.parse(value);
   if (command.type === "close") { closeCodeBrowser(); return; }
   if (command.type === "agent-tools") {
@@ -2755,6 +3081,20 @@ async function runCodeBrowser(value: unknown) {
   if (!scope || !owner || owner.isDestroyed()) return;
   if (codeBrowser && codeBrowser.scope !== scope) closeCodeBrowser();
   const browser: CodeBrowser = codeBrowser ??= { scope, tabs: new Map() };
+  if (command.type === "clear-data") {
+    // The profile of the tab the person is on (or of the project the panel is in, when that tab holds no page yet).
+    const profile = (command.tab ? browser.tabs.get(command.tab) : undefined)?.profile ?? codeBrowserProfile();
+    const copy = nativeCopy();
+    const { response } = await dialog.showMessageBox(owner, {
+      type: "warning", title: copy.browserClearTitle, message: copy.browserClearPrompt, detail: copy.browserClearDetail,
+      buttons: [copy.cancel, copy.browserClearAccept], defaultId: 0, cancelId: 0, noLink: true,
+    });
+    if (response !== 1 || owner.isDestroyed() || codeBrowser !== browser) return false;
+    await profile.clearData();
+    // A page that stayed open would keep the sign-in it holds in memory.
+    for (const view of browser.tabs.values()) if (view.profile === profile) view.reloadAfterClear();
+    return true;
+  }
   const tabId = command.tab;
   const existing = browser.tabs.get(tabId);
   if (command.type === "share" || command.type === "unshare") {
@@ -2771,21 +3111,27 @@ async function runCodeBrowser(value: unknown) {
     return;
   }
   if (command.type === "open") {
-    const address = classifyBrowserAddress(command.url);
-    if (!address) throw new Error("Enter an https address or an HTTP loopback address with an explicit port.");
+    let address = classifyBrowserAddress(command.url);
+    if (!address) throw new Error("Enter a public https address, or an address on this computer or your own network.");
+    // The project the panel is in now (the person's own address); a tab still open from another project is replaced, not reused.
+    const profile = codeBrowserProfile();
+    if (by === "agent") {
+      // The agent opens a local page or (with the person's second switch) a public site; a private-network page is the person's alone.
+      if (address.kind === "private") throw new Error("Only a person opens a page on their own network.");
+    } else {
+      // A name is looked up first: a private name must answer privately, and a name that answers a public address over plain http is refused.
+      address = await admitTypedAddress(address, (host) => profile.resolveHost(host));
+      if (!address) throw new Error("That address is not on this computer or your own network.");
+      if (codeBrowser !== browser || currentBrowserScope() !== scope || owner.isDestroyed()) return;
+    }
     const { kind, url: target } = address;
     if (browser.grant?.tab === tabId) browser.grant = undefined;
-    // A web tab takes any public https address; a local tab stays on its origin. A tab of the other kind is replaced, with a session of its own.
-    if (existing?.kind === kind && (kind === "web" || existing.origin === target.origin)) return existing.load(target.href);
-    if (!existing && browser.tabs.size >= MAX_CODE_BROWSER_TABS) throw new Error("Close a browser tab before opening another.");
-    existing?.close();
-    const view = createCodeBrowserView(owner, { kind, origin: kind === "web" ? "" : target.origin }, tabId, (next) => {
-      if (browser.grant?.tab === tabId && (next.url !== browser.grant.url || next.loading || next.failed)) browser.grant = undefined;
-      if (codeBrowser?.tabs.get(tabId) === view && !owner.isDestroyed() && !owner.webContents.isDestroyed()) {
-        owner.webContents.send("desktop:code-browser-state", browserAgent.decorate(next));
-      }
-    }, () => browserAgent.hostsFor(tabId));
-    browser.tabs.set(tabId, view);
+    const live = browser.tabs.get(tabId);
+    // A web tab takes any public https address; a local or private tab stays on its origin. A tab of the other kind (or another origin) is replaced.
+    if (live?.kind === kind && live.profile === profile && (kind === "web" || live.origin === target.origin)) return live.load(target.href);
+    if (!live && browser.tabs.size >= MAX_CODE_BROWSER_TABS) throw new Error("Close a browser tab before opening another.");
+    live?.close();
+    const view = createBrowserTab(browser, owner, tabId, { kind, origin: kind === "web" ? "" : target.origin }, profile);
     return view.load(target.href);
   }
   if (command.type === "layout") {
@@ -2839,6 +3185,28 @@ const terminalApi = createTerminalApi({
     codeTerminalEnabled = enabled;
     broadcast();
   },
+});
+
+// Typing the fixed sign-in command into a task terminal is the only way a sign-in starts; with the terminal off the screen explains instead.
+function typeCliLogin(command: string): CliLoginOpen {
+  if (!codeTerminalEnabled) return "terminalOff";
+  const workspace = terminalWorkspace();
+  if (!workspace) return "noTask";
+  try {
+    const terminal = terminalHost.open(workspace.task, workspace.cwd, 120, 30);
+    terminalHost.input(terminal.id, command);
+    return "opened";
+  } catch {
+    return "unavailable";
+  }
+}
+
+const providerCli = createProviderCliHost({
+  trustPath: () => join(app.getPath("userData"), "provider-cli-trust-" + createHash("sha256").update(browserSession?.accountId ?? "this-device").digest("hex") + ".json"),
+  writeTrust: writeFileAtomic,
+  hasSaved: () => Object.keys(state.cliPaths).length > 0,
+  typeIntoTerminal: typeCliLogin,
+  shell: () => loginShellKind(defaultShell().file),
 });
 
 function loadCodeTerminal() {
@@ -2919,6 +3287,22 @@ function connectors() {
     }) };
   }
   return connectorApi.api;
+}
+
+let pluginCatalogHost: { signal: AbortSignal; host: ReturnType<typeof createPluginCatalog> } | undefined;
+
+// The Plugins screen's platform list is the web's, read over the Desktop bearer; the app carries none. One copy per account session.
+function pluginCatalog() {
+  const signal = chatSession.signal;
+  if (pluginCatalogHost?.signal !== signal) {
+    pluginCatalogHost = { signal, host: createPluginCatalog({
+      read: (known) => withChatAccount((api) => api.pluginCatalog(known)),
+      // A logo is a public file of the account origin: no cookie or token goes with it, and a redirect is not followed.
+      fetchLogo: (path) => fetch(new URL(path, accountOrigin ?? DESKTOP_LIVE_ORIGIN), { credentials: "omit", redirect: "error", cache: "no-store",
+        signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) }),
+    }) };
+  }
+  return pluginCatalogHost.host;
 }
 
 let accountDataApi: { signal: AbortSignal; api: AccountDataApi } | undefined;
@@ -3437,6 +3821,8 @@ async function signOut() {
   if (!active || signingOut) return;
   const connected = state.account;
   signingOut = true;
+  // Code's runtimes lose the token before anything else happens; a task that is still running sends nothing more.
+  pushCodeSession();
   chatTurn?.abort();
   attachmentTransfer?.controller.abort();
   renewal?.controller.abort();
@@ -3462,6 +3848,8 @@ async function signOut() {
     state.account = { ...connected, detail: "signOutStorageFailure" };
   } finally {
     signingOut = false;
+    // A sign-out that could not finish keeps the session, and its runtimes get the token back.
+    pushCodeSession();
     if (browserSession === active) scheduleSessionCheck(0);
     broadcast();
   }
@@ -3731,6 +4119,28 @@ function chatLocationAllowed() {
     !suspended && !signingOut && !closing;
 }
 
+/** The operating-system side of a failed position read. Asked only after a failure; the renderer passes nothing. */
+async function osLocationStatus(): Promise<OsLocationStatus> {
+  if (!chatLocationAllowed()) return "unknown";
+  // A test build with the account fixture never reads this computer's registry: the answer is the fixture's, or unknown.
+  if (DESKTOP_FIXTURE_ALLOWED && DESKTOP_AUTH_FIXTURE_ORIGIN) {
+    const fixed = process.env.TOMVERSE_DESKTOP_OS_LOCATION_FIXTURE;
+    return fixed === "off" || fixed === "on" ? fixed : "unknown";
+  }
+  return readOsLocationStatus({
+    platform: process.platform, executablePath: process.execPath,
+    query: (args) => new Promise((resolve, reject) => execFile(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "reg.exe"), args,
+      { windowsHide: true, timeout: 4_000, maxBuffer: 16_384 }, (error, stdout) => (error ? reject(error) : resolve(stdout)))),
+  });
+}
+
+/** Opens the Windows location settings page. The address is the fixed constant, never a value from the renderer. */
+async function openOsLocationSettings() {
+  if (process.platform !== "win32" || !chatLocationAllowed()) return false;
+  await shell.openExternal(WINDOWS_LOCATION_SETTINGS_URI);
+  return true;
+}
+
 function mayRequestChatLocation(contents: Electron.WebContents | null) {
   return Boolean(chatLocationAllowed() && geolocationGrant && !geolocationGrant.session.aborted &&
     Date.now() < geolocationGrant.expiry && mainWindow && !mainWindow.isDestroyed() &&
@@ -3800,7 +4210,7 @@ function registerIpc() {
     refreshCodeFallbackSettings();
     return { ...state, handoff: currentHandoff() };
   });
-  main("desktop:code-browser", runCodeBrowser);
+  main("desktop:code-browser", (value) => runCodeBrowser(value));
   main("desktop:code-computer", (value) => computer.host.command(value));
   main("desktop:code-terminal", (value) => terminalApi.run(value));
   main("desktop:location-arm", () => {
@@ -3808,6 +4218,8 @@ function registerIpc() {
     geolocationGrant = { session: chatSession.signal, expiry: Date.now() + 12_000 };
     return true;
   });
+  main("desktop:location-os-status", () => osLocationStatus());
+  main("desktop:location-open-settings", () => openOsLocationSettings());
   main("desktop:voice-arm", () => voice.arm());
   main("desktop:voice-disarm", () => voice.disarm());
   main("desktop:voice-request", (value) => voice.request(voiceRequestInput.parse(value)));
@@ -3842,6 +4254,13 @@ function registerIpc() {
   main("desktop:choose-cli-path", (value) => chooseCliPath(cliProvider.optional().parse(value)));
   main("desktop:save-cli-path", (value) => saveCliPath(cliPathInput.parse(value)));
   main("desktop:remove-cli-path", (value) => removeCliPath(cliProvider.parse(value)));
+  main("desktop:scan-cli-providers", () => providerCli.scan());
+  main("desktop:trust-cli-path", (value) => trustCliPath(cliPathInput.parse(value)));
+  main("desktop:dismiss-cli-offer", () => providerCli.dismissOffer());
+  main("desktop:open-cli-login", (value) => {
+    const { provider, path } = cliPathInput.parse(value);
+    return providerCli.login(provider, path);
+  });
   const readCliAccount = DESKTOP_CLI_AUTH_FIXTURE_ALLOWED ? checkCliAccount : () => unknownCliAccount;
   main("desktop:check-cli-account", (value) => readCliAccount(cliProvider.parse(value)));
   const readCliProtocol = DESKTOP_CLI_PROTOCOL_CHECK_ALLOWED ? checkCliProtocol : () => ({ status: "unavailable" });
@@ -3852,7 +4271,7 @@ function registerIpc() {
   });
   main("desktop:open-cli-auth-guide", (value) => webViewHost.openGuide(cliAuthGuides[cliProvider.parse(value)]));
   main("desktop:web-view", (value) => webViewHost.run(value));
-  main("desktop:choose-root", chooseRoot);
+  main("desktop:code-projects", (value) => codeProjectHost.run(value));
   main("desktop:retry-code-catalog", retryCodeCatalog);
   main("desktop:confirm-handoff", (value) => confirmWorkspaceHandoff(workspaceHandoffInput.parse(value)));
   main("desktop:remove-handoff", (value) => removeWorkspaceHandoff(z.uuid().parse(value)));
@@ -4008,10 +4427,12 @@ function registerIpc() {
   main("desktop:remote-control", (value) => remoteControl.command(value));
   main("desktop:permissions", (value) => {
     if (signingOut || closing) return { ok: false, error: "The app is closing." };
-    const result = permissionHost.run(permissionCommand.parse(value));
+    const command = permissionCommand.parse(value);
+    const result = permissionHost.run(command);
     if (result.ok) {
       worker?.postMessage(permissionHost.runtimeMessage());
       parallel.permissionChanged();
+      if (command.action === "set-mode") codeProjectHost.rememberPermission(command.mode);
       broadcast();
     }
     return result;
@@ -4223,6 +4644,10 @@ function registerIpc() {
   main("desktop:plugin-inventory", () => {
     if (!state.capabilities?.plugins) return { enabled: false, servers: [], connections: [] };
     return withChatAccount((api) => api.pluginInventory());
+  });
+  main("desktop:plugin-catalog", (value) => {
+    if (!state.capabilities?.plugins || !state.capabilities.pluginCatalog) return null;
+    return pluginCatalog().read(value === true);
   });
   main("desktop:connector-inventory", () => connectors().inventory());
   main("desktop:connector-action", (value) => connectors().run(connectorInput.parse(value)));
@@ -4491,6 +4916,8 @@ else {
       requestQuit();
       return;
     }
+    // What the browser panel's profiles hold in memory (cookies, storage) reaches the disk.
+    void flushBrowserProfiles();
     // Quitting waits (three seconds at most) for the server to be told that a paid voice session is over.
     if (voice.active()) {
       event.preventDefault();
@@ -4500,6 +4927,7 @@ else {
   app.on("will-quit", () => {
     for (const close of cliPathWatches.values()) close();
     cliPathWatches.clear();
+    providerCli.close();
     cliInspection?.controller.abort();
     loginAttempt?.abort();
     linkAttempt?.abort();
@@ -4527,6 +4955,15 @@ else {
       const address = new URL(request.url);
       if (request.method !== "GET" || address.host !== "desktop" || address.search) return new Response(null, { status: 404 });
       const route = address.pathname;
+      // A platform's logo, read from the account's server for the Plugins screen (the page may load images from this app only).
+      const logoId = PLUGIN_LOGO_ROUTE.exec(route)?.[2];
+      if (logoId) {
+        const logo = state.capabilities?.pluginCatalog && pluginCatalogHost?.signal === chatSession.signal ? await pluginCatalogHost.host.logo(logoId) : null;
+        return logo ? new Response(logo.bytes, { headers: {
+          "Content-Type": logo.type, "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Cache-Control": "no-cache",
+          "Content-Security-Policy": "default-src 'none'; sandbox",
+        } }) : new Response(null, { status: 404 });
+      }
       const isPage = route === "/" || route === "/approval" || route === "/login" || route === "/task";
       if (!isPage && !/^\/assets\/[A-Za-z0-9_.-]+$/.test(route)) return new Response(null, { status: 404 });
       const mime = isPage ? "text/html; charset=utf-8" : assetTypes[extname(route)];

@@ -606,6 +606,8 @@ export const es = {
         locationErrordenied: "Permiso de ubicación denegado. Permítelo en los ajustes del navegador o dispositivo e inténtalo de nuevo.",
         locationErrortimeout: "Se agotó el tiempo para obtener la ubicación. El mensaje continúa sin ella. Reinténtalo en + herramientas.",
         locationErrorunavailable: "Ubicación no disponible. El mensaje continúa sin ella. También puedes escribir un lugar.",
+        locationWindowsOff: "La ubicación de Windows está desactivada, así que no se puede obtener tu ubicación actual. También puedes escribir un lugar.",
+        locationOpenWindowsSettings: "Abrir ajustes de ubicación de Windows",
         toolsWebSearchOffDescription: "Las respuestas se dan sin buscar en la web.",
         toolsWebSearchOnDescription: "Busca en la web automáticamente cuando hacen falta información actual o fuentes.",
         toolsWebSearchCostNote: "Se aplican {credits} créditos adicionales por cada modelo que realice una búsqueda. Si no busca, no hay créditos adicionales.",
