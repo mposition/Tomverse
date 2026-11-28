@@ -530,6 +530,7 @@ import {
     terminalChatResponseAttempt,
 } from "@/lib/chatResponseAttemptPersistence";
 import { markMessagesSuperseded, readSupersedesMessageIds, withoutSupersededChatMessages } from "@/lib/chatSupersededMessages";
+import { modelContextTranscript } from "@/lib/chatTranscriptRecovery";
 import {
     DatabaseWriteOutcomeUnknownError,
     databaseErrorMetadata,
@@ -1724,10 +1725,16 @@ async function handleChatPost(
         // Before anything reads the transcript, so the file a retry repeated is
         // resolved, measured, priced and sent once. The log line above keeps the
         // shape the client sent.
-        const { messages, removedReferenceCount } =
+        const { messages: collapsedMessages, removedReferenceCount } =
             collapseRepeatedAttachments(await withoutSupersededChatMessages({
                 userId: session?.user?.id, conversationId, messages: requestMessages, replacing: supersedesMessageIds,
             }));
+        // What the model reads of the earlier answers: a failed turn is one
+        // fixed marker, a stopped partial says it is incomplete, and a search
+        // answer keeps the URLs behind its [n] citations. Before anything
+        // measures or prices the transcript, so the estimate counts exactly
+        // what is sent.
+        const messages = modelContextTranscript(collapsedMessages);
         if (removedReferenceCount > 0) {
             console.info(JSON.stringify({
                 event: "chat_repeated_attachments_collapsed",
@@ -3550,7 +3557,7 @@ async function handleChatPost(
             const code = catalogueHostRefusalCode(error);
             if (!code) throw error;
             return returnKnownUndispatchedGuestAutoRefusal(tracedJsonError(
-                "이 모델은 카탈로그 경로로 보낼 수 없습니다.",
+                "This model cannot be sent through the catalogue route.",
                 code,
                 409,
                 traceId
@@ -10468,8 +10475,8 @@ async function handleChatPost(
             );
             return withoutRejectionLine(tracedJsonError(
                 localFailure.layer === "storage"
-                    ? "첨부파일 저장소를 읽지 못했습니다. 잠시 후 다시 시도해 주세요."
-                    : "요청을 처리하지 못했습니다.",
+                    ? "The attachment storage could not be read. Please try again shortly."
+                    : "The request could not be processed.",
                 localFailure.layer === "storage"
                     ? ATTACHMENT_STORAGE_UNAVAILABLE_CODE
                     : "CHAT_APPLICATION_ERROR",
@@ -10549,7 +10556,7 @@ async function handleChatPost(
                 { failureLayer: "application", phase: "request" }
             );
             return withoutRejectionLine(tracedJsonError(
-                "요청을 처리하지 못했습니다.",
+                "The request could not be processed.",
                 "CHAT_APPLICATION_ERROR",
                 500,
                 traceId,
@@ -10566,7 +10573,7 @@ async function handleChatPost(
         }
 
         return withoutRejectionLine(tracedJsonError(
-            "AI 응답 생성에 실패했습니다.",
+            "The AI response could not be generated.",
             "AI_PROVIDER_ERROR",
             500,
             traceId,
