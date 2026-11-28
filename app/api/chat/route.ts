@@ -281,17 +281,16 @@ import {
     writeAttachmentTextCache,
 } from "@/lib/attachmentTextCache";
 import {
-    base64SizeOf,
     describeImagePayloadLimit,
     messageReadingOrder,
-    planImageOmissions,
-    type ImageSlot,
+    oldestAttachmentSlots,
 } from "@/lib/chatImageBudget";
 import { extractLegacyOfficeText, type LegacyOfficeFormatId } from "@/lib/legacyOfficeText";
 import { legacyOfficeValidationCode } from "@/lib/chatAttachmentValidation";
 import {
     AnimatedImageError,
     describeUnreadPdfPages,
+    pdfPagesNotRead,
     extractPdfTextWithPagesSafely,
     normalizeImageSafely,
     validatePdfSafely,
@@ -3590,12 +3589,16 @@ async function handleChatPost(
             message.role !== "assistant" && Array.isArray(message.attachments)
                 ? message.attachments.length
                 : 0;
-        let olderAttachmentsToOmit = Math.max(
+        const olderAttachmentsToOmit = Math.max(
             0,
             executionMessages.reduce(
                 (count, message) => count + readAttachmentCount(message),
                 0
             ) - MAX_CONVERSATION_ATTACHMENTS
+        );
+        const countOmittedSlots = oldestAttachmentSlots(
+            executionMessages.map(readAttachmentCount),
+            olderAttachmentsToOmit
         );
         /*
           The files that count leaves out are still asked about: a lost file is
@@ -4292,52 +4295,12 @@ async function handleChatPost(
         let nativeFilePartCount = 0;
 
         // The message being sent is read FIRST, whatever its files are made of
-        // (an archive's images and a guest's unsized images included), so
-        // every allowance -- images, text, OCR -- is spent on it before any
-        // earlier message touches it; only its own overflow is an error. The
-        // earlier messages follow, oldest first, and take what is left. This
-        // plan decides which of the earlier direct images go, oldest first,
-        // so the newest earlier ones are the ones kept.
-        const imageSlots: ImageSlot[] = [];
-        if (
-            modelConfig.inputCapabilities?.maxImages ||
-            modelConfig.inputCapabilities?.maxBase64ImagePayloadBytes
-        ) {
-            executionMessages.forEach((message, position) => {
-                if (message.role === "assistant" || !Array.isArray(message.attachments)) {
-                    return;
-                }
-                (message.attachments as IncomingAttachment[]).forEach((incoming, index) => {
-                    const referenceKey = attachmentReferenceKey(incoming);
-                    const known = referenceKey
-                        ? resolvedAttachments.get(referenceKey)
-                        : undefined;
-                    if (known?.unavailableAt) return;
-                    const slotName = known?.name ?? incoming?.name;
-                    const slotType = known?.mediaType ?? incoming?.mediaType;
-                    if (typeof slotName !== "string" || typeof slotType !== "string") return;
-                    const slotFormat = resolveChatAttachmentFormat({
-                        filename: slotName,
-                        declaredMediaType: slotType,
-                        audio: true,
-                    });
-                    if (slotFormat?.category !== "image") return;
-                    imageSlots.push({
-                        key: `${position}:${index}`,
-                        latest: position === executionMessages.length - 1,
-                        base64Bytes: base64SizeOf(
-                            typeof known?.size === "number" ? known.size : 0
-                        ),
-                    });
-                });
-            });
-        }
-        const imagePlan = planImageOmissions(
-            imageSlots,
-            modelConfig.inputCapabilities ?? {}
-        );
-
-        // Messages are built in this order but sent in conversation order.
+        // (an archive's images and a guest's unsized images included), then the
+        // earlier messages from the nearest to the oldest. Every shared
+        // allowance -- images, text, OCR -- is spent in that order, so what is
+        // left out is the oldest, and only the message's own overflow is an
+        // error (lib/chatImageBudget.ts).
+        // Messages are built in that order but sent in conversation order.
         const builtMessages: ModelMessage[][] = executionMessages.map(() => []);
         for (const messageIndex of messageReadingOrder(executionMessages.length)) {
             const msg = executionMessages[messageIndex];
@@ -4400,7 +4363,6 @@ async function handleChatPost(
                 buffer,
                 fromArchive,
                 transcriptAttachmentId = null,
-                leaveOut = false,
             }: {
                 format: ChatAttachmentFormat;
                 name: string;
@@ -4408,8 +4370,6 @@ async function handleChatPost(
                 fromArchive: boolean;
                 /** A bound recording's row: its transcript is paid for once. */
                 transcriptAttachmentId?: string | null;
-                /** An earlier image the request's image allowance has no room for. */
-                leaveOut?: boolean;
             }): Promise<"ok" | "no-text" | "unreadable"> => {
                 if (format.category === "image") {
                     if (!modelSupportsImageInput(modelConfig)) {
@@ -4431,8 +4391,8 @@ async function handleChatPost(
                         return "ok" as const;
                     };
                     if (!isLatestMessage) {
-                        if (leaveOut) return leaveOutEarlierImage();
-                        // The message being sent has already taken its share.
+                        // The message being sent, and the messages after this one,
+                        // have already taken their share.
                         if (
                             imageCapabilities?.maxImages &&
                             totalImageCount + 1 > imageCapabilities.maxImages
@@ -4637,6 +4597,10 @@ async function handleChatPost(
                     let extractedPdfText = "";
                     // Pages the text layer gave nothing for: scans and pictures.
                     let textlessPdfPages: number[] = [];
+                    // 0 when the text pass failed and the count is not known.
+                    let pdfPageCount = 0;
+                    // Pages OCR was asked for and did not answer with text.
+                    let ocrUnreadPages: number[] = [];
                     let pdfValidated = false;
                     try {
                         const extraction = await extractPdfTextWithPagesSafely(
@@ -4645,6 +4609,7 @@ async function handleChatPost(
                         );
                         extractedPdfText = extraction.text;
                         textlessPdfPages = extraction.textlessPages;
+                        pdfPageCount = extraction.pageCount;
                     } catch (error) {
                         logRequestError(
                             "pdf_text_extraction_failed",
@@ -4779,6 +4744,13 @@ async function handleChatPost(
                                 extractedPdfText = ocrResult.text;
                                 // Cut at the budget: never stored as the file's text.
                                 if (ocrResult.truncated) textCacheBlocked = true;
+                                // Text for some pages is not text for all: every page
+                                // of the file is checked against the ones answered, by
+                                // the same rule as the partly scanned file below.
+                                ocrUnreadPages = pdfPagesNotRead(
+                                    Array.from({ length: pdfPageCount }, (_, index) => index + 1),
+                                    ocrResult.pageNumbers
+                                );
                             }
                         } catch (error) {
                             logRequestError(
@@ -4852,12 +4824,23 @@ async function handleChatPost(
                         // Text coming back is not proof the pages were read: the
                         // provider may skip a page or return it empty. Each page
                         // asked for is checked against the pages it answered.
-                        const answered = new Set(scanned?.pageNumbers ?? []);
-                        const unread = textlessPdfPages.filter((page) => !answered.has(page));
+                        const unread = pdfPagesNotRead(
+                            textlessPdfPages,
+                            scanned?.pageNumbers ?? []
+                        );
                         if (
                             scanned?.text &&
                             !addExtractedText(`${format.promptKind} (scanned pages)`, scanned.text)
                         ) {
+                            // An earlier file's scanned text did not fit its share
+                            // and was named as left out: say which pages, too, and
+                            // do not store the file's text as if it were whole.
+                            textCacheBlocked = true;
+                            textAttachments.push({
+                                name,
+                                kind: "PDF page notice",
+                                text: describeUnreadPdfPages(textlessPdfPages),
+                            });
                             return "ok";
                         }
                         if (unread.length === 0 && !scanned?.truncated) return "ok";
@@ -4871,7 +4854,15 @@ async function handleChatPost(
                     }
 
                     if (extractedPdfText) {
-                        addExtractedText(format.promptKind, extractedPdfText);
+                        const added = addExtractedText(format.promptKind, extractedPdfText);
+                        if (added && ocrUnreadPages.length > 0) {
+                            // Named, and never stored as the whole file's text.
+                            textCacheBlocked = true;
+                            addExtractedText(
+                                "PDF page notice",
+                                describeUnreadPdfPages(ocrUnreadPages)
+                            );
+                        }
                         return "ok";
                     }
                     if (fromArchive) return "no-text";
@@ -5185,9 +5176,9 @@ async function handleChatPost(
                 }
 
                 // One of the oldest earlier files past the conversation's count:
-                // decided here, in the same order the probe above counted them.
-                const countOmitted = !isLatestMessage && olderAttachmentsToOmit > 0;
-                if (countOmitted) olderAttachmentsToOmit -= 1;
+                // decided by position, in the order the probe above counted them
+                // (the messages are not read in that order).
+                const countOmitted = countOmittedSlots.has(`${messageIndex}:${attachmentIndex}`);
 
                 const attachmentScope: "current_turn" | "past_turn" =
                     isLatestMessage ? "current_turn" : "past_turn";
@@ -5250,7 +5241,12 @@ async function handleChatPost(
                     (isLatestMessage
                         ? format.category !== "audio" && attachmentTextCacheEnabled()
                         : attachmentTextCacheEnabled() || format.category === "audio");
-                if (textCacheEligible) {
+                // Read for an earlier message only. The turn's own file is always
+                // read from storage: this turn's tools (file creation, conversion,
+                // spreadsheet revision) work on its bytes and lineage, which are
+                // registered below, and a cache hit would skip that. Its text is
+                // still stored once read, for the next turn.
+                if (textCacheEligible && !isLatestMessage) {
                     const cached = await readAttachmentTextCache(resolved!.attachmentId!);
                     // The cache stands in for reading the file, not for
                     // knowing it exists: storage is still asked, and a file it
@@ -5261,29 +5257,7 @@ async function handleChatPost(
                     const originalGone =
                         cached !== null &&
                         (await probeR2Object(attachment.objectKey)).state === "missing";
-                    const cachedCharacters = cached
-                        ? cached.reduce((sum, entry) => sum + entry.text.length, 0)
-                        : 0;
-                    if (
-                        cached &&
-                        !originalGone &&
-                        isLatestMessage &&
-                        totalExtractedCharacters + cachedCharacters <=
-                            CHAT_ATTACHMENT_PARSE_CHARACTERS
-                    ) {
-                        // The turn's own file is never left out; a stored text
-                        // that does not fit is read from the file as before.
-                        totalExtractedCharacters += cachedCharacters;
-                        for (const entry of cached) {
-                            textAttachments.push({
-                                name: attachment.name,
-                                kind: entry.kind,
-                                text: entry.text,
-                            });
-                        }
-                        continue;
-                    }
-                    if (cached && !originalGone && !isLatestMessage) {
+                    if (cached && !originalGone) {
                         for (const entry of cached) {
                             const tokens = estimatePromptTokens(entry.text);
                             if (
@@ -5557,7 +5531,6 @@ async function handleChatPost(
                             buffer: attachmentBuffer,
                             fromArchive: false,
                             transcriptAttachmentId: recordingAttachmentId,
-                            leaveOut: imagePlan.omitted.has(`${messageIndex}:${attachmentIndex}`),
                         })
                     );
                     if (textCacheEligible && !textCacheBlocked && format.category !== "audio") {

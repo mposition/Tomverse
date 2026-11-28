@@ -136,7 +136,16 @@ test("the route caches an account's bound file -- the turn's own once read, an e
     // recording stays on its own row, and a stored text is used for the turn's
     // own file only when it fits whole.
     assert.match(eligibility, /isLatestMessage\s*\?\s*format\.category !== "audio" && attachmentTextCacheEnabled\(\)/);
-    assert.match(route, /isLatestMessage &&\s*totalExtractedCharacters \+ cachedCharacters <=\s*CHAT_ATTACHMENT_PARSE_CHARACTERS/);
+    // Review r-20261128-051641-d94ab6: the turn's own file is written, never
+    // read back from the cache. A hit skips the code that registers the file's
+    // bytes and lineage for this turn's tools (file creation, conversion,
+    // spreadsheet revision), so a retry or another panel would find nothing.
+    assert.match(route, /if \(textCacheEligible && !isLatestMessage\) \{\s*const cached = await readAttachmentTextCache\(/);
+    assert.ok(!route.includes("cachedCharacters"));
+    const read = route.slice(route.indexOf("if (textCacheEligible && !isLatestMessage) {"), route.indexOf("let attachmentBuffer: Buffer;"));
+    assert.ok(!read.includes("turnAttachmentBytes"), "the read path registers nothing for the tools");
+    const register = route.indexOf("turnAttachmentBytes.set(");
+    assert.ok(register > route.indexOf("let attachmentBuffer: Buffer;"), "the bytes are registered after the file is read, which the latest message always does");
     // Pages that were not read are not stored as if they were the text.
     assert.match(route, /textCacheBlocked = true;/);
     // Review r-20261127-114544-4444fa: an earlier recording's stored transcript
@@ -144,7 +153,7 @@ test("the route caches an account's bound file -- the turn's own once read, an e
     // file is ingested, so before the audio switch is ever consulted.
     assert.ok(eligibility.includes(': attachmentTextCacheEnabled() || format.category === "audio"'));
     // A cache hit answers to the same past-file share and parse budget.
-    const hit = route.slice(start, route.indexOf("let attachmentBuffer: Buffer;", start));
+    const hit = route.slice(route.indexOf("if (textCacheEligible && !isLatestMessage) {"), route.indexOf("let attachmentBuffer: Buffer;"));
     assert.match(hit, /pastAttachmentTokens \+ tokens > pastAttachmentTokenBudget/);
     assert.match(hit, /CHAT_ATTACHMENT_PARSE_CHARACTERS/);
     // A cut or mixed extraction is never stored.
@@ -199,10 +208,9 @@ test("a cache hit still asks storage whether the original exists", () => {
     const route = source("app/api/chat/route.ts");
     const hit = route.slice(route.indexOf("const cached = await readAttachmentTextCache(resolved!.attachmentId!);"));
     assert.match(hit.slice(0, 900), /\(await probeR2Object\(attachment\.objectKey\)\)\.state === "missing"/);
-    assert.match(hit.slice(0, 2600), /if \(cached && !originalGone && !isLatestMessage\) \{/);
-    // The turn's own file reads the same row, and only while storage has not
-    // reported the original gone.
-    assert.match(hit.slice(0, 2600), /cached &&\s*!originalGone &&\s*isLatestMessage &&/);
+    assert.match(hit.slice(0, 2600), /if \(cached && !originalGone\) \{/);
+    // Only an earlier file is read from the row (the turn's own is read from storage).
+    assert.ok(route.indexOf("if (textCacheEligible && !isLatestMessage) {") < route.indexOf("const cached = await readAttachmentTextCache("));
 });
 
 test("the chat page, receipt recovery and stored previews follow the account limits", () => {
@@ -220,11 +228,13 @@ test("past the conversation's file count the oldest earlier files are left out, 
     const route = source("app/api/chat/route.ts");
     assert.ok(!route.includes('"TOO_MANY_CONVERSATION_ATTACHMENTS"'));
     assert.ok(!route.includes('"TOO_MANY_ATTACHMENT_OBJECTS"'));
-    assert.match(route, /let olderAttachmentsToOmit = Math\.max\(\s*0,[\s\S]{0,300}- MAX_CONVERSATION_ATTACHMENTS\s*\);/);
+    assert.match(route, /const olderAttachmentsToOmit = Math\.max\(\s*0,[\s\S]{0,300}- MAX_CONVERSATION_ATTACHMENTS\s*\);/);
+    // Decided by position, oldest first, because the messages are not read in conversation order.
     assert.match(
         route,
-        /const countOmitted = !isLatestMessage && olderAttachmentsToOmit > 0;\s*if \(countOmitted\) olderAttachmentsToOmit -= 1;/
+        /const countOmittedSlots = oldestAttachmentSlots\(\s*executionMessages\.map\(readAttachmentCount\),\s*olderAttachmentsToOmit\s*\);/
     );
+    assert.match(route, /const countOmitted = countOmittedSlots\.has\(`\$\{messageIndex\}:\$\{attachmentIndex\}`\);/);
     // A guest chat keeps its own small refusal.
     assert.ok(route.includes('"GUEST_TOO_MANY_CONVERSATION_ATTACHMENTS"'));
 });
@@ -246,7 +256,7 @@ test("a file left out by count is still checked for loss first", () => {
     assert.match(route, /await Promise\.all\(batch\.map\(\(key\) => probeR2Object\(key\)\)\)/);
     assert.match(route, /if \(probe\.state === "missing"\) countOmittedMissingKeys\.add/);
     // A recorded loss is honoured before the count decides anything ...
-    const decided = route.indexOf("const countOmitted = !isLatestMessage");
+    const decided = route.indexOf("const countOmitted = countOmittedSlots.has(");
     const recorded = route.indexOf("if (resolved?.attachmentId && resolved.unavailableAt) {", decided);
     const omitted = route.indexOf("if (countOmitted && !countOmittedMissingKeys.has(attachment.objectKey)) {", decided);
     assert.ok(decided > 0 && recorded > decided && omitted > recorded);

@@ -610,3 +610,16 @@ export async function renderPdfImagePagesSafely(buffer: Buffer): Promise<PdfImag
         )
         .map((page) => ({ pageNumber: page.pageNumber, jpeg: Buffer.from(page.jpeg) }));
 }
+
+/**
+ * The pages asked of OCR that did not come back with text. `expected` is every
+ * page the OCR was meant to read -- the text-less pages of a partly scanned
+ * file, or all pages of a wholly scanned one -- and `answered` the pages the
+ * provider returned with content. Empty `expected` (the page count is not
+ * known) means there is nothing to compare against and nothing is reported.
+ * One rule for both paths, so neither takes "some text" for "every page".
+ */
+export function pdfPagesNotRead(expected: readonly number[], answered: readonly number[]): number[] {
+    const read = new Set(answered);
+    return expected.filter((page) => !read.has(page));
+}
