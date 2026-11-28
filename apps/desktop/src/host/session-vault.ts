@@ -11,7 +11,7 @@ const secretSession = z.object({
 
 export type StoredDesktopSession = z.infer<typeof secretSession>;
 const secretCodeKey = z.object({ accountId: z.string().min(1).max(128), key: z.string().min(1).max(160) }).strict();
-/** The person's Z.ai Coding Plan key for the Claude Code (Z.ai) route: a provider key of this computer, not of a Tomverse account. */
+/** The person's Z.ai Coding Plan key for the Z.ai CLI route (Claude Code): a provider key of this computer, not of a Tomverse account. */
 // Letters, digits and the punctuation API keys use (Z.ai keys are `<id>.<secret>`): no quote, backslash or space, so a key reads
 // the same in JSON, a command line or a file as in the field it was typed into.
 export const zaiCodingPlanKey = z.string().trim().min(8).max(512).regex(/^[A-Za-z0-9._~+/=:-]+$/);

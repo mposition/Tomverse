@@ -19,7 +19,7 @@ export const isLiveAcpProvider = (provider: LiveCliProvider): provider is LiveAc
 export const liveCliFile = { openai: "openai", anthropic: "anthropic", zai: "anthropic", qwen: "qwen", xai: "xai", moonshot: "moonshot",
   mistral: "mistral", minimax: "minimax", google: "google" } as const satisfies Record<LiveCliProvider, CliProvider>;
 /** The name the composer and the task show. */
-export const liveCliNames = { openai: "Codex", anthropic: "Claude Code", zai: "Claude Code (Z.ai)", qwen: providerClis.qwen, xai: providerClis.xai,
+export const liveCliNames = { openai: "Codex", anthropic: "Claude Code", zai: "Z.ai CLI (via Claude Code)", qwen: providerClis.qwen, xai: providerClis.xai,
   moonshot: providerClis.moonshot, mistral: providerClis.mistral, minimax: providerClis.minimax, google: providerClis.google } as const satisfies Record<LiveCliProvider, string>;
 const liveAcpExecution = { qwen: qwenFixtureExecution, xai: grokFixtureExecution, moonshot: kimiFixtureExecution, mistral: vibeFixtureExecution,
   minimax: miniMaxFixtureExecution, google: antigravityFixtureExecution } as const satisfies Record<LiveAcpProvider, unknown>;

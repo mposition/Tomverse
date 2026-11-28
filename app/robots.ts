@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { SITE_ORIGIN } from "@/lib/seo";
 import {
+  AD_LANDING_CRAWLERS,
   CANONICAL_PRIVATE_DISALLOW,
   CONTENT_SIGNAL,
   REFUSED_AI_CRAWLERS,
@@ -47,6 +48,9 @@ export default function robots(): MetadataRoute.Robots {
       // why). Googlebot and Bingbot stay on `*` deliberately.
       invitedGroup(SEARCH_INDEX_CRAWLERS),
       invitedGroup(USER_REQUEST_FETCHERS),
+      // Ad crawlers read only a group that names them, so the private paths --
+      // the share pages above all -- reach them only through this one.
+      invitedGroup(AD_LANDING_CRAWLERS),
       // One group per crawler rather than one group naming all of them: a
       // group that listed several would still be a single rule set, and these
       // need to differ from the `*` rules above, not extend them.

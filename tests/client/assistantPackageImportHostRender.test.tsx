@@ -35,7 +35,7 @@ test("the wizard opens on its first step with the host's navigation above the ti
 
 test("a host without a file dialog gets the file input, one with a dialog gets a button and no input", () => {
   const web = render(host());
-  assert.match(web, /<input[^>]*type="file"[^>]*accept="\.zip,\.json"/);
+  assert.match(web, /<input[^>]*type="file"[^>]*accept="\.zip,\.json,\.md,\.markdown"/);
   const desktop = render(host({ pickPackage: async () => null }));
   assert.doesNotMatch(desktop, /type="file"/);
   assert.match(desktop, /<button[^>]*data-testid="assistant-package-import-file"/);

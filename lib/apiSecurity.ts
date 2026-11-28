@@ -425,9 +425,30 @@ export async function assertMessageCapacity(
   newContentBytes: number
 ) {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"messages:" + userId}))`;
+  await checkMessageCapacity(tx, userId, conversationId, newMessageCount, newContentBytes);
+}
+
+/**
+ * The same storage check without the lock, for a request that will write a
+ * message later and should be refused before it spends anything.
+ *
+ * Not a reservation: two requests can both pass it, and the write still
+ * re-checks under `assertMessageCapacity`'s lock. What it removes is the
+ * ordinary case -- an account already at its limit sending a turn whose
+ * answer could never be stored (docs/policy/credit-and-cost-limits.md,
+ * "완료 분기의 정산"). A null `conversationId` checks the account's limits
+ * only, for a caller that has not confirmed it owns the conversation.
+ */
+export async function checkMessageCapacity(
+  db: Pick<Prisma.TransactionClient, "message" | "$queryRaw">,
+  userId: string,
+  conversationId: string | null,
+  newMessageCount: number,
+  newContentBytes: number
+) {
   const [conversationCount, totals] = await Promise.all([
-    tx.message.count({ where: { conversationId } }),
-    tx.$queryRaw<Array<{ count: bigint; bytes: bigint }>>`
+    conversationId === null ? 0 : db.message.count({ where: { conversationId } }),
+    db.$queryRaw<Array<{ count: bigint; bytes: bigint }>>`
       SELECT
         COUNT(m.id)::bigint AS "count",
         COALESCE(SUM(octet_length(m.content)), 0)::bigint AS "bytes"

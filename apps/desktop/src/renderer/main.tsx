@@ -13,6 +13,7 @@ import { CHAT_MAX_MESSAGE_CHARACTERS } from "../../../../lib/chatRequestLimits";
 import { ACCOUNT_SETTINGS_TABS, isAccountSettingsTab, type AccountSettingsTab } from "../../../../lib/accountSettingsEvents";
 import { isLanguage, type Language } from "../../../../lib/language";
 import { desktopChatCopy } from "../../../../locales/desktopChat";
+import { desktopZaiKeyCopy } from "../../../../locales/desktopZaiKey";
 import { desktopCliAccountCopy } from "../../../../locales/desktopCliAccount";
 import { desktopCodeEngineCopy } from "../../../../locales/desktopCodeEngine";
 import { desktopCodeExecutionCopy } from "../../../../locales/desktopCodeExecution";
@@ -108,6 +109,8 @@ type ShellCopy = (typeof desktopShellCopy)[Language];
 type ShellNotice = "hostUnavailable" | "actionFailed" | "taskLocked" | "deleteUnconfirmed" | "deleteUnavailable" | "rejectedReferences";
 type HandoffNotice = "excerptLimit" | "excerptFailed";
 const languagePreference = "tomverse.language";
+// The Z.ai route's name is translated; every other CLI keeps its product name.
+const cliName = (cli: string, language: Language) => cli === liveCliNames.zai ? desktopZaiKeyCopy[language].heading : cli;
 const nav = [
   { id: "chat", label: "Chat", icon: MessageCircle },
   { id: "review", label: "Review", icon: Sparkles },
@@ -234,7 +237,7 @@ function TaskConversation({ task, models, language, openSettings, engine, onRewo
     <footer className="task-status" aria-live="polite">
       <span>{copy[statusLabels[task.status]]}</span>
       {task.execution?.executionMode === "tomverse_api" && <span>Tomverse API</span>}
-      {task.execution?.executionMode === "provider_cli" && <span>{desktopCodeExecutionCopy[language][task.liveCli ? "cliLive" : "cliFixture"].replace("{cli}", task.execution.cli)}</span>}
+      {task.execution?.executionMode === "provider_cli" && <span>{desktopCodeExecutionCopy[language][task.liveCli ? "cliLive" : "cliFixture"].replace("{cli}", cliName(task.execution.cli, language))}</span>}
       {task.savedLocally === false && <span>{copy.sessionOnly}</span>}
       {task.effort && task.effort !== "default" && <span>{copy.requestedEffort.replace("{effort}", effortLabel(language, task.effort))}</span>}
       {task.actual && <span>{copy.appliedEffort.replace("{effort}", effortLabel(language, task.actual))}</span>}
@@ -503,7 +506,7 @@ function Desktop() {
     ? snapshot.antigravityFixtureModel ?? snapshot.grokFixtureModel ?? snapshot.miniMaxFixtureModel ?? snapshot.vibeFixtureModel ?? snapshot.kimiFixtureModel ?? snapshot.qwenFixtureModel ?? snapshot.claudeFixtureModel ?? snapshot.codexFixtureModel : undefined;
   // The person's own Codex or Claude Code (the server's route is on, and the file is saved and trusted): each runs with its own default model.
   const liveCliModels: Model[] = !cliFixtureModel && snapshot?.codeExecutionPreference === "provider_cli"
-    ? (snapshot.providerCliExec ?? []).map((provider) => ({ id: liveCliModelId(provider), name: liveCliNames[provider], provider: liveCliFile[provider], efforts: [] })) : [];
+    ? (snapshot.providerCliExec ?? []).map((provider) => ({ id: liveCliModelId(provider), name: cliName(liveCliNames[provider], language), provider: liveCliFile[provider], efforts: [] })) : [];
   const liveCli = liveCliModels.length > 0;
   const cliRoute = Boolean(cliFixtureModel) || liveCli;
   // The route is on but no Codex or Claude Code file is saved and trusted yet: the API models cannot run here, and the status says what to do.
@@ -674,7 +677,7 @@ function Desktop() {
   if (!busy && snapshot && online) {
     if (pausedByQuota && task.execution) {
       codeStatus = task.execution.executionMode === "provider_cli"
-        ? executionCopy.cliFixture.replace("{cli}", task.execution.cli) : "Tomverse API";
+        ? executionCopy.cliFixture.replace("{cli}", cliName(task.execution.cli, language)) : "Tomverse API";
     } else if (liveCliOffered && !liveCli) {
       codeStatus = executionCopy.cliUnavailable.replace("{cli}", `${providerClis.openai} / ${providerClis.anthropic}`);
     } else if (selectedModel) {
