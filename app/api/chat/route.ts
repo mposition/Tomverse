@@ -2431,6 +2431,7 @@ async function handleChatPost(
                     authorityId: capability.payload.authorityId,
                     sourcePrompt,
                 });
+                latency.checkpoint("guestRefiner");
             } catch {
                 await retainGuestAutoUnknown(guestAutoRun, "refiner");
                 throw new ChatAccessError(
@@ -3929,6 +3930,7 @@ async function handleChatPost(
             );
         }
         await consumeRefinerPreview();
+        latency.checkpoint("refinerConsumed");
         if (!hasContinuation) recordAutoSelection();
 
         if (modelConfig.usageClass === "deep-research" && session?.user?.id && conversationId && persistenceSourceUserMessageId) {
@@ -4085,6 +4087,7 @@ async function handleChatPost(
                 );
             }
             continuationContextConsumed = true;
+            latency.checkpoint("contextBundleConsumed");
             contextSystemPrompt = verifiedContext.systemPrompt;
             memoryData = verifiedContext.memoryData;
             memoryUsedCount = verifiedContext.memoryUsedCount;
@@ -4277,6 +4280,7 @@ async function handleChatPost(
         });
         projectTools = chatRead.tools;
         chatReadCitations = chatRead.citations;
+        latency.checkpoint("toolsBuilt");
         if (mcpConnector) {
             formattedMessages.push({ role: "system", content: MCP_UNTRUSTED_NOTICE });
             inputEstimate.addText(MCP_UNTRUSTED_NOTICE);
@@ -5852,6 +5856,7 @@ async function handleChatPost(
               });
         leaseOwnership = chatLeaseAcquired(accessGrant.leaseId);
         usageReservation = accessGrant.usageReservation;
+        latency.checkpoint("accessAcquired");
         // Shadow only, and awaited so the settlement update cannot race the
         // insert it depends on. The recorder is inert unless the flag is set
         // and swallows its own failures, so this cannot fail a paid request.
@@ -5884,6 +5889,7 @@ async function handleChatPost(
             );
         });
         if (!presearchQueries?.length) await providerBudgetNotice;
+        latency.checkpoint("budgetNoticeStarted");
 
         // Perplexity's "sonar-deep-research" model doesn't stream like every
         // other model here -- it's a submit-then-poll async job that can run
@@ -10178,6 +10184,22 @@ async function handleChatPost(
         // dispatch record and then failed before a response stream existed
         // still has a duration. A request refused earlier (auth, rate limit,
         // credits) is not a turn and writes no timing line.
+        // A client that gives up before any header arrives is a 499 in the platform logs and, with no
+        // reservation yet, used to leave nothing here. Say how far the turn got and which step it was in,
+        // whether or not a reservation exists. Not a turn timing line: it never records a latency sample.
+        if (req.signal.aborted && !turnTimingLogged) {
+            try {
+                console.info(JSON.stringify({
+                    event: "chat_prestream_abort_timing",
+                    traceId,
+                    modelId: dispatchModelIdForLog ?? null,
+                    ...latency.prestream(),
+                    timestamp: new Date().toISOString(),
+                }));
+            } catch {
+                // Diagnostics only.
+            }
+        }
         if ((dispatchRecord || usageReservation) && !turnTimingLogged) {
             turnTimingLogged = true;
             latency.finish("failed_before_stream", dispatchModelIdForLog ?? null, dispatchProviderForLog ?? null);
