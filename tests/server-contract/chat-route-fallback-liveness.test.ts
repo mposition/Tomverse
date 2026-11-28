@@ -561,6 +561,7 @@ mock.module(mod("lib/apiSecurity.ts"), {
           )
         : null,
     assertMessageCapacity: async () => undefined,
+    checkMessageCapacity: async () => undefined,
     consumeApiRateLimit: async (
       request: Request,
       subject: string,
@@ -683,6 +684,8 @@ type Attempt = {
   toolNames: string[];
   searchDescription?: string;
   preparesStep: boolean;
+  /** The step hook itself, so a test can ask what a given step is given. */
+  prepareStep?: (options: { stepNumber: number; steps: unknown[]; messages: unknown[] }) => unknown;
   /** What reached the provider-facing abort signal. */
   providerAbortedWith: unknown;
   /** The provider signal state at the exact reader-cancel boundary. */
@@ -741,6 +744,7 @@ mock.module("ai", {
         toolNames: Object.keys(options.tools ?? {}),
         searchDescription: typeof searchDescription === "string" ? searchDescription : undefined,
         preparesStep: typeof options.prepareStep === "function",
+        prepareStep: options.prepareStep as Attempt["prepareStep"],
         providerAbortedWith: null,
         providerAbortedBeforeReaderCancel: false,
       };
@@ -1037,6 +1041,9 @@ let durableClaimMode:
   | "conflict" = "claimed";
 let durableClaimCalls = 0;
 let durableTerminalFails = false;
+/** The conversation a pre-Router peek finds an attempt bound in; null is none. */
+let peekedAttemptConversationId: string | null = null;
+let durablePeekCalls = 0;
 class DurableConflict extends Error {
   readonly code = "CHAT_ATTEMPT_ID_REUSED";
 }
@@ -1049,6 +1056,12 @@ mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
     ChatAttemptCasError: class extends Error { readonly code = "CHAT_ATTEMPT_REVISION_CONFLICT"; },
     ChatAttemptIdentityConflictError: DurableConflict,
     ChatAttemptScopeError: class extends Error { readonly code = "CHAT_ATTEMPT_SCOPE_NOT_FOUND"; },
+    peekChatResponseAttempt: async (_userId: string, assistantMessageId: string) => {
+      durablePeekCalls += 1;
+      return peekedAttemptConversationId === null
+        ? null
+        : { assistantMessageId, conversationId: peekedAttemptConversationId };
+    },
     claimChatResponseAttempt: async (input: Record<string, unknown>) => {
       durableClaimCalls += 1;
       lastDurableClaimInput = input;
@@ -2348,6 +2361,44 @@ test("an exact durable replay reattaches without reservation or provider dispatc
   assert.equal("leaseExpiresAt" in payload.attempt, false);
 });
 
+test("a POST whose assistant id is already bound skips the paid Router and still reattaches at the claim", async () => {
+  // Control: nothing bound yet, so this routed turn asks the Router.
+  llmRouterInputs.length = 0;
+  durablePeekCalls = 0;
+  await ask("answers", "reattach");
+  assert.equal(durablePeekCalls, 1);
+  assert.equal(llmRouterInputs.length, 1, "an unbound routed turn asks the Router");
+
+  // An attempt bound in this conversation: the claim can only reattach or
+  // refuse, so the Router is not paid for a duplicate.
+  peekedAttemptConversationId = CONVERSATION_ID;
+  try {
+    llmRouterInputs.length = 0;
+    const { response, body } = await ask("answers", "reattach");
+    assert.equal(llmRouterInputs.length, 0, "no Router call for a bound duplicate");
+    assert.equal(response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
+    assert.equal(durableClaimCalls, 1, "the claim still makes the decision");
+    assert.equal(attempts.length, 0);
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal((JSON.parse(body) as { attempt: { assistantMessageId: string } }).attempt.assistantMessageId,
+      ASSISTANT_MESSAGE_ID);
+
+    // A different identity under the same id is still the claim's 409.
+    llmRouterInputs.length = 0;
+    const conflict = await ask("answers", "conflict", 409);
+    assert.equal(llmRouterInputs.length, 0);
+    assert.equal((JSON.parse(conflict.body) as { code?: string }).code, "CHAT_ATTEMPT_ID_REUSED");
+
+    // An attempt bound in another conversation is not this turn's.
+    peekedAttemptConversationId = "another-conversation";
+    llmRouterInputs.length = 0;
+    await ask("answers", "reattach");
+    assert.equal(llmRouterInputs.length, 1);
+  } finally {
+    peekedAttemptConversationId = null;
+  }
+});
+
 test("a completed durable replay includes its canonical public Message", async () => {
   const { response, body } = await ask("answers", "reattach-completed");
   assert.equal(response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
@@ -2790,6 +2841,15 @@ test("a stall after the swap cancels the fallback's stream, settles and releases
 
   // No answer existed, so no assistant message may be written for one.
   assert.deepEqual(world.messages, []);
+});
+
+test("a turn no provider ever wrote a token for is recorded as unavailable, not as interrupted", async () => {
+  await ask("silent");
+  // The first-token deadline ended it: nothing was interrupted, because
+  // nothing had started. The code is one the attempt row's CHECK allows.
+  const terminal = world.terminals.at(-1) as { status?: string; failureCode?: string } | undefined;
+  assert.equal(terminal?.status, "failed");
+  assert.equal(terminal?.failureCode, "provider_unavailable");
 });
 
 /* ------------------------------------- what the override record may claim */
@@ -4249,7 +4309,18 @@ test("grounded answer guidance and Qwen first-step thinking follow independent g
     assert.equal(lastPart.includes("End of quoted evidence"), withEvidence && scenario !== "answer flag off", scenario);
     assert.equal(lastPart.includes("\nObservation —"), groundedLookupScenarios.includes(scenario), scenario);
     assert.equal(lastPart.includes("requested precision"), groundedFullScenarios.includes(scenario), scenario);
-    assert.equal(attempts[0].preparesStep, ["grounded", "compact", "answer flag off", "fast lookup", "both lookup flags"].includes(scenario), scenario);
+    // Qwen's lookup model is swapped in for the first step only where its gate
+    // is on. Every application-managed search turn now carries a step hook
+    // anyway: its last allowed step may not search again, so a turn whose
+    // budget runs out still ends on an answer rather than on `tool-calls`.
+    const firstStep = await attempts[0].prepareStep?.({ stepNumber: 0, steps: [], messages: [] }) as
+      { model?: unknown } | undefined;
+    assert.equal(Boolean(firstStep?.model),
+      ["grounded", "compact", "answer flag off", "fast lookup", "both lookup flags"].includes(scenario), scenario);
+    const lastStep = await attempts[0].prepareStep?.({ stepNumber: 7,
+      steps: Array.from({ length: 7 }, () => ({ toolCalls: [], toolResults: [] })),
+      messages: [] }) as { toolChoice?: unknown } | undefined;
+    assert.equal(lastStep?.toolChoice, "none", scenario);
     if (scenario === "grounded") ordinarySearchDescription = attempts[0].searchDescription;
     assert.ok(ordinarySearchDescription, "the ordinary web search tool has a provider description");
     if (scenario === "fast lookup" || scenario === "both lookup flags" || scenario === "complex") {

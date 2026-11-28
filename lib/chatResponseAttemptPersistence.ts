@@ -61,6 +61,21 @@ export const CHAT_RESPONSE_ATTEMPT_STORAGE_LIMITS = {
   perUser: () => positiveInteger(process.env.CHAT_RESPONSE_ATTEMPTS_PER_USER, 10_000),
 };
 
+/**
+ * An attempt refused before it reached a provider or a credit reservation (a
+ * context-bundle collision, a refusal raised after the claim such as an
+ * exhausted balance or a full storage quota). Empty, terminal, and never a
+ * turn: it is left out of conversation discovery and out of the creation
+ * caps, so a person refused a few thousand times is not then refused for
+ * having been refused. Creation still passes the durable admission bucket
+ * (`60/minute`, `5,000/day`), which is what bounds these rows.
+ */
+const REFUSED_BEFORE_DISPATCH = {
+  status: "failed",
+  failureCode: "request_refused",
+  partialContent: "",
+} as const;
+
 export const chatRecoveryConversationLockKey = (userId: string, conversationId: string) =>
   `chat-recovery:${userId}:${conversationId}`;
 
@@ -228,11 +243,7 @@ export async function listChatResponseAttempts(input: {
       // A context-consumption loser never reached credit reservation or a
       // provider. It stays directly queryable for security/audit recovery but
       // is not a phantom assistant turn in conversation discovery.
-      NOT: {
-        status: "failed",
-        failureCode: "request_refused",
-        partialContent: "",
-      },
+      NOT: REFUSED_BEFORE_DISPATCH,
     },
     orderBy: [{ updatedAt: "desc" }, { assistantMessageId: "desc" }],
     take: limit,
@@ -306,9 +317,15 @@ export async function claimChatResponseAttempt(input: {
 
     const [conversationAttempts, userAttempts] = await Promise.all([
       tx.chatResponseAttempt.count({
-        where: { userId: input.userId, conversationId: parsed.conversationId },
+        where: {
+          userId: input.userId,
+          conversationId: parsed.conversationId,
+          NOT: REFUSED_BEFORE_DISPATCH,
+        },
       }),
-      tx.chatResponseAttempt.count({ where: { userId: input.userId } }),
+      tx.chatResponseAttempt.count({
+        where: { userId: input.userId, NOT: REFUSED_BEFORE_DISPATCH },
+      }),
     ]);
     if (
       conversationAttempts >= CHAT_RESPONSE_ATTEMPT_STORAGE_LIMITS.perConversation() ||

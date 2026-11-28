@@ -104,6 +104,15 @@ type StreamScript = {
   failAfterText?: unknown;
   /** What the SDK's `usage` promise resolves to, when not the default counts. */
   usage?: unknown;
+  /** `providerMetadata` rejects with this, beside an otherwise normal finish. */
+  metadataFailure?: unknown;
+};
+
+/** Rejected, but handled at once: the route reads it later with allSettled. */
+const rejectedLater = (reason: unknown) => {
+  const promise = Promise.reject(reason);
+  promise.catch(() => undefined);
+  return promise;
 };
 
 let script: StreamScript = {
@@ -253,7 +262,9 @@ mock.module("ai", {
         finishReason: Promise.resolve(script.finishReason),
         rawFinishReason: Promise.resolve(script.rawFinishReason),
         content: Promise.resolve([]),
-        providerMetadata: Promise.resolve({}),
+        providerMetadata: script.metadataFailure
+          ? rejectedLater(script.metadataFailure)
+          : Promise.resolve({}),
       };
     },
   },
@@ -2021,6 +2032,38 @@ test("an interrupted stream with no reported usage is settled on the cancelled-t
   // Estimated from the streamed text, as a cancelled turn is.
   assert.equal(world.settledUsage[0]!.outputTokens, Math.ceil(Buffer.byteLength("Half an answer") / 4));
   assert.deepEqual(world.messages.map((message) => message.status), ["incomplete"]);
+});
+
+/*
+  A finished answer whose provider metadata alone could not be read
+  (lib/chatTurnCompletion.ts). Any rejected completion promise used to count
+  as a broken stream, so a `stop` was saved incomplete and charged prorated.
+*/
+test("a stop whose provider metadata could not be read is saved and charged as the finished answer it is", async () => {
+  const { trailer } = await ask({
+    text: ANSWER,
+    finishReason: "stop",
+    rawFinishReason: "end_turn",
+    metadataFailure: new Error("provider metadata unreadable"),
+  });
+  assert.deepEqual(trailer?.completion, { status: "normal" });
+  assert.deepEqual(world.messages.map((message) => message.status), ["normal"]);
+  assert.deepEqual(world.settlements, ["completed"]);
+  // The provider's own usage still settles it.
+  assert.deepEqual(world.settledUsage, [{ inputTokens: 1_000, outputTokens: 500, usageFromProvider: true }]);
+});
+
+/*
+  A turn its step budget stopped while the model was still calling a tool. It
+  used to be saved `normal` and charged the flat completed rate; the answer it
+  was gathering material for was never written.
+*/
+test("a turn that ended on tool-calls with no file is saved unfinished and settled prorated", async () => {
+  const { trailer } = await ask({ text: "Let me look that up.", finishReason: "tool-calls", rawFinishReason: "tool_use" });
+  // No reason: not the output ceiling and not the provider's fault.
+  assert.deepEqual(trailer?.completion, { status: "incomplete" });
+  assert.deepEqual(world.messages.map((message) => message.status), ["incomplete"]);
+  assert.deepEqual(world.settlements, ["cancelled"]);
 });
 
 test("an error finish with no text is still the empty answer it always was", async () => {

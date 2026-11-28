@@ -242,7 +242,7 @@ import { persistArtifactRows } from "@/lib/generatedArtifactStorage";
 import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";
 import { readPublicCompletedChatMessage } from "@/lib/publicChatMessage";
 import { splitProviderInstructions } from "@/lib/chatProviderPrompt";
-import { resolveChatCompletionOutcome } from "@tomverse/chat-core";
+import { chatTurnSettlement, resolveChatTurnCompletion } from "@/lib/chatTurnCompletion";
 import { ERROR_REPORT_TOKEN_HEADER } from "@/lib/errorReportContract";
 import { issueChatErrorReportGrant } from "@/lib/traceErrorEvidence";
 import { emptyResponseCause, streamFailureGrantInput } from "@/lib/chatStreamErrorReport";
@@ -419,6 +419,7 @@ import { sanitizeWebSearchCitations } from "@/lib/webSearchCitations";
 import {
     apiSecurityResponse,
     assertMessageCapacity,
+    checkMessageCapacity,
     consumeApiRateLimit,
     readLimitedJson,
     reserveDailyUploadBytes,
@@ -527,6 +528,7 @@ import {
     ChatAttemptIdentityConflictError,
     ChatAttemptScopeError,
     claimChatResponseAttempt,
+    peekChatResponseAttempt,
     terminalChatResponseAttempt,
 } from "@/lib/chatResponseAttemptPersistence";
 import { markMessagesSuperseded, readSupersedesMessageIds, withoutSupersededChatMessages } from "@/lib/chatSupersededMessages";
@@ -2856,7 +2858,24 @@ async function handleChatPost(
             const searchUtcDate = resume?.searchUtcDate ?? new Date().toISOString().slice(0, 10);
             fusion = { key, userId, requestDigest, expiresAt, searchUtcDate, resume };
         }
-        const imageRouting = createChatTurnImageRouting(autoImageTurnEligible
+        /*
+          A response attempt already bound to this assistant id ends this POST
+          at the durable claim below -- a reattach to that attempt, or the
+          generic 409 for a different request under the same id -- and never
+          dispatches. Neither outcome depends on what the Router picks, so the
+          paid Router call (and the image classification riding on it) is not
+          made for a duplicate. One owner-scoped primary-key read, only when the
+          Router would be asked; the claim still makes the decision, under its
+          own locks. A location-consent turn keeps its own replay rule.
+        */
+        const routerSkippedForBoundAttempt =
+            deterministicAutoSelection.routed &&
+            !wantsFusion &&
+            conversationRouting?.productKey === "chat" &&
+            Boolean(session?.user?.id && conversationId && assistantMessageId) &&
+            (await peekChatResponseAttempt(session!.user!.id!, assistantMessageId!))
+                ?.conversationId === conversationId;
+        const imageRouting = createChatTurnImageRouting(autoImageTurnEligible && !routerSkippedForBoundAttempt
             ? { userId: session!.user!.id!, conversationId: conversationId!, text: profileTextFor(messages),
                 plan: accountPlan, traceId, request: req, attachedPhoto: latestUserTurnHasAttachments(autoRoutingMessages) }
             : null, deterministicAutoSelection.routed && combinedChatImageIntentEnabled(), fusion?.resume?.image);
@@ -2914,8 +2933,10 @@ async function handleChatPost(
         // classification beside it (off unless CHAT_ROUTER_IMAGE_HEDGE_MS).
         const imageHedgeMs = imageRouting.context ? chatRouterImageHedgeMs() : null;
         const imageHedge = imageHedgeMs ? setTimeout(() => imageRouting.hedge(), imageHedgeMs) : null;
-        let llmPick = deterministicAutoSelection.routed
+        let llmPick = deterministicAutoSelection.routed && !routerSkippedForBoundAttempt
             ? await pickAutoModelWithLlm({
+                      // A client that goes away stops the paid call with it.
+                      abortSignal: req.signal,
                       importedSource,
                       ...(importedSource ? { verifyImportedSource } : {}),
                       ...(historySearchActive ? { historySearch: {
@@ -5763,6 +5784,36 @@ async function handleChatPost(
                 signals: routerCandidateInputs.signals,
             };
         });
+        /*
+          An answer that could never be stored is refused before it is paid
+          for. The Message write re-checks under its own lock and stays the
+          authority; this removes the ordinary case -- an account already at its
+          storage limit, whose turn used to be charged, streamed and then lost
+          at that write (docs/policy/credit-and-cost-limits.md, "완료 분기의
+          정산"). One message, sized at this turn's output ceiling in the four
+          bytes per token the settlement estimator uses. Only the storage
+          refusal stops the turn: if the check itself fails, the write decides
+          as it always has.
+        */
+        if (session?.user?.id && conversationId && assistantMessageId) {
+            try {
+                await checkMessageCapacity(
+                    prisma,
+                    session.user.id,
+                    conversationId,
+                    1,
+                    budget.maxOutputTokens * 4
+                );
+            } catch (error) {
+                if (apiSecurityResponse(error)) throw error;
+                logRequestError(
+                    "chat_message_capacity_precheck_failed",
+                    traceId,
+                    error,
+                    modelConfig.id
+                );
+            }
+        }
         const enabledTools =
             nativeSearchEnabled || appManagedSearchEnabled
                 ? ["web_search"]
@@ -6719,6 +6770,34 @@ async function handleChatPost(
                       contextWindowTokens: modelConfig.contextWindowTokens!,
                   })
                 : null;
+        /*
+          An application-managed search turn ends on an answer. Its last
+          allowed step may not call the search again -- the rule the project,
+          MCP and long-context loops already apply to theirs -- or a model still
+          searching when the step budget ran out ended on `tool-calls` with no
+          answer written. Only where nothing else shapes the steps: an artifact
+          tool's last-step call stores a file, which is an answer
+          (docs/policy/generated-artifacts.md section 8), and the other loops
+          carry this rule themselves. A one-step budget is left alone, because
+          its only step is the one that could search.
+        */
+        const appManagedSearchStepCap = Math.min(
+            APP_MANAGED_SEARCH_MAX_STEPS,
+            toolLoopStepCap
+        );
+        const appManagedSearchFinalStep =
+            appManagedSearchTool &&
+            !artifactToolConfig &&
+            !projectTools &&
+            !mcpConnector &&
+            !longContextLoopStep &&
+            !researchPreviewExecution &&
+            appManagedSearchStepCap > 1
+                ? ({ steps }: { steps: readonly unknown[] }) =>
+                      steps.length === appManagedSearchStepCap - 1
+                          ? { toolChoice: "none" as const }
+                          : {}
+                : null;
         await recordDispatchStarted(dispatchRecord);
         if (hasContinuation) void recordContinuationSeedOutcome(finalContinuation.outcome);
         latency.provider();
@@ -6778,9 +6857,20 @@ async function handleChatPost(
                                   longContextLoopStep.outputSpent,
                               ],
                           }
-                        : lookupStep
-                          ? { prepareStep: lookupStep }
-                          : {}),
+                        : appManagedSearchFinalStep
+                          ? {
+                                prepareStep: (options: {
+                                    stepNumber: number;
+                                    steps: Array<StepResult<ToolSet>>;
+                                    messages: ModelMessage[];
+                                }) => ({
+                                    ...(lookupStep?.(options) ?? {}),
+                                    ...appManagedSearchFinalStep(options),
+                                }),
+                            }
+                          : lookupStep
+                            ? { prepareStep: lookupStep }
+                            : {}),
                     ...(mcpConnector ? {
                         maxRetries: 0,
                         stopWhen: stepCountIs(MCP_CHAT_MAX_STEPS),
@@ -7175,12 +7265,20 @@ async function handleChatPost(
                                 provider: dispatched.provider,
                                 finishReason:
                                     outcome === "cancelled" ? "cancelled" : "error",
+                                // A provider that never produced a token --
+                                // the first-token deadline, or a stream that
+                                // failed before its first chunk -- did not
+                                // interrupt anything. The attempt says so with
+                                // a code the row's CHECK already allows.
                                 failureCode:
                                     outcome === "cancelled"
                                         ? null
                                         : outcome === "empty"
                                           ? "internal_error"
-                                          : "stream_interrupted",
+                                          : instrumentation?.outcome === "failed_pre_token" &&
+                                              instrumentation.failureLayer === "provider"
+                                            ? "provider_unavailable"
+                                            : "stream_interrupted",
                             });
                             durableAttempt = null;
                             durableCheckpointWriter = null;
@@ -8673,16 +8771,25 @@ async function handleChatPost(
                           Research Preview answer is its accepted report,
                           checked above, not what the stream did after it.
                         */
-                        const resolvedCompletionOutcome = resolveChatCompletionOutcome({
-                            finishReason,
+                        /*
+                          Only the finish reason's own rejection is a broken
+                          stream: a `stop` whose `response`, `content` or
+                          `providerMetadata` could not be read is a finished
+                          answer, and a missing `usage` is settled on the
+                          estimate below. A `tool-calls` finish with no file is
+                          a turn its step budget stopped (lib/chatTurnCompletion.ts).
+                        */
+                        const completionOutcome = resolveChatTurnCompletion({
+                            finishReason:
+                                finishReasonResult.status === "fulfilled"
+                                    ? finishReasonResult.value
+                                    : undefined,
                             rawFinishReason,
-                            streamFailed: Boolean(completionError),
+                            isResearchPreview,
+                            filesDelivered:
+                                Boolean(conversationId && assistantMessageId) &&
+                                (artifactCollector?.stored.length ?? 0) > 0,
                         });
-                        const completionOutcome =
-                            isResearchPreview &&
-                            resolvedCompletionOutcome.incompleteReason === "interrupted"
-                                ? { status: "normal" as const }
-                                : resolvedCompletionOutcome;
                         if (completionOutcome.status === "incomplete") {
                             console.warn(
                                 JSON.stringify({
@@ -8747,8 +8854,17 @@ async function handleChatPost(
                                 : {}),
                             // The normalizer read the finished response, so an
                             // absent count here means the search really did not
-                            // run -- not that nobody looked.
-                            searchQueriesObserved: true,
+                            // run -- not that nobody looked. Unless the content
+                            // it reads could not be read: a native search is
+                            // counted from that content, and a finished answer
+                            // whose content rejected is now settled as finished,
+                            // so its searches are settled as nobody counted
+                            // them (at the authorized ceiling). An application-
+                            // managed search is counted in this process and is
+                            // observed either way.
+                            searchQueriesObserved:
+                                contentResult.status === "fulfilled" ||
+                                appManagedSearchSnapshot !== null,
                         };
 
                         const durableFinalCheckpoint = durableCheckpointWriter
@@ -8828,9 +8944,16 @@ async function handleChatPost(
                           attempt record says what it was, a post-token
                           provider failure, rather than a cancellation.
                         */
-                        const providerInterrupted =
-                            answerDelivered &&
-                            completionOutcome.incompleteReason === "interrupted";
+                        /*
+                          A turn its own step budget stopped (`tool-calls`,
+                          no file) is settled the same way, but it is not a
+                          provider failure: the provider answered every call
+                          it was sent.
+                        */
+                        const { settledAs, providerInterrupted } = chatTurnSettlement({
+                            completion: completionOutcome,
+                            answerDelivered,
+                        });
                         const interruptionCause = observedStreamError ?? completionError;
                         const interruption = providerInterrupted
                             ? classifyStreamFailure({
@@ -8840,11 +8963,6 @@ async function handleChatPost(
                                   downstreamOpen: true,
                               })
                             : null;
-                        const settledAs = providerInterrupted
-                            ? "cancelled"
-                            : answerDelivered
-                              ? "completed"
-                              : "empty";
                         const interruptionInstrumentation = interruption
                             ? {
                                   outcome: interruption.observedOutcome,
@@ -9688,11 +9806,21 @@ async function handleChatPost(
                       application's, and was being filed as a provider and a
                       model failure (always `phase: "read"`).
                     */
+                    /*
+                      A storage refusal at the Message write
+                      (`MESSAGE_STORAGE_QUOTA_EXCEEDED`) is this application's
+                      too: the provider finished and was paid, and only the
+                      save was refused (chat-durable-draft-and-attempt-recovery.md
+                      section 7: a local persistence refusal is never provider
+                      evidence). `apiSecurityResponse` is the module's own test
+                      for its error class.
+                    */
                     const completionFailureIsLocal =
                         providerStreamFinished &&
                         (error instanceof ChatAttemptCasError ||
                             error instanceof DatabaseWriteOutcomeUnknownError ||
-                            isDatabaseError(error));
+                            isDatabaseError(error) ||
+                            apiSecurityResponse(error) !== null);
                     const streamFailureIsLocal =
                         isStorageError(error) ||
                         isChatLocalFailure(error) ||
