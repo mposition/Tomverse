@@ -100,7 +100,9 @@ export async function PUT(req: Request) {
             await prisma.chatAnswerRating.deleteMany({ where: { messageId: message.id, userId } });
             return NextResponse.json({ rating: null });
         }
-        const reason = body.rating === "down" ? body.reason ?? null : null;
+        // Read once: the retry closure below does not keep the null narrowing.
+        const rating = body.rating;
+        const reason = rating === "down" ? body.reason ?? null : null;
         // A double click or two tabs rate the same answer at once: both upserts
         // see no row, the second create trips the unique key. The retry takes the
         // update branch against the winner's row.
@@ -111,10 +113,10 @@ export async function PUT(req: Request) {
                 messageId: message.id,
                 conversationId: message.conversationId,
                 modelId: message.modelId,
-                rating: body.rating,
+                rating,
                 reason,
             },
-            update: { rating: body.rating, reason, modelId: message.modelId },
+            update: { rating, reason, modelId: message.modelId },
             select: RATING_SELECT,
         }));
         return NextResponse.json({ rating: publicChatAnswerRating(saved) });
