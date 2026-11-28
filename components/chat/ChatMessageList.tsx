@@ -132,6 +132,12 @@ type ChatMessageListProps = {
    */
   onCompareInReview?: (messageId: string) => void;
   compareRequiresCompleted?: boolean;
+  /**
+   * Chat: start a new conversation holding the turns up to this answer
+   * (lib/chatConversationBranch.ts). Resolves when the attempt is over; on
+   * success the page has already moved to the new conversation.
+   */
+  onBranchFromAnswer?: (messageId: string) => Promise<void>;
   onRetryWithoutAttachments?: () => void;
   /**
    * Re-sends the last prompt with a set of already-missing stored files
@@ -652,6 +658,7 @@ export function ChatMessageList({
   enableQuote = false,
   onCompareInReview,
   compareRequiresCompleted = false,
+  onBranchFromAnswer,
   onRetryWithoutAttachments,
   onContinueWithoutUnavailableAttachments,
   onRetryConcurrency,
@@ -693,6 +700,7 @@ export function ChatMessageList({
   // regenerated or edited (lib/chatSupersededTurns.ts).
   const lastTurn = useMemo(() => lastReplaceableTurn(messages), [messages]);
   const supersededIds = useSupersededIds(currentChatId);
+  const [branchingId, setBranchingId] = useState<string | null>(null);
   useAnswerReadyNotice(isSending, messages[messages.length - 1]);
 
   const recoveryEnabled = Boolean(onRestoreQuestion);
@@ -1692,6 +1700,18 @@ export function ChatMessageList({
                       <AnswerTurnActions
                         messageId={msg.id}
                         content={msg.content}
+                        branch={
+                          onBranchFromAnswer && !importedTranscript && (msg.status === undefined || msg.status === "normal")
+                            ? {
+                                onBranch: () => {
+                                  setBranchingId(msg.id);
+                                  void onBranchFromAnswer(msg.id).finally(() => setBranchingId(null));
+                                },
+                                pending: branchingId === msg.id,
+                                disabled: isSending || isSendPreparing || branchingId !== null,
+                              }
+                            : undefined
+                        }
                         regenerate={
                           onRegenerateAnswer && lastTurn?.answer.id === msg.id && canEditQuestion(lastTurn)
                             ? {

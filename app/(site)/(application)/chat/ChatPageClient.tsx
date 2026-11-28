@@ -176,6 +176,7 @@ import { useContinuationSource } from "@/components/continuations/useContinuatio
 import { useReviewContinuationDraftAccess, useReviewContinuationHandoff } from "@/components/continuations/useReviewContinuationHandoff";
 import { reviewHandoffReferencesAvailable } from "@/lib/reviewContinuationHandoffClient";
 import { reviewContinuationHandoffCopy } from "@/locales/reviewContinuationHandoff";
+import { chatAnswerSurfaceCopy } from "@/locales/chatAnswerSurface";
 import { useContinuationLauncher } from "@/components/imports/useContinuationLauncher";
 import {
   REVIEW_FILE_HANDOFF_PARAM,
@@ -10804,6 +10805,46 @@ export function ChatPageClient({
     if (!options?.reattachFile) clearReviewFileHandoffs();
     router.push(reviewPrefillHref(seed, options?.reattachFile ? beginReviewFileHandoff(identityKey) : undefined));
   };
+  /*
+    "Branch from this answer" (lib/chatConversationBranch.ts): the server copies
+    the standing text turns up to the answer into a new Chat conversation, and
+    this page opens it as a fresh load -- the same deep link a reload uses --
+    through the product switch's own admission (drafts preserved, blocked while
+    a send, mode write or draft conflict is open). The conversation left is
+    never changed.
+  */
+  const branchChatAnswer = mountedSurface === "chat" && routeSurface !== "continuation" && !isGuestMode &&
+    !temporaryChat.isActive && shellConversationId
+    ? async (messageId: string) => {
+        const copy = chatAnswerSurfaceCopy[lang];
+        const accountId = accountConversationId(shellConversationId);
+        if (!accountId) return;
+        if (!handleProductSwitch()) { showToast(copy.branchBlocked, "info"); return; }
+        try {
+          const response = await fetch(`/api/conversations/${encodeURIComponent(accountId)}/branch`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ messageId, titleTemplate: copy.branchTitleTemplate, filesTemplate: copy.branchFilesTemplate }),
+          });
+          const body = (await response.json().catch(() => null)) as { id?: unknown; code?: unknown } | null;
+          if (response.ok && typeof body?.id === "string") {
+            window.location.assign(conversationHandoffHref("chat", body.id, REVIEW_WORKSPACE_PATH));
+            return;
+          }
+          const refusal: Record<string, string> = {
+            BRANCH_LOCKED: copy.branchLocked,
+            BRANCH_TEMPORARY: copy.branchTemporary,
+            BRANCH_EXTERNAL_CONTINUATION: copy.branchExternal,
+            BRANCH_PROJECT_ARCHIVED: copy.branchProjectArchived,
+            CONVERSATION_STORAGE_QUOTA_EXCEEDED: copy.branchQuota,
+            MESSAGE_STORAGE_QUOTA_EXCEEDED: copy.branchQuota,
+          };
+          showToast((typeof body?.code === "string" && refusal[body.code]) || copy.branchFailed, "error");
+        } catch {
+          showToast(copy.branchFailed, "error");
+        }
+      }
+    : undefined;
   const beginReviewChatDraft = useCallback(() => {
     conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
     currentChatIdRef.current = null;
@@ -10943,6 +10984,7 @@ export function ChatPageClient({
           onProductSwitch={handleProductSwitch}
           onCompareInReview={compareChatInReview}
           onCompareContinuationInReview={compareContinuationAnswer}
+          onBranchFromAnswer={branchChatAnswer}
           transcriptScope={mountedSurface === "chat" ? "conversation" : "model"}
           onRestorePrompt={restoreChatPrompt}
           onRetryPrompt={retryChatPrompt}
@@ -11142,6 +11184,7 @@ export function ChatPageClient({
           onProductSwitch={handleProductSwitch}
           onCompareInReview={compareChatInReview}
           onCompareContinuationInReview={compareContinuationAnswer}
+          onBranchFromAnswer={branchChatAnswer}
           transcriptScope={mountedSurface === "chat" ? "conversation" : "model"}
           onRestorePrompt={restoreChatPrompt}
           onRetryPrompt={retryChatPrompt}

@@ -145,6 +145,8 @@ export type DesktopChatShellProps = {
   onRetryPrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
   onCompareInReview?: (seed: string, options?: { reattachFile: boolean }) => void;
   onCompareContinuationInReview?: (assistantMessageId: string) => void;
+  /** Chat: new conversation from an answer; the page leaves on success. */
+  onBranchFromAnswer?: (messageId: string) => Promise<void>;
   conversations: Conversation[];
   currentChatId: string | null;
   selectedModels: string[];
@@ -469,6 +471,7 @@ export function DesktopChatShell({
   onRetryPrompt,
   onCompareInReview,
   onCompareContinuationInReview,
+  onBranchFromAnswer,
   conversations,
   currentChatId,
   selectedModels,
@@ -1478,6 +1481,7 @@ export function DesktopChatShell({
                   onRetryPrompt={onRetryPrompt}
                   onCompareInReview={onCompareInReview}
                   onCompareContinuationInReview={onCompareContinuationInReview}
+                  onBranchFromAnswer={onBranchFromAnswer}
                   hasImportedTranscript={hasImportedTranscript}
                   importedMessages={importedMessages}
                   importedTranscript={importedTranscript}

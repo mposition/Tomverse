@@ -116,6 +116,32 @@ test("a chart is code while the answer streams, and when its spec is invalid", (
   assert.match(invalid, /data-testid="chat-code-copy-button"/);
 });
 
+/* --------------------------------------------------------------- branch */
+
+test("every finished answer offers a branch when Chat wires it, and nothing else does", () => {
+  const messages: Message[] = [
+    { id: "u0", role: "user", content: "Older" },
+    answerWith("Older answer", { id: "a0" }),
+    question,
+    answerWith("Newest answer"),
+  ];
+  const html = render(messages, { onBranchFromAnswer: async () => {} });
+  assert.equal(count(html, /data-testid="chat-branch-answer"/g), 2);
+  assert.match(html, /Branch to a new chat/);
+  assert.match(render(messages, { onBranchFromAnswer: async () => {} }, "ko"), /여기서 새 대화로/);
+  // Review and the model panels never pass it.
+  assert.ok(!render(messages).includes("chat-branch-answer"));
+  // A stopped answer and an imported transcript are not branch points.
+  assert.ok(!render([question, answerWith("Half", { status: "incomplete" })], { onBranchFromAnswer: async () => {} }).includes("chat-branch-answer"));
+});
+
+test("a branch is not offered while an answer is streaming, and is disabled while sending", () => {
+  const messages: Message[] = [question, answerWith("Done"), { id: "u2", role: "user", content: "Next" }, answerWith("Partial", { id: "a2" })];
+  const streaming = render(messages, { onBranchFromAnswer: async () => {}, isSending: true });
+  assert.equal(count(streaming, /data-testid="chat-branch-answer"/g), 1, "only the finished answer");
+  assert.match(streaming, /data-testid="chat-branch-answer"[^>]*disabled=""/);
+});
+
 /* --------------------------------------------- regenerate, edit, quote */
 
 test("the newest finished answer offers regenerate and another model; older ones do not", () => {
