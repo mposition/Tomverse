@@ -5,9 +5,14 @@ import {
     planPackageRead,
     readPackageDirectoryFromBlob,
 } from "@/lib/assistantPackageArchive";
-import type { AssistantPackageRefusalCode } from "@/lib/assistantPackageLimits";
 import {
+    ASSISTANT_PACKAGE_LIMITS,
+    type AssistantPackageRefusalCode,
+} from "@/lib/assistantPackageLimits";
+import {
+    buildBareSkillReview,
     buildPackageReview,
+    isBareSkillDocumentName,
     type AssistantPackageReview,
 } from "@/lib/assistantPackageReview";
 
@@ -73,6 +78,29 @@ const sha256Hex = async (input: string | Uint8Array): Promise<string> => {
 };
 
 async function parse(file: File): Promise<void> {
+    // A SKILL.md chosen on its own. There is no container to read, so there is
+    // no directory, no plan and nothing to extract later.
+    if (isBareSkillDocumentName(file.name)) {
+        // Refused from the size the browser reports, before a byte is read.
+        if (file.size > ASSISTANT_PACKAGE_LIMITS.maxEntryBytes) {
+            post({
+                type: "refused",
+                code: "ASSISTANT_PACKAGE_TOO_LARGE",
+                cause: "skill_document_too_large",
+            });
+            return;
+        }
+        const result = await buildBareSkillReview({
+            bytes: new Uint8Array(await file.arrayBuffer()),
+            sha256Hex,
+        });
+        if (result.outcome === "refused") {
+            post({ type: "refused", code: result.code, cause: result.cause });
+            return;
+        }
+        post({ type: "review", review: result.review });
+        return;
+    }
     const directory = await readPackageDirectoryFromBlob(file);
     if (directory.outcome === "refused") {
         post({ type: "refused", code: directory.code, cause: directory.cause });
@@ -136,6 +164,12 @@ async function parse(file: File): Promise<void> {
  * inflate something the review path decided not to.
  */
 async function extract(file: File, paths: readonly string[]): Promise<void> {
+    // A bare SKILL.md holds no documents. Answered without opening it as a
+    // container, which it is not.
+    if (isBareSkillDocumentName(file.name)) {
+        post({ type: "extracted", entries: [] });
+        return;
+    }
     const directory = await readPackageDirectoryFromBlob(file);
     if (directory.outcome === "refused") {
         post({ type: "refused", code: directory.code, cause: directory.cause });
