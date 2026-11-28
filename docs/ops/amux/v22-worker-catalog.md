@@ -151,7 +151,7 @@ CLI runs only inside a bubblewrap view (network kept): `/usr`, only the
 `hosts`, `nsswitch.conf`, `localtime`; the rest of `/etc` is empty), its own
 install directory `/opt/tomverse-amux-v22/<dir>` (the CLI and its Python must
 be installed there), the guard's node and script, the checkout (writable for
-implement with its `.git` read-only, read-only otherwise), the checkout read-only and the run home; nothing else of the
+implement with its `.git` read-only, read-only otherwise) and the run home; nothing else of the
 box is visible, and where bwrap cannot start the CLI does not either. A
 `PreToolUse` hook (`lib/amux/v22KimiToolGuard.mjs`) also blocks, before a tool
 runs, any path that resolves outside the checkout (symlinks and a pattern's

@@ -264,7 +264,13 @@ test("the stream settles on its last assistant message, with the wire's tokens",
     { valid: false, reason: "tool_guard_unconfirmed" }, String(guardDecisions));
   // A string content (--final-message-only's shape) is read as the answer.
   assert.equal(parseAmuxV22ChannelOutput("kimi", jsonl({ role: "assistant", content: "Done." }),
-    { exitCode: 0, role: "investigate", worktreePath: WORKTREE }).resultText, "Done.");
+    { exitCode: 0, role: "investigate", worktreePath: WORKTREE, guardDecisions: 0 }).resultText, "Done.");
+  // With no tool call the guard log must still say none: a decision the
+  // stream does not show, or a log that cannot be read, is no result.
+  for (const guardDecisions of [1, null])
+    assert.deepEqual(parseAmuxV22ChannelOutput("kimi", jsonl({ role: "assistant", content: "Done." }),
+      { exitCode: 0, role: "investigate", worktreePath: WORKTREE, guardDecisions }),
+    { valid: false, reason: "tool_guard_unconfirmed" }, String(guardDecisions));
   assert.equal(amuxV22OutputShape(output),
     "assistant:ReadFile tool assistant:Grep tool*2 assistant");
 });
@@ -302,8 +308,9 @@ test("a tool outside the read list, or a path that leaves the checkout, is never
 });
 
 test("a stream without its answer, a non-JSON line, a write role or an unseen role is not a result", () => {
+  // These streams make no tool call that reaches a result, so the log holds none.
   const options = { exitCode: 0, role: "review", worktreePath: WORKTREE, sessionUsage: USAGE,
-    guardDecisions: 1 };
+    guardDecisions: 0 };
   const reason = (output, extra = {}) => {
     const parsed = parseAmuxV22ChannelOutput("kimi", output, { ...options, ...extra });
     return parsed.valid ? null : parsed.reason;
