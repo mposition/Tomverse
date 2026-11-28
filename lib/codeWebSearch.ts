@@ -31,7 +31,7 @@ import { externalApiAdmissionHook } from "@/lib/externalApiAdmission";
 import { externalApiEnabled, externalApiUserAllowed } from "@/lib/externalApiCatalogCore";
 import { externalApiErrorResponse, externalApiRefusal, idempotentReplay, positiveInteger } from "@/lib/externalApiInference";
 import { sha256Hex } from "@/lib/externalApiKeyCore";
-import { authenticateExternalApiKey } from "@/lib/externalApiKeys";
+import { admissionCredential, authenticateExternalApiCaller, receiptOwner } from "@/lib/externalApiCaller";
 import { ProtocolError } from "@/lib/openAiChatProtocol";
 import { prisma } from "@/lib/prisma";
 import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime";
@@ -56,6 +56,10 @@ import { reserveAppManagedSearchCost } from "@/lib/webSearchNativeCostReservatio
  *
  * Never retried here, like every external request: a request whose outcome is
  * unknown is reported, and the client asks for its receipt.
+ *
+ * Desktop Code's engine may come with the account's Desktop session instead of
+ * a key (lib/externalApiCaller.ts): the same account, price, hold, settlement
+ * and receipt, with no key cap of its own.
  */
 
 /** Whether a signed-in account would be served: the switch, the API, the account list and a ready search backend. */
@@ -99,7 +103,7 @@ export async function handleCodeWebSearch(request: Request, deps: { run?: CodeWe
     let maxQueries = 0;
     let input: CodeWebSearchToolInput | null = null;
     try {
-        const key = await authenticateExternalApiKey(request.headers.get("authorization"));
+        const key = await authenticateExternalApiCaller(request);
         const account = await externalApiAccountAccess(key.userId);
         if (!account.allowed) return externalApiErrorResponse(403, account.message, account.code, { requestId });
         // The same request-rate guard as a generation: a search is a paid request too.
@@ -119,7 +123,7 @@ export async function handleCodeWebSearch(request: Request, deps: { run?: CodeWe
         }
         const idempotencyKeyDigest = idempotencyHeader ? sha256Hex(idempotencyHeader) : null;
         if (idempotencyKeyDigest) {
-            const replay = await idempotentReplay(key.keyId, idempotencyKeyDigest, requestDigest);
+            const replay = await idempotentReplay(receiptOwner(key), idempotencyKeyDigest, requestDigest);
             if (replay) return replay;
         }
 
@@ -156,7 +160,7 @@ export async function handleCodeWebSearch(request: Request, deps: { run?: CodeWe
                 enabledTools: ["web_search"],
                 withinReservationTransaction: externalApiAdmissionHook({
                     requestId,
-                    keyId: key.keyId,
+                    credential: admissionCredential(key),
                     userId: key.userId,
                     modelId: SEARCH_ONLY_CHAT_BUDGET_MODEL_ID,
                     stream: false,
@@ -170,7 +174,7 @@ export async function handleCodeWebSearch(request: Request, deps: { run?: CodeWe
         } catch (error) {
             // A twin admitted together with the original gets the original's receipt.
             if (idempotencyKeyDigest && (isChatAccessError(error) || error instanceof ApiSecurityError)) {
-                const replay = await idempotentReplay(key.keyId, idempotencyKeyDigest, requestDigest);
+                const replay = await idempotentReplay(receiptOwner(key), idempotencyKeyDigest, requestDigest);
                 if (replay) return replay;
             }
             throw error;

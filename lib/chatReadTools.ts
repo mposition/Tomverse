@@ -54,6 +54,26 @@ export type ChatReadToolContext = {
     env?: Record<string, string | undefined>;
 };
 
+/** The turn-level gate both read tools share. */
+const chatReadToolsEligible = (context: Pick<ChatReadToolContext, "userId" | "conversationId" | "productKey" | "researchTurn" | "nativeSearch" | "otherToolOwner" | "model">) =>
+    Boolean(context.userId) && Boolean(context.conversationId) &&
+    context.productKey === "chat" &&
+    !context.researchTurn && !context.nativeSearch && !context.otherToolOwner &&
+    getArtifactToolSupport(context.model) === "verified";
+
+/**
+ * Whether this turn will carry `read_url`. Pure and synchronous so the chat route can ask it
+ * before the system blocks are built: a turn that can read a pasted link must not be told, in
+ * the same request, that nothing on the web is reachable (`lib/webSearchCapabilityPrompt.ts`).
+ * It decides from the same gate and the same link scan as `withChatReadTools`.
+ */
+export const chatUrlReadOffered = (
+    context: Pick<ChatReadToolContext, "userId" | "conversationId" | "productKey" | "researchTurn" | "nativeSearch" | "otherToolOwner" | "model" | "userMessages" | "env">
+): boolean =>
+    chatUrlReadingEnabled(context.env ?? process.env) &&
+    chatReadToolsEligible(context) &&
+    userLinksFromMessages(context.userMessages.map(messageText)).length > 0;
+
 export async function withChatReadTools(context: ChatReadToolContext): Promise<{
     tools: ChatToolSlot | null;
     citations: () => WebSearchCitation[];
@@ -63,15 +83,8 @@ export async function withChatReadTools(context: ChatReadToolContext): Promise<{
     const urlOn = chatUrlReadingEnabled(env);
     const historyOn = chatHistoryReferenceEnabled(env);
     const memoryOn = chatMemoryToolEnabled(env);
-    if (
-        (!urlOn && !historyOn && !memoryOn) ||
-        !context.userId || !context.conversationId ||
-        context.productKey !== "chat" ||
-        context.researchTurn || context.nativeSearch || context.otherToolOwner ||
-        getArtifactToolSupport(context.model) !== "verified"
-    ) {
-        return none;
-    }
+    // The id checks repeat the gate so TypeScript keeps both narrowed below.
+    if ((!urlOn && !historyOn && !memoryOn) || !chatReadToolsEligible(context) || !context.userId || !context.conversationId) return none;
     const parts: ChatReadPart[] = [];
     if (urlOn) {
         // Offered only when the user pasted a link: a turn with no link pays no definition tokens.

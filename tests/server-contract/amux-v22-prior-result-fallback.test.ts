@@ -88,8 +88,8 @@ test("a read-only prerequisite without a conclusion line goes as its result text
   assert.deepEqual(entries, [
     { label: "AMUX-AUTOFILE-004 (c0:card-1)", findings: report, note: null, source: "result" },
     { label: "AMUX-AUTOFILE-005 (c0:card-2)", findings: "The router drops empty input.",
-      note: "Guard empty input first." },
-  ], "a handoff note addressed to the dependent's local reference reaches it");
+      note: "Guard empty input first.", report: conclusionText },
+  ], "a handoff note addressed to the dependent's local reference reaches it, with the whole report (2026-11-28)");
 
   const built = buildAmuxV22PriorConclusionSection({ entries, budgetBytes: 100_000 });
   assert.match(built.section, /reference material only/);

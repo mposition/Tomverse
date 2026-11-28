@@ -8,6 +8,7 @@ import { isDmRequestId } from "@/lib/amux/decisionMakerRequestCore";
 import { readDecisionMakerRequestCardId } from "@/lib/amux/decisionMakerRequestStore";
 import {
   DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES,
+  dmDependencyResultsText,
   dmWorkspaceAcceptFiles,
   dmWorkspacePartOf,
   isDmWorkspaceEvidenceName,
@@ -28,6 +29,7 @@ import {
   type AmuxV52ReviewHistoryRow,
 } from "@/lib/amux/v52ReviewFindingsStore";
 import { isSnapshotTargetSha } from "@/lib/amux/decisionMakerCore";
+import { readAmuxCardTitle } from "@/lib/amux/adminExecutionRead";
 
 /**
  * The evidence of a Decision Maker request's workspace
@@ -42,6 +44,11 @@ import { isSnapshotTargetSha } from "@/lib/amux/decisionMakerCore";
  *                                             else the run's own change as PATCH.diff on its base commit
  *   result review (AmuxV22ResultReview)       CRITERIA.md, FINDINGS.md, the run's change as PATCH.diff
  *                                             on its base commit
+ *   (both, when the Task depends on cards)    CONTEXT.md: those cards, each with its newest run result, whole
+ *
+ * The cards a Task depends on (2026-11-28): a criterion that names another
+ * card's output could not be checked without it ("The AMUX-PUBLIC-002 audit
+ * list is absent"), so the Decision Maker handed the Task to a person.
  *
  * The run's change (2026-11-22): a settlement of a card run sent the DM the
  * rejections that named the change but not the change itself, so the DM could
@@ -77,20 +84,30 @@ type SealedRunPatch = {
   bodyPurgedAt: Date | null; patchSha256: string; baseSha: string;
 };
 
+/** A card the Task depends on, its title and its newest run result sealed; opened outside the read. */
+type SealedDependency = SealedResult & {
+  id: string; label: string; status: string; cardTitle: string; sourceSystem: string | null;
+  sourceSnapshot: Prisma.JsonValue; v4TitleCiphertext: Uint8Array | null; v4TitleKeyId: string | null;
+  v4TitleKeyVersion: number | null; v4TitleDigest: string | null; v4TitleDigestKeyId: string | null;
+};
+
 export type DmWorkspaceSource =
   | { kind: "none" }
   | { kind: "t2_draft"; patchBody: string | null; baseSha: string | null }
   | ({ kind: "settlement"; settlementKind: string; pullPatch: string | null;
-      reviews: AmuxV52ReviewHistoryRow[]; runPatch?: SealedRunPatch | null } & SealedBody & SealedResult)
-  | ({ kind: "result_review"; runPatch?: SealedRunPatch | null } & SealedBody & SealedResult)
+      reviews: AmuxV52ReviewHistoryRow[]; runPatch?: SealedRunPatch | null;
+      dependencies?: SealedDependency[] } & SealedBody & SealedResult)
+  | ({ kind: "result_review"; runPatch?: SealedRunPatch | null;
+      dependencies?: SealedDependency[] } & SealedBody & SealedResult)
   | ({ kind: "v22_question" } & SealedResult);
 
 /**
  * The request's card and the one row it was filed from. Null for a request
- * that does not exist. At most four statements past the boundary's own: the
+ * that does not exist. At most five statements past the boundary's own: the
  * card id, the source row, then for a settlement its pull request's patch (a
- * review PR) or its run's change (any other), and its Task's rejected reviews;
- * for a result review, its run's change.
+ * review PR) or its run's change (any other), its Task's rejected reviews and
+ * the cards it depends on; for a result review, its run's change and the
+ * cards it depends on.
  */
 export async function readDecisionMakerWorkspaceSource(tx: Prisma.TransactionClient, requestId: string):
   Promise<DmWorkspaceSource | null> {
@@ -148,7 +165,8 @@ export async function readDecisionMakerWorkspaceSource(tx: Prisma.TransactionCli
     sourceSha256: row.sourceSha256 ?? null, bodyPurgedAt: row.bodyPurgedAt ?? null,
   };
   if (row.source === "result_review") {
-    return { kind: "result_review", runPatch: await readRunPatch(tx, sealed.attemptId, sealed.taskId), ...sealed };
+    const runPatch = await readRunPatch(tx, sealed.attemptId, sealed.taskId);
+    return { kind: "result_review", runPatch, dependencies: await readDependencies(tx, sealed.taskId), ...sealed };
   }
   if (row.source === "v22_question") {
     const { attemptId, resultIdeaId, keyId, keyVersion, digest, digestKeyId, sourceSha256, bodyPurgedAt } = sealed;
@@ -161,8 +179,45 @@ export async function readDecisionMakerWorkspaceSource(tx: Prisma.TransactionCli
   const runPatch = row.settlementKind === "t2_pr" ? null : await readRunPatch(tx, sealed.attemptId, sealed.taskId);
   // The card says its rejections' findings are in FINDINGS.md: read every one, as the card's sync did.
   const reviews = await readAmuxV52RejectedReviews(tx, [sealed.taskId]);
+  const dependencies = await readDependencies(tx, sealed.taskId);
   return { kind: "settlement", settlementKind: row.settlementKind ?? "", pullPatch: pulls[0]?.patchBody ?? null,
-    runPatch, reviews, ...sealed };
+    runPatch, reviews, dependencies, ...sealed };
+}
+
+/**
+ * The cards a Task depends on, in one statement: each one's label, status,
+ * sealed title and newest run result row (by when it was recorded), sealed.
+ * A card that never ran has no result row.
+ */
+async function readDependencies(tx: Prisma.TransactionClient, taskId: string): Promise<SealedDependency[]> {
+  return tx.$queryRaw<SealedDependency[]>`
+    SELECT o."id", coalesce(o."displayKey", o."id") AS "label", o."status", o."title" AS "cardTitle",
+      o."sourceSystem", o."sourceSnapshot", o."v4TitleCiphertext", o."v4TitleKeyId", o."v4TitleKeyVersion",
+      o."v4TitleDigest", o."v4TitleDigestKeyId",
+      r."attemptId", r."ideaId" AS "resultIdeaId", r."keyId", r."keyVersion", r."digest", r."digestKeyId",
+      r."sourceSha256", r."bodyPurgedAt"
+    FROM "AmuxWorkDependency" d JOIN "AmuxWorkItem" o ON o."id" = d."dependencyId"
+    LEFT JOIN LATERAL (
+      SELECT x."attemptId", x."ideaId", x."keyId", x."keyVersion", x."digest", x."digestKeyId",
+        x."sourceSha256", x."bodyPurgedAt"
+      FROM "AmuxV22TaskResult" x WHERE x."taskId" = o."id"
+      ORDER BY x."createdAt" DESC, x."attemptId" DESC LIMIT 1
+    ) r ON true
+    WHERE d."taskId" = ${taskId}
+    ORDER BY coalesce(o."displayKey", o."id"), o."id"`;
+}
+
+/** The cards a Task depends on as CONTEXT.md, or null with none. A title or result that cannot be opened is shown as such. */
+async function openDependencyResults(dependencies: readonly SealedDependency[]): Promise<string | null> {
+  const opened = await Promise.all(dependencies.map(async (card) => ({
+    label: card.label, status: card.status,
+    title: await readAmuxCardTitle({ id: card.id, title: card.cardTitle, sourceSystem: card.sourceSystem ?? "",
+      sourceSnapshot: card.sourceSnapshot, v4TitleCiphertext: card.v4TitleCiphertext as never,
+      v4TitleKeyId: card.v4TitleKeyId, v4TitleKeyVersion: card.v4TitleKeyVersion,
+      v4TitleDigest: card.v4TitleDigest, v4TitleDigestKeyId: card.v4TitleDigestKeyId }).catch(() => null),
+    result: await openResultText(card),
+  })));
+  return dmDependencyResultsText(opened);
 }
 
 /** The run's captured change, sealed (no body: it is read in slices when opened), or null when it left none. */
@@ -244,6 +299,10 @@ export async function openDecisionMakerWorkspaceEvidence(
     } else {
       files.push({ name: "FINDINGS.md", text: report, missing: reportMissing });
     }
+    // The cards the Task depends on. The card does not point at them, so one
+    // that cannot be opened is shown as such and stops nothing.
+    const dependencies = await openDependencyResults(source.dependencies ?? []);
+    if (dependencies) files.push({ name: "CONTEXT.md", text: dependencies, missing: false });
     // The run's change, on the commit it was made on (a commit the worker
     // fetched, so a public one): repo/ is that commit and repo-patched/ the
     // change applied. The card does not point at it, so a change that cannot

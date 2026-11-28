@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { ShieldAlert, ShieldCheck } from "lucide-react";
 import type { Language } from "../../../../lib/language";
 import { desktopPermissionsCopy } from "../../../../locales/desktopPermissions";
 import { permissionModes, type PermissionModeId, type PermissionRuleInput, type PermissionsView } from "../permission-contract";
@@ -22,17 +21,6 @@ const effectText = (copy: Copy, effect: PermissionRuleInput["effect"]) => effect
 
 export const ruleText = (copy: Copy, rule: PermissionRuleInput) =>
   `${effectText(copy, rule.effect)} · ${toolText(copy, rule.tool)}${rule.pattern ? ` · ${rule.pattern}` : ""}${rule.exact ? ` · ${copy.exact}` : ""}`;
-
-/** The mode the Code screen keeps on show: Allow all is never hidden. */
-export function PermissionModeBadge({ mode, language }: { mode: PermissionModeId | undefined; language: Language }) {
-  const copy = desktopPermissionsCopy[language];
-  if (!mode || mode === "ask") return null;
-  const allowAll = mode === "allow_all";
-  return <span className={`permission permission-mode${allowAll ? " permission-allow-all" : ""}`} role="status" data-testid="permission-mode-badge">
-    {allowAll ? <ShieldAlert size={15} aria-hidden="true" /> : <ShieldCheck size={15} aria-hidden="true" />}
-    {allowAll ? copy.allowAllBadge : modeText(copy, mode)[0]}
-  </span>;
-}
 
 function RuleList({ title, rules, scope, copy, empty, run }: {
   title: string; rules: PermissionRuleInput[]; scope: "user" | "project"; copy: Copy; empty: string | null;

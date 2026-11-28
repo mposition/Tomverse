@@ -6,7 +6,7 @@ type Copy = {
   heading: string; intro: string; connection: string; details: string; path: string; browse: string; check: string; checking: string;
   configure: string; change: string; remove: string; unconfigured: string; credentials: string; preview: string;
   checkRequired: string; pathVerified: string; versionUnverified: string; invalidPath: string; fileMissing: string;
-  wrongFile: string; windowsShim: string; checkFailed: string;
+  wrongFile: string; windowsShim: string; checkFailed: string; userTrusted: string;
   unsupportedPlatform: string; localExecutionUnavailable: string;
 };
 
@@ -22,6 +22,7 @@ export const desktopProviderCliCopy = {
     browse: "Browse", check: "Check and save", checking: "Checking…", configure: "Set path", change: "Change path", remove: "Disconnect",
     unconfigured: "Not configured", credentials: "Sign-in is managed by the provider’s official CLI.", preview: "Preview",
     checkRequired: "Check required", pathVerified: "File verified", versionUnverified: "Version unverified",
+    userTrusted: "Trusted file",
     invalidPath: "Enter the full path to a file on this computer.", fileMissing: "The selected file could not be found.",
     wrongFile: "Select the executable for this provider.", windowsShim: "Select the provider’s .exe file. Windows command wrappers are unsupported.",
     checkFailed: "The file or its settings could not be checked. Try again.",
@@ -37,6 +38,7 @@ export const desktopProviderCliCopy = {
     browse: "찾아보기", check: "검사 후 저장", checking: "검사 중…", configure: "경로 설정", change: "경로 변경", remove: "연결 해제",
     unconfigured: "설정 안 됨", credentials: "로그인 정보는 공급자의 공식 CLI가 관리합니다.", preview: "프리뷰",
     checkRequired: "검사 필요", pathVerified: "파일 확인됨", versionUnverified: "버전 미확인",
+    userTrusted: "신뢰한 파일",
     invalidPath: "이 컴퓨터에 있는 파일의 전체 경로를 입력하세요.", fileMissing: "선택한 파일을 찾을 수 없습니다.",
     wrongFile: "이 공급자의 실행 파일을 선택하세요.", windowsShim: "공급자의 .exe 파일을 선택하세요. Windows 명령 래퍼는 지원되지 않습니다.",
     checkFailed: "파일 또는 설정을 확인하지 못했습니다. 다시 시도하세요.",
@@ -52,6 +54,7 @@ export const desktopProviderCliCopy = {
     browse: "浏览", check: "检查并保存", checking: "正在检查…", configure: "设置路径", change: "更改路径", remove: "断开连接",
     unconfigured: "未配置", credentials: "登录由供应商的官方 CLI 管理。", preview: "预览版",
     checkRequired: "需要检查", pathVerified: "文件已验证", versionUnverified: "版本未验证",
+    userTrusted: "已信任的文件",
     invalidPath: "请输入此计算机上文件的完整路径。", fileMissing: "找不到所选文件。",
     wrongFile: "请选择此供应商的可执行文件。", windowsShim: "请选择供应商的 .exe 文件。Windows 命令包装脚本不受支持。",
     checkFailed: "无法检查文件或相关设置。请重试。",
@@ -67,6 +70,7 @@ export const desktopProviderCliCopy = {
     browse: "瀏覽", check: "檢查並儲存", checking: "正在檢查…", configure: "設定路徑", change: "變更路徑", remove: "中斷連線",
     unconfigured: "未設定", credentials: "登入由供應商的官方 CLI 管理。", preview: "預覽版",
     checkRequired: "需要檢查", pathVerified: "檔案已驗證", versionUnverified: "版本未驗證",
+    userTrusted: "已信任的檔案",
     invalidPath: "請輸入此電腦上檔案的完整路徑。", fileMissing: "找不到選取的檔案。",
     wrongFile: "請選擇此供應商的執行檔。", windowsShim: "請選擇供應商的 .exe 檔案。Windows 命令包裝指令碼不受支援。",
     checkFailed: "無法檢查檔案或相關設定。請再試一次。",
@@ -82,6 +86,7 @@ export const desktopProviderCliCopy = {
     browse: "Parcourir", check: "Vérifier et enregistrer", checking: "Vérification…", configure: "Définir le chemin", change: "Modifier le chemin", remove: "Déconnecter",
     unconfigured: "Non configuré", credentials: "La connexion au compte est gérée par le CLI officiel du fournisseur.", preview: "Aperçu",
     checkRequired: "Vérification requise", pathVerified: "Fichier vérifié", versionUnverified: "Version non vérifiée",
+    userTrusted: "Fichier approuvé",
     invalidPath: "Saisissez le chemin complet d’un fichier sur cet ordinateur.", fileMissing: "Le fichier sélectionné est introuvable.",
     wrongFile: "Sélectionnez l’exécutable de ce fournisseur.", windowsShim: "Sélectionnez le fichier .exe du fournisseur. Les scripts intermédiaires Windows ne sont pas pris en charge.",
     checkFailed: "Impossible de vérifier le fichier ou ses paramètres. Réessayez.",
@@ -97,6 +102,7 @@ export const desktopProviderCliCopy = {
     browse: "Durchsuchen", check: "Prüfen und speichern", checking: "Wird geprüft…", configure: "Pfad festlegen", change: "Pfad ändern", remove: "Verbindung trennen",
     unconfigured: "Nicht konfiguriert", credentials: "Die Anmeldung wird von der offiziellen CLI des Anbieters verwaltet.", preview: "Vorschau",
     checkRequired: "Prüfung erforderlich", pathVerified: "Datei geprüft", versionUnverified: "Version nicht geprüft",
+    userTrusted: "Als vertrauenswürdig markierte Datei",
     invalidPath: "Geben Sie den vollständigen Pfad zu einer Datei auf diesem Computer ein.", fileMissing: "Die ausgewählte Datei wurde nicht gefunden.",
     wrongFile: "Wählen Sie die ausführbare Datei dieses Anbieters aus.", windowsShim: "Wählen Sie die .exe-Datei des Anbieters. Windows-Startskripte werden nicht unterstützt.",
     checkFailed: "Die Datei oder ihre Einstellungen konnten nicht geprüft werden. Versuchen Sie es erneut.",
@@ -112,6 +118,7 @@ export const desktopProviderCliCopy = {
     browse: "Examinar", check: "Comprobar y guardar", checking: "Comprobando…", configure: "Configurar ruta", change: "Cambiar ruta", remove: "Desconectar",
     unconfigured: "Sin configurar", credentials: "La CLI oficial del proveedor gestiona el inicio de sesión.", preview: "Vista previa",
     checkRequired: "Requiere comprobación", pathVerified: "Archivo verificado", versionUnverified: "Versión sin verificar",
+    userTrusted: "Archivo de confianza",
     invalidPath: "Introduce la ruta completa de un archivo en este equipo.", fileMissing: "No se encuentra el archivo seleccionado.",
     wrongFile: "Selecciona el ejecutable de este proveedor.", windowsShim: "Selecciona el archivo .exe del proveedor. Los scripts de inicio de Windows no son compatibles.",
     checkFailed: "No se pudo comprobar el archivo o su configuración. Inténtalo de nuevo.",
@@ -127,6 +134,7 @@ export const desktopProviderCliCopy = {
     browse: "Procurar", check: "Verificar e guardar", checking: "A verificar…", configure: "Definir caminho", change: "Alterar caminho", remove: "Desligar",
     unconfigured: "Não configurado", credentials: "A CLI oficial do fornecedor gere o início de sessão.", preview: "Pré-visualização",
     checkRequired: "Verificação necessária", pathVerified: "Ficheiro verificado", versionUnverified: "Versão não verificada",
+    userTrusted: "Ficheiro de confiança",
     invalidPath: "Introduza o caminho completo de um ficheiro neste computador.", fileMissing: "Não foi possível encontrar o ficheiro selecionado.",
     wrongFile: "Selecione o executável deste fornecedor.", windowsShim: "Selecione o ficheiro .exe do fornecedor. Os scripts de arranque do Windows não são suportados.",
     checkFailed: "Não foi possível verificar o ficheiro ou as respetivas definições. Tente novamente.",

@@ -30,6 +30,7 @@ import {
   bearerTokenFromHeader,
   mobileAuthReady,
   verifyMobileAccessTokenString,
+  type AccessTokenClient,
 } from "@/lib/mobileAccessToken";
 import {
   ApiSecurityError,
@@ -139,7 +140,7 @@ export const mobileApiSecurityResponse = (error: unknown): Response | null => {
  */
 export const requireMobileBearer = async (
   request: Request,
-  client?: "desktop"
+  client?: AccessTokenClient
 ): Promise<{ ok: true; identity: MobileRouteIdentity } | { ok: false; response: Response }> => {
   if (!mobileAuthReady()) {
     // Fail closed and say nothing about which variable is missing. The reason

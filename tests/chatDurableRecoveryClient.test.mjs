@@ -5,6 +5,7 @@ import {
   draftAttachmentReferences,
   isActiveChatResponseAttempt,
   mergeChatResponseAttempts,
+  mergeServerTranscriptIntoLocal,
   messageFromChatResponseAttempt,
   parseCompletedChatResponseMessage,
   parseChatDraftConflict,
@@ -547,4 +548,72 @@ test("completed recovery rejects an unbound or malformed canonical message", () 
     assert.equal(parseCompletedChatResponseMessage(malformed, completed), null);
   }
   assert.equal(parseCompletedChatResponseMessage(valid, attempt()), null);
+});
+
+/* ----------------------- the server's transcript folded into a tab's own ----- */
+
+const row = (id, role, content, extra = {}) => ({ id, role, content, status: "normal", ...extra });
+const ids = (messages) => messages.map((message) => message.id);
+
+test("a turn another tab added is in the transcript the next request is built from", () => {
+  const local = [row("u1", "user", "Q1"), row("a1", "assistant", "A1")];
+  const server = [
+    row("u1", "user", "Q1"), row("a1", "assistant", "A1"),
+    row("u2", "user", "Q2 from the phone"), row("a2", "assistant", "A2 from the phone"),
+  ];
+  const merged = mergeServerTranscriptIntoLocal(local, server, new Set());
+  assert.deepEqual(ids(merged), ["u1", "a1", "u2", "a2"]);
+});
+
+test("a message already matching the server's keeps the tab's own object and its runtime context", () => {
+  const mine = row("a1", "assistant", "A1", { errorReport: { traceId: "t" }, memoryUsedCount: 2 });
+  const merged = mergeServerTranscriptIntoLocal([mine], [row("a1", "assistant", "A1")], new Set());
+  assert.equal(merged[0], mine);
+});
+
+test("an answer the server finished replaces the error a broken stream left behind", () => {
+  const local = [
+    row("u1", "user", "Q1"),
+    row("a1", "assistant", "Half", { status: "error", errorCode: "UNKNOWN_ERROR", recoveryNotice: "Something went wrong" }),
+  ];
+  const server = [row("u1", "user", "Q1"), row("a1", "assistant", "The whole answer")];
+  const merged = mergeServerTranscriptIntoLocal(local, server, new Set());
+  assert.equal(merged[1].content, "The whole answer");
+  assert.equal(merged[1].status, "normal");
+  assert.equal(merged[1].errorCode, undefined);
+});
+
+test("what only this tab holds stays, after the message it followed", () => {
+  const local = [
+    row("u1", "user", "Q1"), row("a1", "assistant", "A1"),
+    row("u2", "user", "Q2"), row("a2", "assistant", "", { status: "error", errorCode: "X" }),
+  ];
+  const server = [
+    row("u1", "user", "Q1"), row("a1", "assistant", "A1"), row("u2", "user", "Q2"),
+    row("u3", "user", "Q3 elsewhere"), row("a3", "assistant", "A3 elsewhere"),
+  ];
+  assert.deepEqual(ids(mergeServerTranscriptIntoLocal(local, server, new Set())), ["u1", "a1", "u2", "a2", "u3", "a3"]);
+  // Before any shared message, it leads.
+  assert.deepEqual(
+    ids(mergeServerTranscriptIntoLocal([row("n", "user", "new")], [row("u1", "user", "Q1")], new Set())),
+    ["n", "u1"]
+  );
+});
+
+test("the greeting is never carried into a transcript the server has rows for", () => {
+  const merged = mergeServerTranscriptIntoLocal(
+    [row("welcome", "assistant", "Hello!")],
+    [row("u1", "user", "Q1")],
+    new Set(),
+    new Set(["welcome"])
+  );
+  assert.deepEqual(ids(merged), ["u1"]);
+});
+
+test("an attempt-backed answer the tab already shows further along is not rolled back", () => {
+  const local = [row("a1", "assistant", "The answer so far, and more")];
+  const behind = [row("a1", "assistant", "The answer so far")];
+  assert.equal(mergeServerTranscriptIntoLocal(local, behind, new Set(["a1"]))[0].content, "The answer so far, and more");
+  // A stored (not attempt-backed) answer is the server's to decide.
+  assert.equal(mergeServerTranscriptIntoLocal(local, behind, new Set())[0].content, "The answer so far");
 });

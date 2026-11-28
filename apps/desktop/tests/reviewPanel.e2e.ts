@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject } from "./code-project-fixture";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -58,10 +59,8 @@ test("the review panel switches scope, turns line comments into the next instruc
     const editor = () => page.getByRole("textbox", { name: "Code request", exact: true });
     const task = () => page.evaluate(() => window.desktop.state().then((state) => state.task));
     await page.getByRole("button", { name: "Code", exact: true }).click();
-    await page.getByRole("button", { name: "Open local folder" }).click();
-    await page.locator('summary[aria-label="Code workspace"]').click();
-    await page.getByRole("combobox", { name: "Code workspace" }).selectOption("local");
-    await page.locator('summary[aria-label="Code workspace"]').click();
+    await openCodeProject(page);
+    await page.getByTestId("worktree-checkbox").uncheck();
     await editor().fill("Rename two lines and add notes");
     const approval = application.waitForEvent("window", { timeout: 15_000 });
     void approval.catch(() => undefined);

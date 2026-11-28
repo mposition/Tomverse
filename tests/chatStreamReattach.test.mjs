@@ -10,6 +10,7 @@ import {
   isInterruptedChatAttempt,
   pendingInterruptedChatAttempts,
   recoveredPartialText,
+  releaseInterruptedChatAttemptsForOtherIdentities,
   resetInterruptedChatAttempts,
   settleInterruptedChatAttempt,
   shouldApplyPolledPartial,
@@ -125,12 +126,19 @@ const record = (id, finished) => ({
 });
 const tick = () => new Promise((settle) => setTimeout(settle, 0));
 
-test("a hand-off with no panel polling the key is refused, so the turn ends as before", () => {
+test("a hand-off with no panel on the key waits for the next one instead of ending the turn", async () => {
+  // The user left the conversation before the stream broke.
   resetInterruptedChatAttempts();
   const finished = [];
-  assert.equal(handOffInterruptedChatAttempt(KEY, record("a", finished)), false);
-  assert.deepEqual(pendingInterruptedChatAttempts(KEY), []);
+  assert.equal(handOffInterruptedChatAttempt(KEY, record("a", finished)), true);
+  assert.equal(pendingInterruptedChatAttempts(KEY).length, 1);
   assert.deepEqual(finished, []);
+  const unwatch = watchInterruptedChatAttempts(KEY, () => {});
+  await tick();
+  // The panel adopts what is pending when it mounts; nothing is finished.
+  assert.equal(pendingInterruptedChatAttempts(KEY).length, 1);
+  assert.deepEqual(finished, []);
+  unwatch();
 });
 
 test("a watching panel is told, and settling removes the record exactly once", () => {
@@ -163,7 +171,9 @@ test("a panel that remounts on the same key keeps the hand-off", async () => {
   second();
 });
 
-test("when the last panel leaves, whatever was pending ends as it did before", async () => {
+test("when the last panel leaves, what was handed over stays for the panel that comes back", async () => {
+  // The server may finish the answer while the user is away. Ending the turn
+  // as an error here froze that into the transcript.
   resetInterruptedChatAttempts();
   const finished = [];
   const unwatch = watchInterruptedChatAttempts(KEY, () => {});
@@ -171,8 +181,24 @@ test("when the last panel leaves, whatever was pending ends as it did before", a
   handOffInterruptedChatAttempt(KEY, record("b", finished));
   unwatch();
   await tick();
-  assert.deepEqual(finished, [["a", null], ["b", null]]);
-  assert.deepEqual(pendingInterruptedChatAttempts(KEY), []);
+  assert.deepEqual(finished, []);
+  assert.deepEqual(
+    pendingInterruptedChatAttempts(KEY).map((attempt) => attempt.assistantMessageId),
+    ["a", "b"]
+  );
+  assert.equal(isInterruptedChatAttempt(KEY, "a"), true);
+});
+
+test("a hand-off does not outlive the identity it was made under", () => {
+  resetInterruptedChatAttempts();
+  const finished = [];
+  const other = "account:user-2|conversation-9|gpt-6-luna|conversation";
+  handOffInterruptedChatAttempt(KEY, record("a", finished));
+  handOffInterruptedChatAttempt(other, record("b", finished));
+  releaseInterruptedChatAttemptsForOtherIdentities("account:user-1");
+  assert.equal(pendingInterruptedChatAttempts(KEY).length, 1);
+  assert.deepEqual(pendingInterruptedChatAttempts(other), []);
+  assert.deepEqual(finished, []);
 });
 
 /* ------------------------------------------------ the panel's wiring ----- */
@@ -197,6 +223,7 @@ test("a reattached attempt that ends without an answer takes the old error path"
   const terminal = source.slice(source.indexOf("const makeTerminalRecovery"), source.indexOf("const retryAfterMs"));
   assert.match(terminal, /interrupted\.finish\(null\)/);
   // Only an account Chat panel watches for hand-offs.
+  // (A hand-off made while no panel is mounted is adopted by the next one.)
   const watch = source.slice(source.indexOf("Streams that broke on this key"), source.indexOf("const isMobileShell"));
   assert.match(watch, /if \(isGuestMode \|\| transcriptScope !== "conversation"\) return;/);
   assert.match(watch, /watchInterruptedChatAttempts\(runtimeKey, adopt\)/);
@@ -260,4 +287,68 @@ test("an interrupted reattached turn keeps its recovered partial as the body", (
   assert.match(writer, /recoveryNotice: content/);
   const watch = source.slice(source.indexOf("Streams that broke on this key"), source.indexOf("const isMobileShell"));
   assert.match(watch, /if \(isGuestMode \|\| transcriptScope !== "conversation"\) return;/);
+});
+
+/* ---------- coming back to the conversation: the panel's wiring, pinned ----- */
+
+const historyEffect = () =>
+  source.slice(
+    source.indexOf("Loads the message view for the current (identity, conversation, model)"),
+    source.indexOf("The tab coming back after being away")
+  );
+
+test("coming back re-reads the transcript silently and merges it, never replacing a streaming key", () => {
+  const effect = historyEffect();
+  // A remount on an owned key, or the tab returning, is a silent refresh...
+  assert.match(effect, /const silentRefresh =/);
+  assert.match(effect, /\(owned \|\| transcriptRefreshNonce > 0\)/);
+  assert.match(effect, /claimChatRuntimeRefresh\(loadKey\)/);
+  // ...that is never done while the key streams or a send is being prepared...
+  assert.match(effect, /!isChatRuntimeStreaming\(runtimeKey\)/);
+  assert.match(effect, /!sendPreparationsRef\.current\.has\(runtimeKey\)/);
+  assert.match(effect, /!promptPendingRef\.current/);
+  // ...and folds the server's rows in by id instead of replacing the transcript.
+  assert.match(effect, /mergeServerTranscriptIntoLocal\(/);
+  // A key the user left mid-handoff keeps being polled whatever this read shows.
+  assert.match(effect, /pendingInterruptedChatAttempts\(loadKey\)/);
+  // Owned keys are still not replaced by a full load.
+  assert.match(effect, /if \(!silentRefresh && owned && /);
+});
+
+test("the tab returning after being away asks for a refresh, and only after a real absence", () => {
+  const listener = source.slice(
+    source.indexOf("The tab coming back after being away"),
+    source.indexOf("A reload never resubmits /api/chat.")
+  );
+  assert.match(listener, /document\.addEventListener\("visibilitychange", onVisibility\)/);
+  assert.match(listener, /window\.addEventListener\("focus", comeBack\)/);
+  assert.match(listener, /TRANSCRIPT_REFRESH_MIN_AWAY_MS/);
+  assert.match(listener, /setTranscriptRefreshNonce\(/);
+  // Review panels and guests keep their own transcripts.
+  assert.match(listener, /isGuestMode \|\| transcriptScope !== "conversation" \|\| reviewProvider/);
+});
+
+test("a history answer for a key the panel has moved off does not write that panel's attempt state", () => {
+  const effect = historyEffect();
+  const guard = effect.indexOf("if (runtimeKeyRef.current === loadKey) {");
+  const refs = effect.indexOf("attemptBackedMessageIdsRef.current = merged.attemptBackedIds;");
+  const durable = effect.indexOf("setDurableAttemptIds(activeAttemptIds);");
+  assert.ok(guard > 0 && refs > guard && durable > refs, "refs and durable ids are written only for the current key");
+  // The transcript itself still goes to the key the read was for.
+  assert.match(effect, /writeChatRuntimeMessages\(loadKey, transcript/);
+});
+
+test("the Deep Research poll stops after a bound, says so, and carries the run's signal", () => {
+  const poll = source.slice(
+    source.indexOf("const pollDeepResearchJob = useCallback("),
+    source.indexOf("Resumes polling for a deep-research job")
+  );
+  assert.match(source, /const DEEP_RESEARCH_MAX_POLL_MS = \d+ \* 60 \* 1_000;/);
+  assert.match(poll, /elapsedMs > MAX_POLL_MS/);
+  assert.match(poll, /t\("chat\.deepResearchPollTimeout"\), "normal"/);
+  assert.match(poll, /body: JSON\.stringify\(\{ assistantMessageId: jobAssistantMessageId \}\),\s+signal,/);
+});
+
+test("refusals the server words in English go through the shared copy table", () => {
+  assert.match(source, /chatSendErrorCopyKey\(errorCode\)/);
 });

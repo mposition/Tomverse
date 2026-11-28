@@ -479,3 +479,23 @@ test("around centres the page on an imported message inside the bridged snapshot
     assert.equal(locked.source.status, "locked");
     assert.equal(locked.focus, undefined, "a locked source does not say whether the id was there");
 });
+
+test("the model's search matches every word anywhere in a message; the user's search stays one phrase", async () => {
+    const user = await createUser();
+    await seedConversation(user.id, {
+        messages: ["the launch moved: Friday is the deadline now", "deadline is next week", "Friday lunch with the team"],
+    });
+    const asModel = (query: string) =>
+        searchConversationMessages({
+            request: requestWith(),
+            userId: user.id,
+            query,
+            displayTimeZone: "UTC",
+            modelReference: { accountMemoryDefaultOff: false },
+        });
+    // Words in a different order than the message holds them, and a LIKE metacharacter kept literal.
+    assert.deepEqual((await asModel("deadline friday")).results.map((r) => r.snippet), ["the launch moved: Friday is the deadline now"]);
+    assert.equal((await asModel("deadline lunch")).results.length, 0);
+    assert.equal((await asModel("dead%")).results.length, 0);
+    assert.equal((await search(user.id, "deadline friday")).results.length, 0, "the user's box still matches the phrase as written");
+});

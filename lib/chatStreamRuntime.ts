@@ -2,6 +2,7 @@ import type { ChatAttachment, Message } from "@/components/chat/types";
 import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
 import type { ChatAbortCause } from "@/lib/chatStreamLiveness";
 import type { WebSearchToggleMode } from "@/lib/appDefaults";
+import { releaseInterruptedChatAttemptsForOtherIdentities } from "@/lib/chatStreamReattach";
 
 /**
  * Where a comparison panel's transcript and its in-flight request actually
@@ -415,6 +416,21 @@ export function claimChatRuntimeLoad(key: string): number {
   return record.loadRequestId;
 }
 
+/**
+ * A newest-ticket claim for a read that must not disturb the view: no loading
+ * placeholder, no closed send barrier. For re-reading the server's transcript
+ * of a key that is already on screen (a remount, the tab coming back), where
+ * the answer is a merge into what is shown and a failure is simply ignored.
+ *
+ * It still supersedes any older read, and any newer claim -- a send's restore,
+ * a full load -- supersedes this one, so it can never settle over them.
+ */
+export function claimChatRuntimeRefresh(key: string): number {
+  const record = ensureRecord(key);
+  record.loadRequestId = nextLoadRequestId++;
+  return record.loadRequestId;
+}
+
 export function isCurrentChatRuntimeLoad(
   key: string,
   requestId: number
@@ -573,6 +589,7 @@ export function releaseChatRuntimeForOtherIdentities(identityKey: string): void 
     record.controller = null;
     records.delete(key);
   }
+  releaseInterruptedChatAttemptsForOtherIdentities(identityKey);
 }
 
 /** Test-only: drops every key, aborting anything still running. */

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,7 +40,7 @@ test("Code opens a terminal for the task, runs a command in it, and reads its ou
     await writeFile(descriptor, JSON.stringify({ root, profile, endpoint: gateway.base, key: TEST_KEY }));
     application = await launchNativeFixture(descriptor);
     const page = await application.firstWindow();
-        await page.getByRole("button", { name: "Open local folder" }).click();
+        await openCodeProject(page);
 
     // The terminal is off until the person turns it on, and it is turned on before the task so the agent gets read_terminal.
     await page.getByRole("button", { name: "Terminal", exact: true }).click();
@@ -49,7 +50,7 @@ test("Code opens a terminal for the task, runs a command in it, and reads its ou
     await expect(panel.getByText("Start a task to open a terminal in its folder.")).toBeVisible();
     await expect.poll(async () => (await state(page)).codeTerminal?.enabled).toBe(true);
 
-    await page.getByLabel("Code mode").selectOption("ask");
+    await selectCodeMode(page, "ask");
     await page.getByRole("textbox", { name: "Code request" }).fill("Read my terminal.");
     await page.getByRole("button", { name: "Send Code request" }).click();
     await expect.poll(async () => (await state(page)).task?.status).toBe("running");
