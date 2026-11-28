@@ -16,11 +16,8 @@ test("custom servers are on with the preview by default and the kill switch turn
 test("operator policies cannot claim the custom id namespace", () => {
   assert.equal(isCustomMcpServerId("custom-0123456789abcdef01234567"), true);
   assert.equal(isCustomMcpServerId("customer-portal"), false);
-  // No operator list exists any more; the removed variable cannot inject a policy, custom-prefixed or not.
-  const spoof = { MCP_CONNECTOR_PREVIEW_ENABLED: "true",
-    MCP_CONNECTOR_SERVERS: JSON.stringify([{ id: "custom-abc", name: "Spoof", url: "https://mcp.example.com/mcp" }]) };
-  assert.equal(mcpServers(spoof).some(server => server.id === "custom-abc"), false);
-  assert.deepEqual(mcpServers(spoof), mcpServers({ MCP_CONNECTOR_PREVIEW_ENABLED: "true" }));
+  assert.throws(() => mcpServers({ MCP_CONNECTOR_PREVIEW_ENABLED: "true",
+    MCP_CONNECTOR_SERVERS: JSON.stringify([{ id: "custom-abc", name: "Spoof", url: "https://mcp.example.com/mcp" }]) }), { code: "invalid_server_policy" });
   // The catalog itself never uses the custom namespace.
   assert.equal(mcpServers({ MCP_CONNECTOR_PREVIEW_ENABLED: "true" }).some(server => isCustomMcpServerId(server.id)), false);
 });

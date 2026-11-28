@@ -89,11 +89,17 @@ export function mcpCustomServersEnabled(env: Record<string, string | undefined> 
 
 export function mcpServers(env: Record<string, string | undefined> = process.env): McpServerPolicy[] {
   if (!mcpPreviewEnabled(env)) return [];
-  // The catalog (config/mcp/provider-presets.json) is the only source of fixed servers; no server list variable is read.
-  const configured: McpServerPolicy[] = [];
-  configured.push(...selectedMcpProviderPolicies(env).map(server => mcpServerSchema.parse(server)));
+  const disabled = disabledMcpProviderIds(env);
+  // The catalog (config/mcp/provider-presets.json) is where providers come from; no list has to be edited for a new one.
+  // MCP_CONNECTOR_SERVERS is read only so the servers an operator listed before keep their exact policy, and the stored
+  // connections bound to that policy's digest keep working; an entry there wins over a catalog preset with the same id.
+  // Nothing new goes into it, and it can be removed once it is empty.
+  const legacy = z.array(mcpServerSchema).max(256).parse(JSON.parse(env.MCP_CONNECTOR_SERVERS || "[]")).filter(server => !disabled.has(server.id));
+  const legacyIds = new Set(legacy.map(server => server.id));
+  const configured: McpServerPolicy[] = [...legacy];
+  configured.push(...selectedMcpProviderPolicies(env).filter(server => !legacyIds.has(server.id)).map(server => mcpServerSchema.parse(server)));
   // The kill switch covers the built-in GitHub profile too: "github" in MCP_CONNECTOR_PROVIDERS_DISABLED turns it off.
-  if (env.MCP_GITHUB_OAUTH_CLIENT_ID && env.MCP_GITHUB_OAUTH_CLIENT_SECRET && !disabledMcpProviderIds(env).has("github")) {
+  if (env.MCP_GITHUB_OAUTH_CLIENT_ID && env.MCP_GITHUB_OAUTH_CLIENT_SECRET && !disabled.has("github")) {
     configured.push(mcpServerSchema.parse({ id: "github", name: `GitHub · ${env.MCP_GITHUB_REPOSITORY}`,
       url: "https://api.githubcopilot.com/mcp/x/issues", auth: "oauth", readTools: ["search_issues", "issue_read"],
       sourceAdapter: "github-issues", githubRepository: env.MCP_GITHUB_REPOSITORY, githubRepositoryId: Number(env.MCP_GITHUB_REPOSITORY_ID),

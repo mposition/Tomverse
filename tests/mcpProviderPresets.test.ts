@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { MCP_PROVIDERS } from "@/lib/mcpProviderCatalog";
 import { MCP_PROVIDER_PRESETS, providerEnvironmentPrefix } from "@/lib/mcpProviderPresets";
-import { mcpAuthorizationRedirect, mcpServers } from "@/lib/mcpConnectorPolicy";
+import { mcpAuthorizationRedirect, mcpServerSchema, mcpServers } from "@/lib/mcpConnectorPolicy";
 import { validateMcpEndpoint } from "@/lib/mcpConnectorClient";
 import { mcpPolicyDigest } from "@/lib/mcpConnectorStore";
 
@@ -36,14 +36,24 @@ test("without any list variable the catalog makes dynamic-registration and no-au
   for (const preset of MCP_PROVIDER_PRESETS.filter(p => p.auth === "configure")) assert.ok(!connectable.some(s => s.id === preset.id), preset.id);
 });
 
-test("the removed list variables are ignored", () => {
+test("the provider list variable is ignored; servers listed before keep their exact policy", () => {
   const base = ids();
   assert.deepEqual(ids({ MCP_CONNECTOR_PROVIDERS: "notion" }), base);
   assert.deepEqual(ids({ MCP_CONNECTOR_PROVIDERS: "notion,notion" }), base);
   assert.deepEqual(ids({ MCP_CONNECTOR_PROVIDERS: "unregistered" }), base);
-  assert.deepEqual(ids({ MCP_CONNECTOR_SERVERS: "not even parsed" }), base);
-  assert.deepEqual(ids({ MCP_CONNECTOR_SERVERS: JSON.stringify([{ id: "operator-added", name: "Operator added", url: "https://mcp.example.com/mcp" }]) }), base);
-  assert.deepEqual(ids({ MCP_CONNECTOR_SERVERS: JSON.stringify([{ id: "linear", name: "Spoof", url: "https://mcp.example.com/mcp" }]) }), base);
+  // A server an operator listed before stays, with the policy it was connected under (its stored digest still matches).
+  const listed = { id: "operator-added", name: "Operator added", url: "https://mcp.example.com/mcp" };
+  const withListed = servers({ MCP_CONNECTOR_SERVERS: JSON.stringify([listed]) });
+  assert.deepEqual(withListed.map(s => s.id).sort(), [...base, "operator-added"].sort());
+  // An entry with a catalog id wins over the preset, so a connection made under the operator's policy keeps it.
+  const linear = { id: "linear", name: "Linear (operator)", url: "https://mcp.example.com/linear" };
+  const overridden = servers({ MCP_CONNECTOR_SERVERS: JSON.stringify([linear]) }).filter(s => s.id === "linear");
+  assert.equal(overridden.length, 1);
+  assert.equal(overridden[0]!.url, linear.url);
+  assert.equal(mcpPolicyDigest(overridden[0]!), mcpPolicyDigest(mcpServerSchema.parse(linear)));
+  // The kill switch covers listed servers too; a malformed list still fails loudly rather than silently dropping them.
+  assert.ok(!servers({ MCP_CONNECTOR_SERVERS: JSON.stringify([listed]), MCP_CONNECTOR_PROVIDERS_DISABLED: "operator-added" }).some(s => s.id === "operator-added"));
+  assert.throws(() => servers({ MCP_CONNECTOR_SERVERS: "not even parsed" }));
 });
 
 test("the disabled list switches off only the named providers", () => {

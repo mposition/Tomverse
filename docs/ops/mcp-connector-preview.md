@@ -99,8 +99,11 @@ Production activation and paid-model evaluation remain outside this handoff.
 
 `MCP_CONNECTOR_PREVIEW_ENABLED` defaults to false. When enabled, the server offers
 the fixed profiles of the catalog (`config/mcp/provider-presets.json`) directly;
-there is no list of profiles to select and no server-list variable (the former
-`MCP_CONNECTOR_PROVIDERS` and `MCP_CONNECTOR_SERVERS` are no longer read). A
+there is no list of profiles to select (the former `MCP_CONNECTOR_PROVIDERS` is no
+longer read). `MCP_CONNECTOR_SERVERS` is read only for compatibility: the servers an
+operator listed there before keep their exact policy, so their stored connections
+keep working, and an entry wins over a catalog preset with the same id. Nothing new
+goes into it; remove it once it is empty. A
 profile is offered when it can connect without an operator secret (dynamic client
 registration, or no auth) or when the operator has supplied its registered app and
 scope bounds (`MCP_PROVIDER_<ID>_*`); the others stay absent. Switch a misbehaving
