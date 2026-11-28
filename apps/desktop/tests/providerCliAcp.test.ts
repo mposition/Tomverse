@@ -438,7 +438,7 @@ async function withProject<T>(body: (directory: string) => Promise<T>) {
   } finally { await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 }
 
-type Session = { modes?: { current: string; available: string[] } | null; config?: Record<string, string>; modeOption?: boolean; setMode?: string; setConfig?: string; flipTo?: string; sneakTo?: string; earlyMode?: string };
+type Session = { modes?: { current: string; available: string[] } | null; config?: Record<string, string>; modeOption?: boolean; setMode?: string; setConfig?: string; flipTo?: string; sneakTo?: string; earlyMode?: string; earlyFlood?: boolean };
 const modesOf = (provider: LiveAcpProvider, current: string) => ({ current, available: [...acpSafety[provider].known] });
 /** What each CLI reports when it starts in a mode that asks, and in the mode it really starts in (Vibe: accept-edits; MiniMax Code: permissionMode auto). */
 const safeSession: Record<LiveAcpProvider, Session> = {
@@ -641,6 +641,8 @@ test("A mode that cannot be confirmed as one that asks ends the run before any t
     assert.equal(ordered.result.status, "completed", ordered.result.error);
     assert.deepEqual(ordered.seen.modeSets, ["ask"]);
     assert.equal(ordered.seen.prompt, "Fix the bug");
+    // More notifications before the session exists than are kept: a dropped one may be a mode change, so nothing is sent.
+    await fails({ ...safeSession.mistral, earlyFlood: true }, "mistral", /more notifications before its session started/);
     // A switch the CLI answers in its result, or by a notification, is confirmed.
     for (const how of ["result", "notify"]) {
       const mode = await attempt({ ...unsafeSession.mistral, setMode: how }, "mistral");

@@ -566,6 +566,8 @@ export function createAcpClient(options: AcpClientOptions) {
   /** The id of the session/new request, and how many early notifications came before its answer. */
   let sessionNewId = -1;
   let earlyBeforeAnswer = 0;
+  /** More notifications came before the session existed than are kept: one about the mode may be among those dropped. */
+  let earlyOverflow = false;
   const watchers = new Set<() => void>();
   let approvals: Promise<void> = Promise.resolve();
   let sessionId = "";
@@ -778,6 +780,7 @@ export function createAcpClient(options: AcpClientOptions) {
       throw new Error(code === -32000 ? "The CLI is not signed in. Sign in with the CLI itself, then try again." : created.error ? errorText(created) : "The CLI did not start a session.");
     }
     sessionId = session.sessionId.slice(0, 200);
+    if (earlyOverflow) throw new Error("The CLI sent more notifications before its session started than Desktop reads. Tomverse Desktop does not start a task in a mode it cannot confirm asks first.");
     // Notifications from before the session's answer are older than the mode it reports and are dropped; those after it are newer and
     // count, the mode ones while the mode is set and the others once it is.
     const later = early.splice(0).slice(earlyBeforeAnswer).flatMap((message) =>
@@ -818,7 +821,7 @@ export function createAcpClient(options: AcpClientOptions) {
       }
       if (!hasId) {
         if (method !== "session/update" || !isRecord(message.params)) return;
-        if (sessionId === "") { if (early.length < 64) early.push(message); } else if (message.params.sessionId === sessionId) handleUpdate(message);
+        if (sessionId === "") { if (early.length < 64) early.push(message); else earlyOverflow = true; } else if (message.params.sessionId === sessionId) handleUpdate(message);
         return;
       }
       if (method === "session/request_permission" && isRecord(message.params) && message.params.sessionId === sessionId) answer(message.id, message.params);
