@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { codeRunVendorRequestRefused, createStaticMarketingCsp, createStrictCsp, createOfflineChatCsp } from "@/lib/csp";
-import { isArtifactSharePagePath } from "@/lib/artifactSharePageHeaders";
 import {
   EXPERIMENT_COOKIE_NAME,
   EXPERIMENT_HOLD_COOKIE_NAME,
@@ -585,7 +584,10 @@ export function proxy(request: NextRequest) {
   // A public share page carries its own policy, always enforced (CSP `sandbox`
   // plus the preview frame's policy; lib/artifactSharePage.ts). A header set
   // here would replace the route's, so this path gets none from the proxy.
-  if (isArtifactSharePagePath(request.nextUrl.pathname)) {
+  // The prefix is written out here, not imported from
+  // lib/artifactSharePageHeaders.ts: the proxy is in the Prompt Refiner
+  // runtime source closure, whose file set a database CHECK is bound to.
+  if (request.nextUrl.pathname.startsWith("/share/a/")) {
     return withNativeCors(response, request);
   }
   const reportUrl = new URL(
