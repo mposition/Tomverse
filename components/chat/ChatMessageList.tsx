@@ -6,6 +6,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  memo,
   useLayoutEffect,
   useMemo,
   useContext,
@@ -17,7 +18,7 @@ import { ResearchPreviewRunCard } from "@/components/chat/ResearchPreviewRunCard
 import { webResearchPreviewRuns, researchRunMessage } from "@/lib/researchPreviewRunClient";
 import { McpProgressNotice } from "@/components/plugins/McpProgressNotice";
 import ReactMarkdown from "react-markdown";
-import type { ExtraProps } from "react-markdown";
+import type { Components, ExtraProps, Options as MarkdownOptions } from "react-markdown";
 import type { ComponentPropsWithoutRef, MouseEventHandler, ReactNode } from "react";
 import { AnswerMarkdown } from "@tomverse/chat-ui";
 import rehypeHighlight from "rehype-highlight";
@@ -37,6 +38,8 @@ import { useSupersededIds } from "@/components/chat/useSupersededIds";
 import { canEditQuestion, lastReplaceableTurn } from "@/lib/chatSupersededTurns";
 import { prepareMathMarkdown } from "@/lib/chatMathDelimiters";
 import { isMathPre, mermaidSourceFromPre } from "@/lib/chatMermaidBlock";
+import { chartSpecFromPre } from "@/lib/chatChart";
+import { ChatChart } from "@/components/chat/ChatChart";
 import {
   ArrowDown,
   Bot,
@@ -131,6 +134,12 @@ type ChatMessageListProps = {
    */
   onCompareInReview?: (messageId: string) => void;
   compareRequiresCompleted?: boolean;
+  /**
+   * Chat: start a new conversation holding the turns up to this answer
+   * (lib/chatConversationBranch.ts). Resolves when the attempt is over; on
+   * success the page has already moved to the new conversation.
+   */
+  onBranchFromAnswer?: (messageId: string) => Promise<void>;
   onRetryWithoutAttachments?: () => void;
   /**
    * Re-sends the last prompt with a set of already-missing stored files
@@ -513,6 +522,9 @@ function MarkdownCodeBlock({ children, node }: MarkdownPreProps) {
       <MermaidDiagram source={mermaidSource} fallback={codeBlock} label={chatTurnToolsCopy[lang].mermaidDiagram} />
     );
   }
+  // A `chart` block whose JSON spec validates; anything else stays code.
+  const chartSpec = answerRender ? chartSpecFromPre(node) : null;
+  if (chartSpec) return <ChatChart spec={chartSpec} fallback={codeBlock} />;
   return codeBlock;
 }
 
@@ -525,6 +537,146 @@ const USER_CODE_COMPONENTS = {
     </code>
   ),
 };
+
+/*
+  The answer's markdown components, declared once at module scope.
+
+  They used to be written inline in the `components` prop, which made every
+  entry a new function -- a new element *type* -- on each render of the list.
+  React unmounts and remounts a subtree whose type changed, so any parent
+  re-render (a keystroke in the composer, a streamed chunk of a different
+  answer) rebuilt every list item, table and quote on screen, and with them
+  the code blocks nested inside: an opened preview closed, the copied tick
+  vanished, and a Mermaid diagram was drawn again. A stable type is updated in
+  place. Entries that need the language read it from context themselves.
+*/
+function AnswerTable({ children }: ComponentPropsWithoutRef<"table"> & ExtraProps) {
+  const { t } = useLanguage();
+  return (
+    // The wrapper scrolls the table itself; without it a wide table forces the
+    // whole message list to scroll sideways.
+    // UX-031. A scroll container with nothing focusable in it cannot be
+    // scrolled by keyboard at all -- there is no way to reach the right-hand
+    // columns of a wide table without a pointer. `tabIndex={0}` makes the
+    // region itself a stop so the arrow keys reach it, and the role and name
+    // stop it being an unlabelled stop.
+    <div
+      className="mb-3 max-w-full overflow-x-auto last:mb-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+      tabIndex={0}
+      role="region"
+      aria-label={t("chat.markdownTableRegion")}
+    >
+      <table className="w-full border-collapse text-left text-[0.95em]">{children}</table>
+    </div>
+  );
+}
+
+// Never put model-controlled image URLs in `src`. Retrieved pages and
+// attachments can prompt-inject a model into embedding prior chat text in a
+// tracking URL; a normal <img> would send it without a click.
+function AnswerBlockedImage({ alt }: ComponentPropsWithoutRef<"img"> & ExtraProps) {
+  const { t } = useLanguage();
+  return (
+    <span
+      className="inline-flex rounded-md border border-zinc-300 bg-zinc-100 px-2 py-1 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+      role="note"
+    >
+      {t("chat.markdownImageBlocked")}
+      {alt ? `: ${alt}` : ""}
+    </span>
+  );
+}
+
+function AnswerCode({ children, className, ...props }: MarkdownCodeProps) {
+  // KaTeX output (lib/chatMathDelimiters.ts): a formula, not a code span, so
+  // none of the inline-code chrome.
+  if (className?.includes("language-math")) {
+    return className.includes("math-display") ? (
+      <div className="mb-3 max-w-full last:mb-0">{children}</div>
+    ) : (
+      <span>{children}</span>
+    );
+  }
+  return (
+    <code
+      {...props}
+      className={`rounded bg-zinc-200 px-1 py-0.5 text-[0.9em] text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100 ${className || ""}`}
+    >
+      {children}
+    </code>
+  );
+}
+
+const ANSWER_MARKDOWN_COMPONENTS: Components = {
+  /*
+    UI-026. No `whitespace-pre-wrap` here. CommonMark collapses a single
+    newline inside a paragraph into a space, but react-markdown leaves that
+    newline in the text node -- so preserving whitespace turned every soft wrap
+    the model happened to emit into a hard line break, and any run of spaces
+    into visible gaps. The user's own message below still preserves whitespace,
+    because that text is not markdown and was typed the way it reads.
+  */
+  p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
+  ul: ({ children }) => <ul className="mb-3 list-disc pl-5 last:mb-0">{children}</ul>,
+  ol: ({ children }) => <ol className="mb-3 list-decimal pl-5 last:mb-0">{children}</ol>,
+  li: ({ children }) => <li className="mb-1">{children}</li>,
+  // Tailwind's preflight resets headings to `font-size: inherit; font-weight:
+  // inherit` and zeroes every border, so without these overrides a model's
+  // "## Heading" rendered pixel-identical to a paragraph and GFM tables came
+  // out borderless and unpadded.
+  h1: ({ children }) => <h1 className="mb-2 mt-4 text-[1.35em] font-bold leading-snug first:mt-0">{children}</h1>,
+  h2: ({ children }) => <h2 className="mb-2 mt-4 text-[1.2em] font-bold leading-snug first:mt-0">{children}</h2>,
+  h3: ({ children }) => <h3 className="mb-2 mt-3 text-[1.08em] font-bold leading-snug first:mt-0">{children}</h3>,
+  h4: ({ children }) => <h4 className="mb-1.5 mt-3 text-[1em] font-bold leading-snug first:mt-0">{children}</h4>,
+  h5: ({ children }) => <h5 className="mb-1.5 mt-3 text-[0.95em] font-bold uppercase tracking-wide first:mt-0">{children}</h5>,
+  h6: ({ children }) => <h6 className="mb-1.5 mt-3 text-[0.9em] font-bold uppercase tracking-wide first:mt-0">{children}</h6>,
+  blockquote: ({ children }) => (
+    <blockquote className="mb-3 border-l-2 border-zinc-300 pl-3 italic text-zinc-600 last:mb-0 dark:border-zinc-600 dark:text-zinc-300">
+      {children}
+    </blockquote>
+  ),
+  hr: () => <hr className="my-4 border-t border-zinc-200 dark:border-zinc-700" />,
+  table: AnswerTable,
+  th: ({ children }) => (
+    <th className="border border-zinc-300 bg-zinc-100 px-2 py-1 font-bold dark:border-zinc-600 dark:bg-zinc-800">
+      {children}
+    </th>
+  ),
+  td: ({ children }) => (
+    <td className="border border-zinc-300 px-2 py-1 align-top dark:border-zinc-600">{children}</td>
+  ),
+  // Block code, with its own copy control (see MarkdownCodeBlock).
+  pre: MarkdownCodeBlock,
+  code: AnswerCode,
+  a: ({ children, href }) => (
+    <a href={href} target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 underline">
+      {children}
+    </a>
+  ),
+  img: AnswerBlockedImage,
+};
+
+const ANSWER_REHYPE_PLUGINS: NonNullable<MarkdownOptions["rehypePlugins"]> = [
+  rehypeHighlight,
+  ANSWER_MATH_REHYPE_PLUGIN,
+];
+
+/**
+ * One answer's markdown. Memoised on the text alone, so parsing, KaTeX and
+ * highlighting run again only for the answer whose text changed -- the one
+ * streaming -- and not for every answer on screen each time the list renders.
+ */
+export const AnswerMarkdownBody = memo(function AnswerMarkdownBody({ content }: { content: string }) {
+  return (
+    <AnswerMarkdown
+      remarkPlugins={ANSWER_REMARK_PLUGINS}
+      rehypePlugins={ANSWER_REHYPE_PLUGINS}
+      components={ANSWER_MARKDOWN_COMPONENTS}
+    >
+      {prepareMathMarkdown(content)}
+    </AnswerMarkdown>
+  );
+});
 
 /**
  * A user's own message: text exactly as typed, with only code lifted out
@@ -648,6 +800,7 @@ export function ChatMessageList({
   enableQuote = false,
   onCompareInReview,
   compareRequiresCompleted = false,
+  onBranchFromAnswer,
   onRetryWithoutAttachments,
   onContinueWithoutUnavailableAttachments,
   onRetryConcurrency,
@@ -689,6 +842,7 @@ export function ChatMessageList({
   // regenerated or edited (lib/chatSupersededTurns.ts).
   const lastTurn = useMemo(() => lastReplaceableTurn(messages), [messages]);
   const supersededIds = useSupersededIds(currentChatId);
+  const [branchingId, setBranchingId] = useState<string | null>(null);
   useAnswerReadyNotice(isSending, messages[messages.length - 1]);
 
   const recoveryEnabled = Boolean(onRestoreQuestion);
@@ -1513,113 +1667,7 @@ export function ChatMessageList({
                       value={isActivelyGenerating ? ANSWER_RENDER_STREAMING : ANSWER_RENDER_FINAL}
                     >
                     <CodeBlockStreamingScope streaming={isActivelyGenerating}>
-                    <AnswerMarkdown
-                      remarkPlugins={ANSWER_REMARK_PLUGINS}
-                      rehypePlugins={[rehypeHighlight, ANSWER_MATH_REHYPE_PLUGIN]}
-                      components={{
-                        /*
-                          UI-026. No `whitespace-pre-wrap` here. CommonMark
-                          collapses a single newline inside a paragraph into a
-                          space, but react-markdown leaves that newline in the
-                          text node -- so preserving whitespace turned every
-                          soft wrap the model happened to emit into a hard line
-                          break, and any run of spaces into visible gaps. The
-                          user's own message below still preserves whitespace,
-                          because that text is not markdown and was typed the
-                          way it reads.
-                        */
-                        p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
-                        ul: ({ children }) => <ul className="mb-3 list-disc pl-5 last:mb-0">{children}</ul>,
-                        ol: ({ children }) => <ol className="mb-3 list-decimal pl-5 last:mb-0">{children}</ol>,
-                        li: ({ children }) => <li className="mb-1">{children}</li>,
-                        // Tailwind's preflight resets headings to `font-size:
-                        // inherit; font-weight: inherit` and zeroes every border,
-                        // so without these overrides a model's "## Heading"
-                        // rendered pixel-identical to a paragraph and GFM tables
-                        // came out borderless and unpadded.
-                        h1: ({ children }) => <h1 className="mb-2 mt-4 text-[1.35em] font-bold leading-snug first:mt-0">{children}</h1>,
-                        h2: ({ children }) => <h2 className="mb-2 mt-4 text-[1.2em] font-bold leading-snug first:mt-0">{children}</h2>,
-                        h3: ({ children }) => <h3 className="mb-2 mt-3 text-[1.08em] font-bold leading-snug first:mt-0">{children}</h3>,
-                        h4: ({ children }) => <h4 className="mb-1.5 mt-3 text-[1em] font-bold leading-snug first:mt-0">{children}</h4>,
-                        h5: ({ children }) => <h5 className="mb-1.5 mt-3 text-[0.95em] font-bold uppercase tracking-wide first:mt-0">{children}</h5>,
-                        h6: ({ children }) => <h6 className="mb-1.5 mt-3 text-[0.9em] font-bold uppercase tracking-wide first:mt-0">{children}</h6>,
-                        blockquote: ({ children }) => (
-                            <blockquote className="mb-3 border-l-2 border-zinc-300 pl-3 italic text-zinc-600 last:mb-0 dark:border-zinc-600 dark:text-zinc-300">
-                                {children}
-                            </blockquote>
-                        ),
-                        hr: () => <hr className="my-4 border-t border-zinc-200 dark:border-zinc-700" />,
-                        // The wrapper scrolls the table itself; without it a wide
-                        // table forces the whole message list to scroll sideways.
-                        // UX-031. A scroll container with nothing focusable in
-                        // it cannot be scrolled by keyboard at all -- there is
-                        // no way to reach the right-hand columns of a wide
-                        // table without a pointer. `tabIndex={0}` makes the
-                        // region itself a stop so the arrow keys reach it, and
-                        // the role and name stop it being an unlabelled stop.
-                        table: ({ children }) => (
-                            <div
-                                className="mb-3 max-w-full overflow-x-auto last:mb-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                                tabIndex={0}
-                                role="region"
-                                aria-label={t("chat.markdownTableRegion")}
-                            >
-                                <table className="w-full border-collapse text-left text-[0.95em]">{children}</table>
-                            </div>
-                        ),
-                        th: ({ children }) => (
-                            <th className="border border-zinc-300 bg-zinc-100 px-2 py-1 font-bold dark:border-zinc-600 dark:bg-zinc-800">
-                                {children}
-                            </th>
-                        ),
-                        td: ({ children }) => (
-                            <td className="border border-zinc-300 px-2 py-1 align-top dark:border-zinc-600">{children}</td>
-                        ),
-                        // Block code, with its own copy control. Referenced
-                        // by identity rather than written out here: an inline
-                        // component would be remounted on every render and
-                        // could not hold the copied state (see
-                        // MarkdownCodeBlock).
-                        pre: MarkdownCodeBlock,
-                        code: ({ children, className, ...props }: MarkdownCodeProps) =>
-                          // KaTeX output (lib/chatMathDelimiters.ts): a formula,
-                          // not a code span, so none of the inline-code chrome.
-                          className?.includes("language-math") ? (
-                            className.includes("math-display") ? (
-                              <div className="mb-3 max-w-full last:mb-0">{children}</div>
-                            ) : (
-                              <span>{children}</span>
-                            )
-                          ) : (
-                          <code
-                            {...props}
-                            className={`rounded bg-zinc-200 px-1 py-0.5 text-[0.9em] text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100 ${className || ""}`}
-                          >
-                            {children}
-                          </code>
-                        ),
-                        a: ({ children, href }) => (
-                          <a href={href} target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 underline">
-                            {children}
-                          </a>
-                        ),
-                        // Never put model-controlled image URLs in `src`.
-                        // Retrieved pages and attachments can prompt-inject a
-                        // model into embedding prior chat text in a tracking
-                        // URL; a normal <img> would send it without a click.
-                        img: ({ alt }) => (
-                          <span
-                            className="inline-flex rounded-md border border-zinc-300 bg-zinc-100 px-2 py-1 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
-                            role="note"
-                          >
-                            {t("chat.markdownImageBlocked")}
-                            {alt ? `: ${alt}` : ""}
-                          </span>
-                        ),
-                      }}
-                    >
-                      {prepareMathMarkdown(displayContent)}
-                    </AnswerMarkdown>
+                    <AnswerMarkdownBody content={displayContent} />
                     {isActivelyGenerating && (
                       <span
                         className="ml-0.5 inline-block h-3.5 w-[2px] animate-pulse bg-zinc-400 align-middle motion-reduce:animate-none dark:bg-zinc-500"
@@ -1696,6 +1744,18 @@ export function ChatMessageList({
                       <AnswerTurnActions
                         messageId={msg.id}
                         content={msg.content}
+                        branch={
+                          onBranchFromAnswer && !importedTranscript && (msg.status === undefined || msg.status === "normal")
+                            ? {
+                                onBranch: () => {
+                                  setBranchingId(msg.id);
+                                  void onBranchFromAnswer(msg.id).finally(() => setBranchingId(null));
+                                },
+                                pending: branchingId === msg.id,
+                                disabled: isSending || isSendPreparing || branchingId !== null,
+                              }
+                            : undefined
+                        }
                         regenerate={
                           onRegenerateAnswer && lastTurn?.answer.id === msg.id && canEditQuestion(lastTurn)
                             ? {

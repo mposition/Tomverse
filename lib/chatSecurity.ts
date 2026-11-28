@@ -3693,7 +3693,18 @@ export const acquireChatAccess = async (
         // Same reservation, aggregate scope: a claimed slot already holds one
         // unit of this IP's minute. An unclaimed request still charges it here,
         // which is what keeps the single-model path unchanged.
-        if (!claimedAdmissionSlot && !guestAutoPrehold) {
+        // A scheduled run is not a client at an address: the runner builds the
+        // request in this process, so its IP key is the shared fingerprint of
+        // "no address" and every run of every account would spend one bucket.
+        // The account's own per-minute subject limit above still applies. The
+        // proof is `subjectSlotsKeptFree`, which the Chat route fills only from
+        // the in-process run scope (lib/scheduledTaskReservationGuard.ts,
+        // lib/scheduledTaskRunContext.ts) -- unreachable from a network
+        // request, never a header the caller could send. Importing the run
+        // scope here instead would add a file to the Prompt Refiner runtime
+        // source closure for no gain.
+        const isScheduledRun = access.kind === "user" && subjectSlotsKeptFree > 0;
+        if (!claimedAdmissionSlot && !guestAutoPrehold && !isScheduledRun) {
             const ipMinuteStart = periodStart("minute", now);
             const ipScope = ipRateScope(access.ipKey, ipPerMinute);
             const ipAllowed = await incrementUsage(

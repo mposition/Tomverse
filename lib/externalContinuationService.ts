@@ -35,7 +35,7 @@ import type { Prisma } from "@prisma/client";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { desktopImportUnlockEnabled, lockedContinuationSource, type LockedContinuationSource } from "@/lib/desktopImportUnlockCore";
 import { DESKTOP_APP_ORIGIN } from "@/lib/desktopReadApiContract";
-import { ApiSecurityError } from "@/lib/apiSecurity";
+import { ApiSecurityError, assertConversationCapacity } from "@/lib/apiSecurity";
 import { isExternalContinuationEnabled } from "@/lib/appSettings";
 import {
     effectivePlanModelLimit,
@@ -382,6 +382,10 @@ async function createContinuationRows(input: {
             if (!project) throw new ApiSecurityError(404, "PROJECT_NOT_FOUND", "Project not found.");
             if (project.archivedAt) throw new ApiSecurityError(409, "PROJECT_ARCHIVED", "Restore the project first.");
         }
+
+        // A continuation is a conversation the person will see in their list, so
+        // it counts against the same conversation quota as one they create by hand.
+        await assertConversationCapacity(tx, input.userId);
 
         // The shared creation service, not `conversation.create`. It is what
         // writes `productKey` in the same statement as the row, so a

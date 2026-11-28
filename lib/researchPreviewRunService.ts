@@ -19,6 +19,7 @@ import { getOperationalFeatureFlags } from "@/lib/appSettings";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { resolveModelPricing } from "@/lib/modelPricing";
 import { prisma } from "@/lib/prisma";
+import { isTemporaryConversationExpired } from "@/lib/temporaryChatAccess";
 import {
   decideResearchPreviewAdmission,
   researchPreviewGate,
@@ -45,6 +46,7 @@ import {
 import {
   RESEARCH_PREVIEW_RUN_ACTIVE_LIMIT_MS,
   RESEARCH_PREVIEW_RUN_CHECKPOINT_TTL_MS,
+  ResearchPreviewRunError,
   activateResearchPreviewRun,
   beginResearchPreviewGeneration,
   checkpointResearchPreviewRun,
@@ -169,6 +171,7 @@ export async function createDurableResearchPreviewRun(input: {
           selectionMode: true,
           selectedModels: true,
           assistantProfileVersionId: true,
+          temporaryExpiresAt: true,
         },
       }),
       readEligibleResearchPreviewSource({
@@ -185,6 +188,11 @@ export async function createDurableResearchPreviewRun(input: {
   const question = sourceMessage?.question ?? "";
   if (!conversation || !sourceMessage) {
     throw new Error("RESEARCH_SOURCE_UNAVAILABLE");
+  }
+  // An expired temporary Chat is about to be deleted with every run under it
+  // (lib/temporaryConversationSweep.ts): a new paid run would be started only to be lost.
+  if (isTemporaryConversationExpired(conversation.temporaryExpiresAt, new Date())) {
+    throw new ResearchPreviewRunError(410, "TEMPORARY_CHAT_EXPIRED", "This temporary chat has ended.");
   }
   const profileTools = await profileToolPolicy(
     input.userId,
@@ -708,7 +716,7 @@ export async function resumeDurableResearchPreviewRun(input: {
   if (!run || run.userId !== input.userId) return null;
   const conversation = await prisma.conversation.findFirst({
     where: { id: run.conversationId, userId: input.userId },
-    select: { id: true, password: true, passwordVersion: true },
+    select: { id: true, password: true, passwordVersion: true, temporaryExpiresAt: true },
   });
   if (
     !conversation ||
@@ -720,6 +728,10 @@ export async function resumeDurableResearchPreviewRun(input: {
     )
   ) {
     throw new Error("RESEARCH_CONVERSATION_LOCKED");
+  }
+  // Resuming starts provider calls again; an expired temporary Chat is about to be deleted with the run.
+  if (isTemporaryConversationExpired(conversation.temporaryExpiresAt, new Date())) {
+    throw new ResearchPreviewRunError(410, "TEMPORARY_CHAT_EXPIRED", "This temporary chat has ended.");
   }
   await currentWorkerPolicy(run);
   if (!run.reservationId) throw new Error("RESEARCH_RESERVATION_MISSING");

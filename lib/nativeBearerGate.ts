@@ -325,6 +325,14 @@ export function desktopRemotePreviewEnabled() {
 }
 
 /**
+ * A Code task run by the person's own Codex or Claude Code on their computer. The run touches no server route (it uses no
+ * Tomverse coding API and no credits), so this only tells a Desktop build that it may offer the route. Off by default.
+ */
+export function desktopProviderCliExecEnabled() {
+  return process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true" && process.env.TOMVERSE_DESKTOP_PROVIDER_CLI_EXEC_ENABLED === "true";
+}
+
+/**
  * Passkey confirmation of remote approvals (docs/ops/desktop-remote-control.md). Off by default, and only meaningful
  * while remote control itself is on. While it is off nobody is asked for a passkey and none can be registered; the
  * passkeys already registered stay where they are.

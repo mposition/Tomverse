@@ -155,7 +155,17 @@ for (const shell of ["DesktopChatShell", "MobileChatShell"]) {
     const source = parseSource(path);
     const attributes = findNodes(source, (node) => ts.isJsxAttribute(node) && node.name.getText(source) === "onRequestCloseModel");
     assert.equal(attributes.length, 1);
-    const expression = attributes[0].initializer.expression;
+    let expression = attributes[0].initializer.expression;
+    const sharedCallback = shell === "DesktopChatShell";
+    if (sharedCallback) {
+      // Desktop binds one stable callback per panel instead of an inline arrow
+      // (an inline one is a new prop on every keystroke); run the callback itself.
+      assert.equal(expression.getText(source), "closeModelHandlers.get(modelId)");
+      const callbacks = findNodes(source, (node) => ts.isVariableDeclaration(node) &&
+        ts.isIdentifier(node.name) && node.name.text === "closeModel");
+      assert.equal(callbacks.length, 1);
+      expression = callbacks[0].initializer.arguments[0];
+    }
     for (const singleTranscript of [true, false]) {
       const events = [];
       const click = { currentTarget: trigger, target: nestedIcon };
@@ -163,7 +173,8 @@ for (const shell of ["DesktopChatShell", "MobileChatShell"]) {
         document: { activeElement: previouslyFocused }, openChatModelPicker: (target) => events.push(["picker", target]),
         onToggleModel: (id) => events.push(["toggle", id]),
       });
-      handler(singleTranscript ? click : undefined);
+      if (sharedCallback) handler("model-a", singleTranscript ? click : undefined);
+      else handler(singleTranscript ? click : undefined);
       // React's currentTarget is only available during dispatch. Keep the node,
       // not the event, for the later close operation. Review needs no event.
       click.currentTarget = null;

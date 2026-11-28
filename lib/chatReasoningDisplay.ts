@@ -127,19 +127,41 @@ export const splitChatReasoning = (raw: string): SplitChatReasoning => {
     const signal = parseSignal(rest.slice(payloadStart, end));
     count += 1;
     rest = rest.slice(end);
-    if (!signal) continue;
-    if (signal.state === "reset") {
-      view = null;
-    } else if (signal.state === "thinking") {
-      view = appendBounded(
-        { ...(view ?? { text: "", durationMs: null, truncated: false }), done: false },
-        signal.text ?? ""
-      );
-    } else if (view) {
-      view = { ...view, done: true, durationMs: signal.durationMs };
-    }
+    if (signal) view = applyReasoningSignal(view, signal);
   }
   return { text, reasoning: view, count };
+};
+
+const applyReasoningSignal = (
+  view: ChatReasoningView | null,
+  signal: ChatReasoningSignal
+): ChatReasoningView | null => {
+  if (signal.state === "reset") return null;
+  if (signal.state === "thinking") {
+    return appendBounded(
+      { ...(view ?? { text: "", durationMs: null, truncated: false }), done: false },
+      signal.text ?? ""
+    );
+  }
+  return view ? { ...view, done: true, durationMs: signal.durationMs } : view;
+};
+
+/**
+ * Folds one complete stream control into the view. For the stream reader that
+ * meets each control once (`createChatStreamDisplayProjector().takeControls()`),
+ * so the summary costs time linear in its length. A control that is not a
+ * reasoning marker, or one this client cannot parse, leaves the view as it was.
+ */
+export const foldChatReasoningControl = (
+  view: ChatReasoningView | null,
+  control: string
+): ChatReasoningView | null => {
+  if (!control.startsWith(CHAT_REASONING_MARKER)) return view;
+  const payloadStart = CHAT_REASONING_MARKER.length;
+  const end = matchingBraceEnd(control, payloadStart);
+  if (end === -1) return view;
+  const signal = parseSignal(control.slice(payloadStart, end));
+  return signal ? applyReasoningSignal(view, signal) : view;
 };
 
 const matchingBraceEnd = (raw: string, from: number): number => {
