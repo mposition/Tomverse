@@ -21,13 +21,15 @@ const VENDOR = /^[a-z][a-z0-9-]{0,63}$/;
 // carries every finding whole, so its output is read up to 64 MiB.
 const MAX_OUTPUT = 64 * 1_024 * 1_024;
 
+// The scope has no length of the runner's (owner decision 2026-11-28): the app
+// keeps it inside the review request's transport (lib/amux/v52ReviewCore.ts).
 function validInput(input) {
   return input && UUID.test(input.attemptId) && SHA.test(input.baseSha) &&
     SHA.test(input.commitSha) && input.baseSha !== input.commitSha &&
     input.reviewRef === `refs/amux-v52-review/${input.attemptId}` &&
     ["claude", "codex", "cursor", "copilot", "antigravity"].includes(input.author) &&
     VENDOR.test(input.authorVendor) && typeof input.scope === "string" &&
-    input.scope.length > 0 && input.scope.length <= 20_000 &&
+    input.scope.length > 0 &&
     typeof input.touchesContract === "boolean" && validAvoid(input);
 }
 

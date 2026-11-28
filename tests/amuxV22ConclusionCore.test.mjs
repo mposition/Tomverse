@@ -54,9 +54,10 @@ test("each verdict has its settlement: proceed finishes, stop and replan park, n
   assert.equal(amuxV22ConclusionSettlement(null), null, "a result without a valid conclusion keeps today's review");
 });
 
-test("the switch is off unless it says prompt or auto", () => {
-  assert.equal(amuxV22ConclusionMode(undefined), "off");
-  assert.equal(amuxV22ConclusionMode("enabled"), "off");
+test("the switch is auto unless it says off or prompt (owner decision 2026-11-28)", () => {
+  assert.equal(amuxV22ConclusionMode(undefined), "auto");
+  assert.equal(amuxV22ConclusionMode("enabled"), "auto");
+  assert.equal(amuxV22ConclusionMode("off"), "off");
   assert.equal(amuxV22ConclusionMode("prompt"), "prompt");
   assert.equal(amuxV22ConclusionMode("auto"), "auto");
 });
@@ -75,6 +76,20 @@ test("handoff notes reach the Task they name, by key, id or *", () => {
   assert.equal(amuxV22HandoffNotesFor(conclusion, { id: "task-a", displayKey: "AMUX-A-2" }), "for a\nfor all");
   assert.equal(amuxV22HandoffNotesFor(conclusion, { id: "task-b", displayKey: null }), "for b\nfor all");
   assert.equal(amuxV22HandoffNotesFor({ handoff: [] }, { id: "x", displayKey: null }), null);
+});
+
+// 2026-11-28 (AMUX-PUBLIC-004): AMUX-PUBLIC-002's conclusion summed up its
+// audit; the table of what to fix was only in its report.
+test("the local CLI flow's prior file carries a conclusion's whole report after its findings; the budgeted section does not", () => {
+  const table = "| key | fix |\n|---|---|\n" + "| pricing.copy.x | say y |\n".repeat(500);
+  const entries = [{ label: "AMUX-PUBLIC-002", findings: "Six keys need fixing.", note: null, report: `## 2. 문장별 분류\n${table}` }];
+  const whole = buildAmuxV22PriorConclusionSection({ entries, budgetBytes: null });
+  assert.ok(whole.section.includes(`From AMUX-PUBLIC-002:\nFindings: Six keys need fixing.\nIts final report, whole:\n## 2. 문장별 분류\n${table}`));
+  const budgeted = buildAmuxV22PriorConclusionSection({ entries, budgetBytes: 20_000 });
+  assert.doesNotMatch(budgeted.section, /Its final report/);
+  // No report, no line.
+  const bare = buildAmuxV22PriorConclusionSection({ entries: [{ label: "A", findings: "f", note: null }], budgetBytes: null });
+  assert.doesNotMatch(bare.section, /Its final report/);
 });
 
 test("the prior section is labelled reference material, bounded, and digested as sent", () => {
