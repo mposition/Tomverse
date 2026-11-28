@@ -9,6 +9,7 @@ import { CONTINUATION_RECEIPT_HEADER, receiptForAttempt, type ContinuationReceip
 import { PASSAGE_HEADER } from "@/lib/continuationPassages";
 import type { ChatPanelLocationIntent, RouterLocationTurn } from "@/lib/chatLocationClient";
 import { selectedMcpConnection } from "@/lib/mcpConnectorSelection";
+import { answerCreditsConversationId, createAnswerCreditWatches } from "@/lib/chatAnswerCreditsClient";
 
 import { reviewProviderTranscript } from "@/lib/reviewProviderTranscript";
 import { chatLocationSession, readRouterLocationRequest, requireRouterLocationVersion } from "@/lib/chatLocationClient";
@@ -91,6 +92,7 @@ import {
 import type { ChatContentState } from "@/lib/chatContentState";
 import type { ModelRuntimeStatus } from "@/lib/chatRuntimeStatus";
 import { consumeChatStream } from "@/lib/chatStreamConsumer";
+import { CHAT_REASONING_DISPLAY_HEADER } from "@/lib/chatReasoningDisplay";
 import {
   decideChatStreamReattach,
   handOffInterruptedChatAttempt,
@@ -338,6 +340,8 @@ type ChatAppProps = {
     researchDurable?: boolean;
     researchMode?: "preview";
     reasoningEffort?: import("@/lib/reasoningEffort").ExplicitReasoningEffort;
+    /** Study mode was on when this question was sent (lib/chatStudyPrompt.ts). */
+    studyMode?: boolean;
     deepResearchDepth?: "quick" | "standard" | "deep";
     /**
      * Web search for this send only, when the send was made by the web-search
@@ -794,6 +798,50 @@ function ChatAppComponent({
     onResponseCompleteRef.current = onResponseComplete;
     promptPendingRef.current = Boolean(promptPayload);
   });
+
+  /*
+    What a finished answer was charged, asked after once its settlement lands
+    (lib/chatAnswerCreditsClient.ts). Read-only; it never touches the charge.
+
+    Only for the conversation this panel shows: the asks stop when the panel
+    unmounts or moves to another conversation, and an answer that finishes
+    after it has moved on starts none. Through a ref for the same reason as
+    the handlers above -- the send callback and the attempt poll read it
+    without taking it as a dependency.
+  */
+  const shownConversationIdRef = useRef(initialConversationId);
+  const answerCreditWatchesRef = useRef<ReturnType<typeof createAnswerCreditWatches> | null>(null);
+  const followAnswerCreditsRef = useRef<
+    (key: string, conversationId: string | null | undefined, answerId: string) => void
+  >(() => undefined);
+  useLayoutEffect(() => {
+    shownConversationIdRef.current = initialConversationId;
+    followAnswerCreditsRef.current = (key, conversationId, answerId) => {
+      const savedConversationId = answerCreditsConversationId({
+        transcriptScope,
+        currentProduct,
+        isGuestMode,
+        conversationId,
+      });
+      if (!savedConversationId || savedConversationId !== shownConversationIdRef.current) return;
+      answerCreditWatchesRef.current ??= createAnswerCreditWatches();
+      answerCreditWatchesRef.current.follow({
+        conversationId: savedConversationId,
+        messageId: answerId,
+        onSettled: (settledCredits) =>
+          writeChatRuntimeMessages(key, (current) =>
+            current.map((message) =>
+              message.id === answerId ? { ...message, settledCredits } : message
+            )
+          ),
+      });
+    };
+  });
+  useEffect(() => {
+    answerCreditWatchesRef.current ??= createAnswerCreditWatches();
+    const watches = answerCreditWatchesRef.current;
+    return () => watches.stopAll();
+  }, [initialConversationId]);
 
   // `runtime.isLoaded` is already per (identity, conversation, model): the
   // snapshot a panel reads can only describe the key it asked for, so there is
@@ -1668,6 +1716,9 @@ function ChatAppComponent({
               message.id === assistantMessageId ? completedMessage : message
             );
           });
+          // A reattached or reloaded answer that finished while polled shows
+          // its charge as a streamed one does.
+          if (!controller.signal.aborted) followAnswerCreditsRef.current(key, attempt.conversationId, assistantMessageId);
           if (!controller.signal.aborted) observeJourneyReply({ owner: panelIdentityKey, epoch: pollingJourneyEpoch,
             conversationId: attempt.conversationId, sourceUserMessageId: attempt.sourceUserMessageId,
             status: completedMessage.status === "incomplete" ? "incomplete" : "normal", nonempty: Boolean(completedMessage.content.trim()) });
@@ -1808,6 +1859,7 @@ function ChatAppComponent({
     requestOptions?: {
       webSearchMode?: WebSearchToggleMode;
       reasoningEffort?: ExplicitReasoningEffort;
+      studyMode?: boolean;
       /** Project search-hit refs the user attached to this one question. */
       projectReferences?: readonly string[];
     },
@@ -1922,6 +1974,7 @@ function ChatAppComponent({
     replacement = beginReplacement(targetChatId, takeArmedSupersede(targetChatId, text), !isGuestMode);
     const replacedIds = replacement.excludedIds();
     const { webSearchMode: webSearchModeOverride, reasoningEffort, projectReferences } = requestOptions ?? {};
+    const studyMode = requestOptions?.studyMode === true && !researchMode;
     const effectiveWebSearchMode: WebSearchMode | undefined =
       researchMode ? "always" : webSearchModeOverride ?? webSearchMode;
     const mcpConnectionId = !researchMode && currentProduct === "chat" ? selectedMcpConnection(initialConversationId) : undefined;
@@ -1937,6 +1990,7 @@ function ChatAppComponent({
       // and its retry reads the conversation's mode exactly as before.
       ...(webSearchModeOverride ? { webSearchMode: webSearchModeOverride } : {}),
       ...(reasoningEffort ? { reasoningEffort } : {}),
+      ...(studyMode ? { studyMode } : {}),
       // A Guest Auto authority and logical turn are one-shot. Keeping this
       // content-free marker with the retry source lets a remounted panel hide
       // and reject the generic manual retry rather than silently sending the
@@ -2486,6 +2540,7 @@ function ChatAppComponent({
           ...(researchMode ? { researchMode } : {}),
           ...(deepResearchDepth ? { deepResearchDepth } : {}),
           ...(reasoningEffort ? { reasoningEffort } : {}),
+          ...(studyMode ? { studyMode } : {}),
           ...(mcpConnectionId ? { mcpConnectionId } : {}),
           ...(admissionToken ? { admissionToken } : {}),
           ...(activeContextBundle ? { contextBundle: activeContextBundle } : {}),
@@ -2508,7 +2563,7 @@ function ChatAppComponent({
           controller.signal.throwIfAborted();
           if (!isGuestMode && !researchMode) observeJourneyDispatch(panelIdentityKey, targetChatId, sourceUserMessageId);
           return fetch(path, {
-          method: "POST", headers: { "Content-Type": "application/json", ...(researchMode ? { "Accept-Language": lang } : {}), ...(turnPassages ? {[PASSAGE_HEADER]:turnPassages} : {}) },
+          method: "POST", headers: { "Content-Type": "application/json", ...(researchMode ? { "Accept-Language": lang } : {}), ...(turnPassages ? {[PASSAGE_HEADER]:turnPassages} : {}), ...(transcriptScope === "conversation" ? { [CHAT_REASONING_DISPLAY_HEADER]: "1" } : {}) },
           body,
           signal: controller.signal,
         });
@@ -2916,6 +2971,8 @@ function ChatAppComponent({
           );
         }
         if (completedMessage) {
+          // The attempt had already finished: its answer is saved and settled.
+          followAnswerCreditsRef.current(runKey, attempt.conversationId, assistantMessageId);
           observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch, conversationId: attempt.conversationId,
             sourceUserMessageId: attempt.sourceUserMessageId, status: completedMessage.status === "incomplete" ? "incomplete" : "normal", nonempty: Boolean(completedMessage.content.trim()) });
           onResponseComplete?.(
@@ -2997,6 +3054,7 @@ function ChatAppComponent({
                     ? autoRewrite : undefined,
                   isGeneratingArtifact: progress.isGeneratingArtifact,
                   mcpProgress: progress.mcpProgress,
+                  ...(progress.reasoning ? { reasoning: progress.reasoning } : {}),
                   ...(progress.generatingArtifactFormat
                     ? {
                         generatingArtifactFormat:
@@ -3110,6 +3168,8 @@ function ChatAppComponent({
           undefined,
           {
             searchMetadata,
+            // The summary streamed beside the answer, folded once it ends.
+            ...(streamed.reasoning ? { reasoning: { ...streamed.reasoning, done: true } } : {}),
             // `medium` is a Desktop-only step; the web composer has no label for it.
             appliedReasoningEffort: trailer?.appliedReasoningEffort === "medium" ? undefined : trailer?.appliedReasoningEffort,
             // Always written, so a retry that produces no file clears the
@@ -3143,6 +3203,8 @@ function ChatAppComponent({
         );
         // Only an answer the server stored replaces the turn before it.
         replacement.complete(completionStatus, { saved: !trailer?.persistence });
+        // Only a saved answer is linked to its charge.
+        if (!trailer?.persistence) followAnswerCreditsRef.current(runKey, targetChatId, assistantMessageId);
         if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
           conversationId: targetChatId, sourceUserMessageId, status: completionStatus,
           nonempty: Boolean(assistantText.trim()) || fileOnlyAnswer });
@@ -3244,6 +3306,10 @@ function ChatAppComponent({
             assistantText.trim() ? assistantText : t("chat.responseCancelled"),
             "cancelled"
           );
+          // A stop after some text is charged for what was written. Only a
+          // turn of a saved conversation has a charge to show; the ref
+          // refuses any other (answerCreditsConversationId).
+          if (assistantText.trim()) followAnswerCreditsRef.current(runKey, targetChatId, assistantMessageId);
         }
       } else if (isGuestVerificationError(error)) {
         // The challenge itself ended without a token (failed / cancelled /
@@ -3668,7 +3734,7 @@ function ChatAppComponent({
             null,
             null,
             "single",
-            { reasoningEffort: lastPrompt.reasoningEffort },
+            { reasoningEffort: lastPrompt.reasoningEffort, studyMode: lastPrompt.studyMode },
             attachmentIds,
             lastPrompt.sourceUserMessageId
           );
@@ -4097,6 +4163,7 @@ function ChatAppComponent({
           : undefined}
         compareRequiresCompleted={Boolean(onCompareContinuationInReview)}
         onBranchFromAnswer={transcriptScope === "conversation" && currentProduct === "chat" ? onBranchFromAnswer : undefined}
+        showAnswerCredits={transcriptScope === "conversation" && currentProduct === "chat" && !isGuestMode}
         // Both scopes: a concurrency refusal is the one failure Chat may
         // resend, since nothing of the refused turn ever ran (see the handler).
         // Without a held retry prompt (after a reload) Chat falls back to

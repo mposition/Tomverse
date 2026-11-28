@@ -10,7 +10,7 @@
  * component, the unit lane cannot mount one, and the alternative was a test
  * that re-implements the loop and then agrees with itself.
  *
- * Nothing about the wire format changed in the move. Four out-of-band
+ * Nothing about the wire format changed in the move. Five out-of-band
  * channels share the stream, all led by a NUL code point that providers do
  * not emit in normal completions, and all stripped on **every pass** rather
  * than once at the end -- the answer is rendered as it streams, and a marker
@@ -21,6 +21,7 @@
  *                                      producing non-visible parts, or the
  *                                      server has stopped waiting for it
  *   * lib/generatedArtifactProgressSignal.ts -- a file is being built
+ *   * lib/chatReasoningDisplay.ts   -- the provider's reasoning summary
  *   * lib/webSearchStreamTrailer.ts -- the closing metadata object
  *
  * The order matters only in that each splitter is handed the previous one's
@@ -31,6 +32,7 @@ import { createChatStreamDisplayProjector } from "@tomverse/chat-core";
 import { mcpProgressFromStream, type McpProgressState } from "@/lib/mcpConnectorProgress";
 import { splitStreamKeepaliveSignal, type ChatStreamKeepaliveSignal } from "@/lib/chatStreamKeepalive";
 import { splitArtifactProgressSignal } from "@/lib/generatedArtifactProgressSignal";
+import { foldChatReasoningControl, type ChatReasoningView } from "@/lib/chatReasoningDisplay";
 import { splitRoutingRetrySignal } from "@/lib/routingRetrySignal";
 import { splitSearchMetadataTrailer } from "@/lib/webSearchStreamTrailer";
 import type { ChatTimeoutErrorCode } from "@/lib/chatStreamLiveness";
@@ -44,6 +46,8 @@ export type ChatStreamProgress = {
   /** The "building a file" card, until the trailer says what came of it. */
   isGeneratingArtifact: boolean;
   generatingArtifactFormat: string | null;
+  /** The provider's reasoning summary so far, or null when none was sent. */
+  reasoning: ChatReasoningView | null;
 };
 
 export type ChatStreamResult = ChatStreamProgress & {
@@ -100,6 +104,7 @@ export const consumeChatStream = async (input: {
   let retryingWithModelId: string | null = null;
   let isGeneratingArtifact = false;
   let generatingArtifactFormat: string | null = null;
+  let reasoning: ChatReasoningView | null = null;
   let serverStallCode: ChatTimeoutErrorCode | null = null;
   // Reads the stream once, remembering where it got to (see streamText.ts).
   const projector = createChatStreamDisplayProjector();
@@ -143,6 +148,9 @@ export const consumeChatStream = async (input: {
         isGeneratingArtifact = true;
         generatingArtifactFormat = artifactProgress.signal.format;
       }
+      // Not progress either: the summary is shown beside the answer, and a
+      // model that thinks for minutes must not look like one that answered.
+      reasoning = foldChatReasoningControl(reasoning, control);
       const mcp = mcpProgressFromStream(control);
       if (mcp) mcpProgress = mcp;
     }
@@ -174,6 +182,7 @@ export const consumeChatStream = async (input: {
       retryingWithModelId,
       isGeneratingArtifact,
       generatingArtifactFormat,
+      reasoning,
     });
   }
 
@@ -195,6 +204,7 @@ export const consumeChatStream = async (input: {
     retryingWithModelId,
     isGeneratingArtifact,
     generatingArtifactFormat,
+    reasoning,
     searchMetadataJson,
     serverStallCode,
   };

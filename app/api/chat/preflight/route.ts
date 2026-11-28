@@ -92,6 +92,8 @@ const preflightSchema = z
             )
             .max(CHAT_MAX_ATTACHMENTS_PER_MESSAGE),
         webSearchMode: z.enum(WEB_SEARCH_MODES).optional(),
+        /** Study mode adds an instruction block to the turn, so the quote counts it. */
+        studyMode: z.boolean().optional(),
     })
     .strict();
 
@@ -495,6 +497,7 @@ export async function POST(request: Request) {
                 // Consent may change while preflight is pending. Reserve the
                 // bounded optional context regardless; settlement uses actual input.
                 reserveLocationInput: true,
+                studyMode: payload.studyMode === true,
                 modelId: model.id,
                 provider: model.provider,
                 usageClass: model.usageClass,

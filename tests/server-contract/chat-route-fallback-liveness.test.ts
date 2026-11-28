@@ -605,6 +605,7 @@ type FixtureProject = {
 };
 let fixtureProject: FixtureProject | null = null;
 const projectExtractionEnqueues: string[] = [];
+const chatExtractionEnqueues: string[] = [];
 mock.module(mod("lib/projectWorkspaceService.ts"), {
   namedExports: {
     resolveConversationProjectScope: async () => fixtureProject,
@@ -615,6 +616,10 @@ mock.module(mod("lib/projectMemoryExtraction.ts"), {
   namedExports: {
     enqueueNativeProjectExtraction: async (input: { conversationId: string }) => {
       projectExtractionEnqueues.push(input.conversationId);
+      return { outcome: "skipped", reason: "operator_off" };
+    },
+    enqueueNativeChatExtraction: async (input: { conversationId: string }) => {
+      chatExtractionEnqueues.push(input.conversationId);
       return { outcome: "skipped", reason: "operator_off" };
     },
   },
@@ -677,6 +682,8 @@ type Attempt = {
   modelId: string | null;
   /** The `onError` the route passed; absent means the SDK's own default. */
   onError?: (event: { error: unknown }) => unknown;
+  /** The provider options this attempt was dispatched with. */
+  providerOptions?: unknown;
   /** Whether its stream was cancelled, and with what. */
   cancelledWith: unknown;
   messages: Array<{ role: string; content: unknown }>;
@@ -705,6 +712,10 @@ let fallbackBehaviour:
   | "partial"
   | "completion_wait" = "answers";
 let primaryAnswerChunks: string[] | undefined;
+/** Reasoning parts the answering attempt reports to `onChunk` first. */
+let providerReasoningParts: Array<Record<string, unknown>> | undefined;
+/** Extra request headers for the next `ask`. */
+let askExtraHeaders: Record<string, string> = {};
 let injectPrimaryFault = true;
 let turnLocation: Record<string, unknown> | undefined;
 let completionUsageRead = false;
@@ -736,6 +747,7 @@ mock.module("ai", {
         modelId:
           (options.model as { modelId?: string } | undefined)?.modelId ?? null,
         onError: options.onError as Attempt["onError"],
+        providerOptions: options.providerOptions,
         cancelledWith: null,
         messages: options.messages as Attempt["messages"],
         toolNames: Object.keys(options.tools ?? {}),
@@ -789,6 +801,9 @@ mock.module("ai", {
         textStream: new ReadableStream<string>({
           start(controller) {
             if ((index === 0 && injectPrimaryFault) || silent) return;
+            // Stream parts the text stream never carries, as the SDK hands
+            // them to `onChunk` before the first visible token.
+            for (const chunk of providerReasoningParts ?? []) void options.onChunk?.({ chunk } as never);
             for (const chunk of (index === 0 ? primaryAnswerChunks : undefined) ?? [ANSWER]) controller.enqueue(chunk);
             if (!partial) controller.close();
           },
@@ -828,7 +843,7 @@ mock.module("ai", {
 /* -------------------------------------------------------------------------- */
 
 const world = {
-  messages: [] as Array<{ id: string; status: string; modelId: string; content?: string }>,
+  messages: [] as Array<{ id: string; status: string; modelId: string; content?: string; searchMetadata?: unknown }>,
   terminals: [] as Array<Record<string, unknown>>,
 };
 let failAssistantPersistence = false;
@@ -969,7 +984,7 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
       };
     },
     create: (args: {
-      data: { id: string; status: string; modelId: string; content?: string };
+      data: { id: string; status: string; modelId: string; content?: string; searchMetadata?: unknown };
     }) => {
       if (failAssistantPersistence && args.data.id === ASSISTANT_MESSAGE_ID) {
         throw new Error("FORCED_ASSISTANT_MESSAGE_TX_FAILURE");
@@ -979,6 +994,7 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
         status: args.data.status,
         modelId: args.data.modelId,
         content: args.data.content,
+        searchMetadata: args.data.searchMetadata,
       });
       return args.data;
     },
@@ -1863,6 +1879,7 @@ const ask = async (
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        ...askExtraHeaders,
         // Step 4 of the drill: the first provider fails before its first
         // chunk. Also lock 2 of the readiness override -- one credential.
         ...(withInjectedPrimaryFault
@@ -4844,6 +4861,22 @@ test("a prepared project turn offers project_search/project_read under a step gu
   } finally { fixtureProject = null; projectExtractionEnqueues.length = 0; }
 });
 
+test("an ordinary Chat turn queues Chat memory extraction after the answer is stored, and a project turn queues only the project one", async () => {
+  fixtureProject = null;
+  chatExtractionEnqueues.length = 0;
+  projectExtractionEnqueues.length = 0;
+  try {
+    await ask("answers", "claimed", 200, false, undefined, true, false);
+    assert.deepEqual(chatExtractionEnqueues, [CONVERSATION_ID]);
+    assert.deepEqual(projectExtractionEnqueues, []);
+    chatExtractionEnqueues.length = 0;
+    fixtureProject = contextProject();
+    await ask("answers", "claimed", 200, true, undefined, true, false);
+    assert.deepEqual(chatExtractionEnqueues, []);
+    assert.deepEqual(projectExtractionEnqueues, [CONVERSATION_ID]);
+  } finally { fixtureProject = null; chatExtractionEnqueues.length = 0; projectExtractionEnqueues.length = 0; }
+});
+
 test("a folder project (context off) sends exactly as before: no bundle required, no project tools, no extraction", async () => {
   fixtureProject = contextProject({ contextEnabled: false });
   projectExtractionEnqueues.length = 0;
@@ -4853,4 +4886,115 @@ test("a folder project (context off) sends exactly as before: no bundle required
     assert.ok(!attempts[0].toolNames.includes("project_search"));
     assert.deepEqual(projectExtractionEnqueues, []);
   } finally { fixtureProject = null; }
+});
+
+/* -------------------------------------------------------------------------- */
+/* The reasoning summary (lib/chatReasoningDisplay.ts)                         */
+/* -------------------------------------------------------------------------- */
+
+const { splitChatReasoning } = require(
+  resolve(ROOT, "lib/chatReasoningDisplay.ts")
+) as typeof import("../../lib/chatReasoningDisplay");
+
+/**
+ * One manual turn on a model that already reasons, whose provider reports a
+ * reasoning block before its text.
+ */
+const reasoningTurn = async (input: { switchOn: boolean; header: boolean }) => {
+  const savedSwitch = process.env.CHAT_REASONING_DISPLAY_ENABLED;
+  if (input.switchOn) process.env.CHAT_REASONING_DISPLAY_ENABLED = "true";
+  else delete process.env.CHAT_REASONING_DISPLAY_ENABLED;
+  conversationSelectionMode = "manual";
+  selectedConversationModels = ["claude-haiku-5-5"];
+  providerReasoningParts = [
+    { type: "reasoning-start", id: "r1" },
+    { type: "reasoning-delta", id: "r1", text: "Weighing the two options." },
+    { type: "reasoning-end", id: "r1" },
+    { type: "text-delta", id: "t1", text: ANSWER },
+  ];
+  askExtraHeaders = input.header ? { "X-Chat-Reasoning-Display": "1" } : {};
+  try {
+    return await ask("answers", "claimed", 200, false, undefined, true, false, undefined, "off", "none", "claude-haiku-5-5");
+  } finally {
+    if (savedSwitch === undefined) delete process.env.CHAT_REASONING_DISPLAY_ENABLED;
+    else process.env.CHAT_REASONING_DISPLAY_ENABLED = savedSwitch;
+    conversationSelectionMode = "auto";
+    selectedConversationModels = [REQUESTED_MODEL_ID];
+    providerReasoningParts = undefined;
+    askExtraHeaders = {};
+  }
+};
+
+test("with the switch on and a client that draws it, the summary streams beside the answer and is saved with it", async () => {
+  const { body } = await reasoningTurn({ switchOn: true, header: true });
+  assert.equal(attempts.length, 1);
+  // The provider is asked for a summary of the thinking it already does, and
+  // for nothing more: the effort it was configured with is still there.
+  const options = attempts[0].providerOptions as { anthropic?: { thinking?: { type?: string; display?: string }; effort?: string } };
+  assert.equal(options.anthropic?.thinking?.type, "adaptive");
+  assert.equal(options.anthropic?.thinking?.display, "summarized");
+  assert.equal(options.anthropic?.effort, "high");
+
+  const split = splitChatReasoning(body);
+  assert.equal(split.reasoning?.text, "Weighing the two options.");
+  assert.equal(split.reasoning?.done, true);
+  assert.equal(typeof split.reasoning?.durationMs, "number");
+  // The answer itself carries none of it.
+  const readable = splitStreamKeepaliveSignal(splitRoutingRetrySignal(split.text).text).text;
+  assert.ok(readable.startsWith(ANSWER), JSON.stringify(readable.slice(0, 80)));
+  assert.ok(!readable.includes("Weighing"));
+
+  // Saved in the answer's own JSON metadata, and never in its content.
+  assert.equal(world.messages.length, 1);
+  assert.equal(world.messages[0].content, ANSWER);
+  const saved = (world.messages[0].searchMetadata as { reasoning?: { text?: string; durationMs?: number } }).reasoning;
+  assert.equal(saved?.text, "Weighing the two options.");
+  assert.equal(typeof saved?.durationMs, "number");
+});
+
+for (const [name, input] of [
+  ["the switch is off", { switchOn: false, header: true }],
+  ["the client does not say it draws the summary", { switchOn: true, header: false }],
+] as const) {
+  test(`when ${name}, the request and the response are exactly what they were`, async () => {
+    const { body } = await reasoningTurn(input);
+    assert.equal(attempts.length, 1);
+    assert.ok(!JSON.stringify(attempts[0].providerOptions).includes("summarized"));
+    assert.equal(
+      (attempts[0].providerOptions as { anthropic?: { thinking?: { display?: string } } }).anthropic?.thinking?.display,
+      undefined
+    );
+    assert.ok(!body.includes("TOMVERSE_REASONING"), "no reasoning chunk is written");
+    assert.equal(splitChatReasoning(body).reasoning, null);
+    assert.equal(world.messages.length, 1);
+    assert.ok(!("reasoning" in ((world.messages[0].searchMetadata ?? {}) as object)), "nothing is saved");
+  });
+}
+
+test("a fallback model's reasoning reaches the browser after the swap notice, never the failed model's", async () => {
+  const saved = process.env.CHAT_REASONING_DISPLAY_ENABLED;
+  process.env.CHAT_REASONING_DISPLAY_ENABLED = "true";
+  providerReasoningParts = [
+    { type: "reasoning-start", id: "r1" },
+    { type: "reasoning-delta", id: "r1", text: "The second model thought this." },
+    { type: "reasoning-end", id: "r1" },
+    { type: "text-delta", id: "t1", text: ANSWER },
+  ];
+  askExtraHeaders = { "X-Chat-Reasoning-Display": "1" };
+  try {
+    const { body } = await ask("answers");
+    assert.equal(attempts.length, 2);
+    const routing = splitRoutingRetrySignal(body);
+    assert.equal(routing.signal?.state, "retrying_with_another_model");
+    const reasoning = splitChatReasoning(body).reasoning;
+    assert.equal(reasoning?.text, "The second model thought this.");
+    assert.equal(reasoning?.done, true);
+    const readable = splitStreamKeepaliveSignal(splitChatReasoning(routing.text).text).text;
+    assert.ok(readable.startsWith(ANSWER), JSON.stringify(readable.slice(0, 80)));
+  } finally {
+    if (saved === undefined) delete process.env.CHAT_REASONING_DISPLAY_ENABLED;
+    else process.env.CHAT_REASONING_DISPLAY_ENABLED = saved;
+    providerReasoningParts = undefined;
+    askExtraHeaders = {};
+  }
 });

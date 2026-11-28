@@ -1006,6 +1006,10 @@ run(
     // move/lock/delete lifecycle, explicit scope moves, confirmed project
     // deletion, the knowledge owner container and the turn context identity.
     "tests/integration/project-workspace.db.test.ts",
+    // Automatic memory from ordinary Chat conversations: which conversations are queued
+    // (default-off switch, locks, temporary, memory off, pacing), what the commit refuses
+    // after the fact, and that locking or deleting the source takes the memory with it.
+    "tests/integration/chat-auto-memory.db.test.ts",
     "tests/integration/external-conversation-lock.db.test.ts",
     "tests/integration/memory-expiry.db.test.ts",
     "tests/integration/chat-context-bundle.db.test.ts",
@@ -1627,6 +1631,23 @@ run(
     "tests/integration/conversation-superseded-turns.db.test.ts",
   ],
   "Running the replaced-turn mark scenarios"
+);
+// Its own process: it replaces next-auth and the provider stream. A saved
+// turn's reservation names its answer, the answer shows what settlement wrote
+// (summed, withheld while open, nothing when refunded or unlinked), and only
+// the owner of an unlocked Chat conversation reads it.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/chat-answer-credits.db.test.ts",
+  ],
+  "Running the answer credit link and read scenarios"
 );
 // Real row/transaction semantics with storage fully stubbed. Keep the R2 mock
 // in its own process rather than changing another integration suite's client.

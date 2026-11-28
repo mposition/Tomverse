@@ -32,6 +32,7 @@ import {
 import { chatTurnToolsCopy } from "@/locales/chatTurnTools";
 import { AnswerQuoteButton } from "@/components/chat/AnswerQuoteButton";
 import { AnswerTurnActions } from "@/components/chat/AnswerTurnActions";
+import { AnswerCreditsLabel } from "@/components/chat/AnswerCreditsLabel";
 import { UserTurnEditor } from "@/components/chat/UserTurnEditor";
 import { useAnswerReadyNotice } from "@/components/chat/useAnswerReadyNotice";
 import { useSupersededIds } from "@/components/chat/useSupersededIds";
@@ -40,6 +41,9 @@ import { prepareMathMarkdown } from "@/lib/chatMathDelimiters";
 import { isMathPre, mermaidSourceFromPre } from "@/lib/chatMermaidBlock";
 import { chartSpecFromPre } from "@/lib/chatChart";
 import { ChatChart } from "@/components/chat/ChatChart";
+import { flashcardSpecFromPre, quizSpecFromPre } from "@/lib/chatStudy";
+import { ChatQuiz } from "@/components/chat/ChatQuiz";
+import { ChatFlashcards } from "@/components/chat/ChatFlashcards";
 import {
   ArrowDown,
   Bot,
@@ -63,6 +67,7 @@ import { Message, type ChatAttachment } from "@/components/chat/types";
 import { providerLabel } from "@/components/imports/importFormatting";
 import { externalProviderBrand } from "@/lib/externalProviderBranding";
 import { AutoRoutedByBadge } from "@/components/chat/AutoRoutedByBadge";
+import { ChatReasoningPanel, chatMessageReasoning } from "@/components/chat/ChatReasoningPanel";
 import { AutoRewriteDisclosure } from "@/components/chat/AutoRewriteDisclosure";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { CodeBlockPreview } from "@/components/chat/CodeBlockPreview";
@@ -139,6 +144,12 @@ type ChatMessageListProps = {
    * success the page has already moved to the new conversation.
    */
   onBranchFromAnswer?: (messageId: string) => Promise<void>;
+  /**
+   * Chat, signed in: show under each answer the credits it was actually
+   * charged (`Message.settledCredits`, lib/chatAnswerCreditsCore.ts). Off in
+   * Review and for guests, whose answers never carry the figure anyway.
+   */
+  showAnswerCredits?: boolean;
   onRetryWithoutAttachments?: () => void;
   /**
    * Re-sends the last prompt with a set of already-missing stored files
@@ -524,6 +535,11 @@ function MarkdownCodeBlock({ children, node }: MarkdownPreProps) {
   // A `chart` block whose JSON spec validates; anything else stays code.
   const chartSpec = answerRender ? chartSpecFromPre(node) : null;
   if (chartSpec) return <ChatChart spec={chartSpec} fallback={codeBlock} />;
+  // `quiz` and `flashcards` blocks, the same way: valid and final, or code.
+  const quizSpec = answerRender ? quizSpecFromPre(node) : null;
+  if (quizSpec) return <ChatQuiz spec={quizSpec} fallback={codeBlock} />;
+  const flashcardSpec = answerRender ? flashcardSpecFromPre(node) : null;
+  if (flashcardSpec) return <ChatFlashcards spec={flashcardSpec} fallback={codeBlock} />;
   return codeBlock;
 }
 
@@ -800,6 +816,7 @@ export function ChatMessageList({
   onCompareInReview,
   compareRequiresCompleted = false,
   onBranchFromAnswer,
+  showAnswerCredits = false,
   onRetryWithoutAttachments,
   onContinueWithoutUnavailableAttachments,
   onRetryConcurrency,
@@ -1280,6 +1297,18 @@ export function ChatMessageList({
             // "finished normally", both are "normal".
             const isActivelyGenerating =
               !isUser && !msg.researchRunId && isSending && idx === messages.length - 1 && msg.role === "assistant";
+            // What this finished answer was charged, once settlement wrote it
+            // (lib/chatAnswerCreditsCore.ts). Absent shows nothing: a guest, an
+            // unsettled or refunded turn, and an answer from before the link.
+            const answerCredits =
+              showAnswerCredits &&
+              !isUser &&
+              !imported &&
+              !isActivelyGenerating &&
+              typeof msg.settledCredits === "number" &&
+              msg.settledCredits >= 1
+                ? msg.settledCredits
+                : undefined;
 
             // Only shown before the first token arrives (msg.content is
             // still empty) -- once real text starts streaming in, the
@@ -1293,6 +1322,9 @@ export function ChatMessageList({
                 : messages[idx - 1]?.attachments?.length
                   ? t("chat.readingFileStatus")
                   : t("chat.connectingStatus");
+            // The provider's reasoning summary, streamed or saved; null for the
+            // many answers that have none (components/chat/ChatReasoningPanel.tsx).
+            const reasoningView = chatMessageReasoning(msg);
 
               // Technical detail lines (trace IDs, internal cost figures) are
             // appended to msg.content after a newline -- the first line is
@@ -1528,6 +1560,9 @@ export function ChatMessageList({
                 )}
                 {isUser && !imported && <span className="sr-only">{t("chat.you")}</span>}
 
+                {reasoningView && !imported && (
+                  <ChatReasoningPanel reasoning={reasoningView} generating={isActivelyGenerating} />
+                )}
                 <div
                   role={!isUser && msg.status === "error" ? "alert" : undefined}
                   data-imported={imported ? "true" : undefined}
@@ -1646,9 +1681,11 @@ export function ChatMessageList({
                     isActivelyGenerating ? (
                       <div className="flex items-center gap-2">
                         <TypingIndicator />
-                        <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                          {connectingStatusText}
-                        </span>
+                        {!reasoningView && (
+                          <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                            {connectingStatusText}
+                          </span>
+                        )}
                       </div>
                     ) : (
                       <TypingIndicator label={t("chat.responseGenerating")} />
@@ -1731,10 +1768,11 @@ export function ChatMessageList({
                         );
                       })()}
                     {!isUser && !imported && !isActivelyGenerating && !msg.researchRunId && !msg.imageTurn &&
-                      msg.content.trim() && (msg.status === undefined || msg.status === "normal" || msg.status === "incomplete") && (
+                      msg.content.trim() && (msg.status === undefined || msg.status === "normal" || msg.status === "incomplete") ? (
                       <AnswerTurnActions
                         messageId={msg.id}
                         content={msg.content}
+                        credits={answerCredits}
                         branch={
                           onBranchFromAnswer && !importedTranscript && (msg.status === undefined || msg.status === "normal")
                             ? {
@@ -1758,7 +1796,13 @@ export function ChatMessageList({
                             : undefined
                         }
                       />
-                    )}
+                    ) : answerCredits !== undefined ? (
+                      // A stopped answer that was still charged for what it
+                      // wrote has no tools row; its figure stands alone.
+                      <div className="mt-1 flex items-center">
+                        <AnswerCreditsLabel credits={answerCredits} />
+                      </div>
+                    ) : null}
                     {!isUser && supersededIds.has(msg.id) && (
                       <p data-testid="chat-superseded-note" className="mt-2 text-[12px] leading-4 text-zinc-500 dark:text-zinc-400">
                         {chatTurnToolsCopy[lang].superseded}
@@ -1819,7 +1863,7 @@ export function ChatMessageList({
                     )}
                     {msg.searchMetadata && (
                       // A Research report lists its sources in its own body; this list adds only the rest.
-                      <SearchCitationList citations={citationsOutsideResearchBody(msg.searchMetadata.citations, msg.searchMetadata.research)} label={t("chat.searchCitationsLabel")} />
+                      <SearchCitationList citations={citationsOutsideResearchBody(msg.searchMetadata.citations, msg.searchMetadata.research)} label={t("chat.searchCitationsLabel")} memorySaved={{ note: t("chat.memorySavedNote"), manage: t("chat.memorySavedManage") }} />
                     )}
                     {!isUser && msg.status !== "error" && !isActivelyGenerating && msg.content && typeof msg.id === "string" && !isGuestMode && (
                       // What a project delivered with this answer; renders

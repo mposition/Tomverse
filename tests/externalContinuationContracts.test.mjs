@@ -597,6 +597,9 @@ async function assertClientSurfaceRouting(client) {
                     return true;
                 },
                 currentChatIdRef: currentConversation,
+                // The handler's first line notes where an explicit selection is
+                // going, so study mode is not carried into it; routing ignores it.
+                studyNavigationTargetRef: { current: null },
                 identityKey: scenario.identity ?? "account:test", identityNamespaceRef: identityNamespace,
                 identityNamespaceKey: (namespace) => namespace,
                 accountConversationId: () => scenario.accountId === null ? null : "owned-id",

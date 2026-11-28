@@ -2822,6 +2822,14 @@ export const acquireChatAccess = async (
          * its existing insert/idempotency contract.
          */
         guestAutoPrehold?: GuestAutoPreholdConversion;
+        /**
+         * The saved Chat answer this reservation pays for, recorded on the new
+         * row so that answer can show what it cost. Written with the insert
+         * and never read by reservation, settlement or refund: it changes no
+         * amount and no status. The Chat route passes it only for a signed-in
+         * turn of a saved conversation; every other caller leaves it out.
+         */
+        assistantMessageId?: string;
     }
 ): Promise<{
     leaseId: string;
@@ -4369,6 +4377,11 @@ export const acquireChatAccess = async (
                     planReservedCredits,
                     addOnReservedCredits,
                     expiresAt: reservationExpiresAt,
+                    // Only on a signed-in user's row: a guest turn has no saved
+                    // answer to show a cost under.
+                    ...(options?.assistantMessageId && access.userId
+                        ? { assistantMessageId: options.assistantMessageId }
+                        : {}),
                 },
             });
         }
@@ -6337,6 +6350,7 @@ export const validateChatPayload = (body: unknown) => {
         turnstileToken?: unknown;
         deepResearchDepth?: unknown;
         reasoningEffort?: unknown;
+        studyMode?: unknown;
         webSearchMode?: unknown;
         mcpConnectionId?: unknown;
         admissionToken?: unknown;
@@ -6479,6 +6493,9 @@ export const validateChatPayload = (body: unknown) => {
     }
     if (payload.reasoningEffort !== undefined && payload.reasoningEffort !== "low" && payload.reasoningEffort !== "medium" && payload.reasoningEffort !== "high") {
         throw new ChatAccessError(400, "INVALID_REASONING_EFFORT", "Invalid reasoning effort.");
+    }
+    if (payload.studyMode !== undefined && payload.studyMode !== true && payload.studyMode !== false) {
+        throw new ChatAccessError(400, "INVALID_STUDY_MODE", "Invalid study mode.");
     }
 
     if (
@@ -6684,6 +6701,7 @@ export const validateChatPayload = (body: unknown) => {
         turnstileToken?: string;
         deepResearchDepth?: "quick" | "standard" | "deep";
         reasoningEffort?: "low" | "medium" | "high";
+        studyMode?: boolean;
         webSearchMode?: WebSearchMode;
         mcpConnectionId?: string;
         admissionToken?: string;

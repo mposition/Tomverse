@@ -114,7 +114,8 @@ import {
   useConversationDrafts,
   type PreparedDraftSend,
 } from "@/components/chat/useConversationDrafts";
-import { appendQuoteToDraft, subscribeChatQuote } from "@/lib/chatQuote";
+import { appendQuoteToDraft, subscribeChatDraftText, subscribeChatQuote } from "@/lib/chatQuote";
+import { readStudyMode, writeStudyMode } from "@/lib/chatStudyMode";
 import {
   parseChatDraftMessageReceipt,
   parseChatMessageSaveResponse,
@@ -2085,6 +2086,17 @@ export function ChatPageClient({
   const [memoryMode, setMemoryMode] = useState<ConversationMemoryMode>(
     DEFAULT_CONVERSATION_MEMORY_MODE
   );
+  // Study mode (lib/chatStudyPrompt.ts): per conversation, remembered in this
+  // browser only (lib/chatStudyMode.ts) and sent with each turn. Nothing is
+  // stored on the server, so there is no column to keep in step.
+  const [studyMode, setStudyMode] = useState(false);
+  const studyModeRef = useRef(false);
+  // The conversation a sidebar click is opening, so the effect below loads
+  // that conversation's own switch instead of carrying a blank chat's into it.
+  const studyNavigationTargetRef = useRef<string | null>(null);
+  const studyPreviousChatIdRef = useRef<string | null>(null);
+  // Whether the last starter card is what turned study mode on.
+  const starterStudyArmedRef = useRef(false);
   /**
    * The conversation's stored Auto state, and whether this account is offered
    * Auto at all (UI contract auto-model-selection.md §1).
@@ -3620,6 +3632,41 @@ export function ChatPageClient({
     });
   }, [mountedSurface, setInputValue]);
 
+  // "Explain the ones I missed" under a quiz puts its follow-up in the draft the
+  // same way, and sends nothing.
+  useEffect(() => {
+    if (mountedSurface !== "chat") return;
+    return subscribeChatDraftText((text) => {
+      setInputValue((current) => appendQuoteToDraft(current, text));
+      setFocusToken((value) => value + 1);
+    });
+  }, [mountedSurface, setInputValue]);
+
+  // Study mode follows the conversation on screen. A blank chat that becomes a
+  // conversation (its first send, or Auto creating it first) keeps the switch
+  // the reader set; opening another conversation reads that one's own.
+  useEffect(() => {
+    const previous = studyPreviousChatIdRef.current;
+    studyPreviousChatIdRef.current = currentChatId;
+    if (previous === null && currentChatId && studyModeRef.current && studyNavigationTargetRef.current !== currentChatId) {
+      writeStudyMode(currentChatId, true);
+      return;
+    }
+    studyNavigationTargetRef.current = null;
+    const stored = readStudyMode(currentChatId);
+    studyModeRef.current = stored;
+    setStudyMode(stored);
+  }, [currentChatId]);
+
+  const handleStudyModeChange = useCallback(
+    (on: boolean) => {
+      studyModeRef.current = on;
+      setStudyMode(on);
+      writeStudyMode(currentChatId, on);
+    },
+    [currentChatId]
+  );
+
   useEffect(() => {
     // The /chat URL names its conversation; a continuation route already does.
     if (routeSurface !== "chat" || isGuestMode ||
@@ -3702,6 +3749,7 @@ export function ChatPageClient({
             size: attachment.size,
           })),
           webSearchMode: requestedWebSearchMode ?? webSearchMode,
+          ...(mountedSurface === "chat" && studyModeRef.current ? { studyMode: true } : {}),
           ...projectReferenceFields(projectReferences),
         });
         const requestPreflight = () =>
@@ -3910,7 +3958,7 @@ export function ChatPageClient({
       } finally {
         comparisonPreflightInFlightRef.current = false;
       }
-    }, [effectiveDisabledPanels, selectedModels, showToast, t, webSearchMode]);
+    }, [effectiveDisabledPanels, mountedSurface, selectedModels, showToast, t, webSearchMode]);
 
   useEffect(() => {
     return () => {
@@ -4895,6 +4943,7 @@ export function ChatPageClient({
         skipLockCheck = false,
         surfaceHint?: ConversationSurface
     ) => {
+        studyNavigationTargetRef.current = id;
         const outstandingHandoff = initialConversationHandoffRef.current;
         if (!outstandingHandoff.settled &&
             outstandingHandoff.requestedId !== id) {
@@ -7807,6 +7856,10 @@ export function ChatPageClient({
         ...(options?.researchMode ? { researchMode: options.researchMode, researchDurable: options.researchDurable === true } : {}),
         ...(options?.reasoningEffort && !imageTurnSend && !options.researchMode && !options.deepResearchDepth
           ? { reasoningEffort: options.reasoningEffort } : {}),
+        // Study mode is a Chat answer's own instruction: an image answer, a
+        // research preview and a Deep Research run carry none of it.
+        ...(mountedSurface === "chat" && studyModeRef.current && !imageTurnSend && !options?.researchMode && !options?.deepResearchDepth
+          ? { studyMode: true } : {}),
         ...(options?.deepResearchDepth
           ? { deepResearchDepth: options.deepResearchDepth }
           : {}),
@@ -10433,6 +10486,15 @@ export function ChatPageClient({
     }
     starterSeedMemoriesRef.current = application.memories;
     setWebSearchMode(application.webSearchMode);
+    // Study mode is armed on the same terms as the search toggle: a card puts
+    // it on, and the next card takes it off again only if a card put it on.
+    if (entry.seed.studyMode) {
+      starterStudyArmedRef.current = true;
+      handleStudyModeChange(true);
+    } else if (starterStudyArmedRef.current) {
+      starterStudyArmedRef.current = false;
+      if (studyModeRef.current) handleStudyModeChange(false);
+    }
     if (handsToStudio) {
       // A Review image card asks this same composer for images; the person
       // still presses send. The seed replaces a previous card's sentence as a
@@ -11084,6 +11146,8 @@ export function ChatPageClient({
             assistantProfileOptions ? handleAssistantProfileChange : undefined
           }
           researchPreview={researchPreview}
+          studyMode={mountedSurface === "chat" ? studyMode : undefined}
+          onStudyModeChange={mountedSurface === "chat" ? handleStudyModeChange : undefined}
           onOpenDeepResearchSetup={() => setIsDeepResearchSetupOpen(true)}
           isDeepResearchPending={isDeepResearchPending}
           onDismissDeepResearchChip={dismissDeepResearchChip}
@@ -11283,6 +11347,8 @@ export function ChatPageClient({
             assistantProfileOptions ? handleAssistantProfileChange : undefined
           }
           researchPreview={researchPreview}
+          studyMode={mountedSurface === "chat" ? studyMode : undefined}
+          onStudyModeChange={mountedSurface === "chat" ? handleStudyModeChange : undefined}
           onOpenDeepResearchSetup={() => setIsDeepResearchSetupOpen(true)}
           isDeepResearchPending={isDeepResearchPending}
           onDismissDeepResearchChip={dismissDeepResearchChip}

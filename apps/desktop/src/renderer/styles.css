@@ -256,6 +256,9 @@ pre, code { font-family: var(--font-code); }
 .provider-cli-scan-status { align-self: center; color: var(--muted); }
 .provider-cli-connection { display: grid; gap: 14px; margin-top: 54px; }
 .provider-cli-connection input { width: 100%; min-height: 56px; padding-inline: 16px; border: 0; border-radius: 8px; background: var(--surface); }
+.provider-cli-zai { display: grid; gap: 10px; max-width: 800px; margin-top: 36px; }
+.provider-cli-zai p { margin: 0; color: var(--muted); }
+.provider-cli-zai input { flex: 1; min-width: 0; min-height: 40px; padding-inline: 12px; border: 0; border-radius: 8px; background: var(--surface); }
 .provider-cli-actions { display: flex; flex-wrap: wrap; gap: 12px; }
 .provider-cli-result { min-height: 28px; margin-top: 26px; overflow-wrap: anywhere; }
 .provider-cli-account { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; margin: 10px 0 20px; }

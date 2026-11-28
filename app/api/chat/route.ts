@@ -387,6 +387,8 @@ import {
 import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
 import { buildRoutingRetryChunk } from "@/lib/routingRetrySignal";
 import { buildStreamKeepaliveChunk } from "@/lib/chatStreamKeepalive";
+import { CHAT_REASONING_DISPLAY_HEADER, withStoredReasoning } from "@/lib/chatReasoningDisplay";
+import { chatReasoningDisplayEnabled, createChatReasoningRelay } from "@/lib/chatReasoningRelay";
 import { resolveChatStreamKeepalivePlan } from "@/lib/chatStreamKeepalivePlan";
 import { buildArtifactProgressChunk } from "@/lib/generatedArtifactProgressSignal";
 import {
@@ -414,7 +416,7 @@ import type { ChatToolSlot } from "@/lib/chatToolLoop";
 import { projectReceiptSources } from "@/lib/projectSourceAccess";
 import { resolveConversationProjectScope } from "@/lib/projectWorkspaceService";
 import { projectContextRequiresBundle, type ProjectTurnScope } from "@/lib/projectWorkspaceCore";
-import { enqueueNativeProjectExtraction } from "@/lib/projectMemoryExtraction";
+import { enqueueNativeChatExtraction, enqueueNativeProjectExtraction } from "@/lib/projectMemoryExtraction";
 import { buildMcpProgressChunk } from "@/lib/mcpConnectorProgress";
 import { MCP_UNTRUSTED_NOTICE, mcpPreviewEnabled } from "@/lib/mcpConnectorPolicy";
 import { sanitizeWebSearchCitations } from "@/lib/webSearchCitations";
@@ -1618,6 +1620,7 @@ async function handleChatPost(
             turnstileToken,
             deepResearchDepth,
             reasoningEffort,
+            studyMode,
             webSearchMode,
             mcpConnectionId,
             admissionToken,
@@ -4197,6 +4200,9 @@ async function handleChatPost(
         });
         const turnSystemBlocks = buildChatTurnSystemBlocks({
             currentLocation,
+            // Study mode is the reader's own opt-in for this turn; a research
+            // preview carries none of the capability blocks.
+            studyMode: studyMode === true && !isResearchPreview,
             omittedEarlierMessages,
             clientTimeZone,
             urlReadAvailable,
@@ -5860,6 +5866,12 @@ async function handleChatPost(
                   withinReservationTransaction: scheduledTaskReservationGuard(access.userId),
                   // Undefined outside a scheduled run; inside one, the person keeps a slot.
                   subjectSlotsKeptFree: scheduledTaskSubjectSlotsKeptFree(),
+                  // The answer this turn is saved as, so it can show what it
+                  // cost. Only when the turn is saved: the same condition the
+                  // persistence below uses.
+                  ...(session?.user?.id && conversationId && assistantMessageId
+                      ? { assistantMessageId }
+                      : {}),
               });
         leaseOwnership = chatLeaseAcquired(accessGrant.leaseId);
         usageReservation = accessGrant.usageReservation;
@@ -6456,7 +6468,22 @@ async function handleChatPost(
         // authorized are the same number by construction. Merged into
         // `providerOptions.openai` beside `reasoningEffort` rather than over
         // it -- see `getModelGenerationSettings`.
+        // Default OFF (CHAT_REASONING_DISPLAY_ENABLED). When on, the provider
+        // is asked for a summary of the reasoning it already does and the
+        // relay carries it to the browser (lib/chatReasoningRelay.ts); when
+        // off, neither the request nor the response differs from before.
+        // Only for a client that says it draws the summary
+        // (CHAT_REASONING_DISPLAY_HEADER): an installed app that does not
+        // would read the new marker as the start of an unknown control and
+        // hide the answer after it.
+        const reasoningRelay =
+            chatReasoningDisplayEnabled() &&
+            req.headers.get(CHAT_REASONING_DISPLAY_HEADER) === "1" &&
+            !isResearchPreview
+                ? createChatReasoningRelay()
+                : null;
         const generationSettings = getModelGenerationSettings(modelConfig, {
+            reasoningSummary: reasoningRelay !== null,
             openAiMaxToolCalls: openAiNativeSearchToolCallCeiling({
                 capability: webSearchCapability,
                 nativeSearchEnabled,
@@ -6731,6 +6758,19 @@ async function handleChatPost(
                 providerPartsObserved += 1;
                 return forward?.(event);
             };
+        // The reasoning relay listens to the same parts as the activity count.
+        // `attempt()` is a fresh observer each time, so a displaced attempt's
+        // late parts never reach the answer that replaced it.
+        const withReasoningRelay = (
+            forward: ProviderPartObserver | null
+        ): ProviderPartObserver | null => {
+            const relayed = reasoningRelay?.attempt();
+            if (!relayed) return forward;
+            return (event) => {
+                relayed(event);
+                return forward?.(event);
+            };
+        };
         const forwardedOnChunk = (config: unknown) => {
             const candidate = (config as { onChunk?: unknown } | null | undefined)
                 ?.onChunk;
@@ -6863,7 +6903,7 @@ async function handleChatPost(
                     onChunk: observeProviderParts(
                         researchPreviewExecution
                             ? null
-                            : forwardedOnChunk(combinedToolConfig)
+                            : withReasoningRelay(forwardedOnChunk(combinedToolConfig))
                     ),
                     onError: observeStreamError({
                         traceId,
@@ -7758,6 +7798,9 @@ async function handleChatPost(
             }
         };
         stopFirstTokenWatch = () => {
+            // Every ending that stops the watch ends the reasoning relay with
+            // it, so no timer outlives the response stream.
+            reasoningRelay?.dispose();
             if (keepaliveWriter) {
                 clearInterval(keepaliveWriter);
                 keepaliveWriter = null;
@@ -8012,6 +8055,7 @@ async function handleChatPost(
                 accessKind: access.kind,
                 inputBreakdown: inputEstimate.breakdown(),
                 reservationOnlyInputTokens,
+                reasoningSummary: reasoningRelay !== null,
                 webSearchMode: webSearchMode ?? null,
                 // The same map the primary resolved. A fallback that resolved
                 // its own could disagree with the primary only by reading a
@@ -8209,7 +8253,7 @@ async function handleChatPost(
                         nextAttemptAbortController.signal,
                     ]),
                     ...attemptDispatchOptions(plan),
-                    onChunk: observeProviderParts(null),
+                    onChunk: observeProviderParts(withReasoningRelay(null)),
                     onError: observeStreamError({
                         traceId,
                         modelId: plan.modelId,
@@ -8521,6 +8565,9 @@ async function handleChatPost(
         const protectedStream = new ReadableStream<string>({
             start(controller) {
                 streamController = controller;
+                // Reasoning the provider sent before this stream existed has
+                // been waiting in the relay; it goes out now.
+                reasoningRelay?.setSink((chunk) => enqueueSafely(controller, chunk));
                 if (streamState !== "open") controller.close();
             },
             async pull(controller) {
@@ -8560,6 +8607,9 @@ async function handleChatPost(
                         // The provider finished. Whatever it produced, it is
                         // no longer being waited for.
                         providerStreamFinished = true;
+                        // The last summary text and the final time, written
+                        // before the trailer so the browser has them first.
+                        reasoningRelay?.finish();
                         stopFirstTokenWatch();
                         const completionResults = await Promise.allSettled([
                             dispatched.stream.response,
@@ -9101,9 +9151,18 @@ async function handleChatPost(
                                             content: storedContent,
                                             status: completionOutcome.status,
                                             modelId: dispatched.modelId,
-                                            searchMetadata: reasoningEffort
-                                                ? { ...webSearchExecution, reasoningEffort: { requested: reasoningEffort, applied: appliedEffort ?? "default" } }
-                                                : webSearchExecution,
+                                            // The reasoning summary rides in the
+                                            // answer's own JSON metadata so a
+                                            // reload still shows "Thought for N
+                                            // seconds"; no migration, and no
+                                            // reader of this column sends it on
+                                            // (lib/chatReasoningDisplay.ts).
+                                            searchMetadata: withStoredReasoning(
+                                                reasoningEffort
+                                                    ? { ...webSearchExecution, reasoningEffort: { requested: reasoningEffort, applied: appliedEffort ?? "default" } }
+                                                    : webSearchExecution,
+                                                reasoningRelay?.snapshot() ?? null
+                                            ),
                                             // Spread, so an answer with no
                                             // bundle writes neither column
                                             // and both stay NULL (§22).
@@ -9296,14 +9355,22 @@ async function handleChatPost(
                                 // The rows are committed, so the objects they
                                 // point at must survive the release below.
                                 artifactsPersisted = true;
-                                // Project memory from this conversation's new
+                                // Memory from this conversation's new
                                 // messages: queued after the commit, never
                                 // awaited, so the answer is not held for it.
-                                // Off unless the operator switch is on.
-                                if (verifiedContext?.project && session?.user?.id && conversationId) {
+                                // A project conversation and an ordinary Chat
+                                // one each have their own operator switch, off
+                                // by default; the Chat path decides everything
+                                // else (locks, temporary, memory off) itself.
+                                if (session?.user?.id && conversationId) {
                                     const ownerId = session.user.id;
-                                    void enqueueNativeProjectExtraction({ userId: ownerId, conversationId })
-                                        .catch((error) => logRequestError("project_memory_enqueue_failed", traceId, error));
+                                    if (verifiedContext?.project) {
+                                        void enqueueNativeProjectExtraction({ userId: ownerId, conversationId })
+                                            .catch((error) => logRequestError("project_memory_enqueue_failed", traceId, error));
+                                    } else {
+                                        void enqueueNativeChatExtraction({ userId: ownerId, conversationId })
+                                            .catch((error) => logRequestError("chat_memory_enqueue_failed", traceId, error));
+                                    }
                                 }
                             } catch (error) {
                                 logRequestError(

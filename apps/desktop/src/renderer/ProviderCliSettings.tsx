@@ -4,6 +4,7 @@ import { desktopProviderCliCopy } from "../../../../locales/desktopProviderCli";
 import { desktopCliAccountCopy } from "../../../../locales/desktopCliAccount";
 import { desktopCliProtocolCopy } from "../../../../locales/desktopCliProtocol";
 import { desktopProviderCliScanCopy } from "../../../../locales/desktopProviderCliScan";
+import { desktopZaiKeyCopy } from "../../../../locales/desktopZaiKey";
 import { cliLoginArguments, cliProviders, cliUsesInstallationFolder, cliUsesReleaseArchive, isCliProtocolProvider, isCliScanProvider, providerClis, supportsIsolatedCliAccount, type CliAccount, type CliLoginOpen, type CliPathCheck, type CliPaths, type CliProtocolCheck,
   type CliProvider, type CliScan, type CliScanCandidate, type SavedCliPath } from "../code-execution";
 
@@ -14,8 +15,10 @@ const signInMessage: Record<CliLoginOpen, Message> = {
   opened: "signInOpened", terminalOff: "signInTerminalOff", noTask: "signInNoTask", unavailable: "signInUnavailable",
 };
 
-export function ProviderCliSettings({ language, paths, supportedPaths, provider, goTo, authFixture, protocolCheckAvailable }: {
+export function ProviderCliSettings({ language, paths, supportedPaths, provider, goTo, authFixture, protocolCheckAvailable, zai }: {
   language: Language;
+  /** The Claude Code (Z.ai) route, when the server offers provider CLI tasks: where its key is kept, if one is saved. */
+  zai?: { key?: "device" | "session" };
   paths: CliPaths;
   supportedPaths: readonly CliProvider[];
   provider?: CliProvider;
@@ -37,7 +40,44 @@ export function ProviderCliSettings({ language, paths, supportedPaths, provider,
       returnTo.current = provider;
       goTo("list");
     }} />;
-  return <CliList language={language} paths={paths} supportedPaths={supportedPaths} goTo={goTo} list={list} />;
+  return <>
+    <CliList language={language} paths={paths} supportedPaths={supportedPaths} goTo={goTo} list={list} />
+    {zai && <ZaiKey language={language} saved={zai.key} claudeReady={paths.anthropic?.status === "pathVerified" || paths.anthropic?.status === "userTrusted"} />}
+  </>;
+}
+
+/** The Z.ai Coding Plan key. It goes to the main process once and is never shown again; the field starts empty. */
+function ZaiKey({ language, saved, claudeReady }: { language: Language; saved?: "device" | "session"; claudeReady: boolean }) {
+  const copy = desktopZaiKeyCopy[language];
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<"invalid" | "failed" | null>(null);
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    const value = key.trim();
+    if (value.length < 8 || !/^[A-Za-z0-9._~+/=:-]+$/.test(value)) { setMessage("invalid"); return; }
+    setBusy(true);
+    setMessage(null);
+    try { await window.desktop.saveZaiKey(value); setKey(""); } catch { setMessage("failed"); } finally { setBusy(false); }
+  }
+  async function remove() {
+    setBusy(true);
+    setMessage(null);
+    try { await window.desktop.removeZaiKey(); } catch { setMessage("failed"); } finally { setBusy(false); }
+  }
+  return <section className="settings provider-cli-zai" aria-labelledby="provider-cli-zai-title">
+    <h3 id="provider-cli-zai-title">{copy.heading}</h3>
+    <p>{copy.intro}</p>
+    {!claudeReady && <small>{copy.needsClaude}</small>}
+    {saved && <small role="status">{saved === "device" ? copy.savedDevice : copy.savedSession}</small>}
+    <form className="provider-cli-actions" onSubmit={(event) => void save(event)}>
+      <input type="password" autoComplete="off" spellCheck={false} aria-label={copy.label} placeholder={copy.label} value={key}
+        disabled={busy} onChange={(event) => setKey(event.target.value)} />
+      <button className="soft" type="submit" disabled={busy || !key.trim()}>{busy ? copy.saving : copy.save}</button>
+      {saved && <button className="soft" type="button" disabled={busy} onClick={() => void remove()}>{copy.remove}</button>}
+    </form>
+    {message && <small role="alert">{copy[message]}</small>}
+  </section>;
 }
 
 // Shown only while the list is on screen, so each visit starts a new scan and the saved paths and sign-in states are current.
