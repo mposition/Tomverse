@@ -425,6 +425,21 @@ domains:
       account deletes it; deleting its conversation only clears the link and
       the next run starts a new conversation.
 
+  - domain: savedPrompt
+    prismaModel: SavedPrompt
+    userLinkageRole: subject
+    owner: backend-ai
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included
+    note: >-
+      A prompt the account saved under a name to put back into the composer:
+      the name, the text, its place in the list and when it was saved and last
+      changed. Nothing is sent anywhere until the person sends it as a message.
+      Deleting the account deletes it.
+
   - domain: scheduledTaskRun
     prismaModel: ScheduledTaskRun
     userLinkageRole: subject
