@@ -46,9 +46,12 @@ npm run mcp:providers -- --provider=notion --json
 ```
 
 This prints public endpoints, scope options and environment-variable names,
-never client secrets or tokens. Select fixed profiles using the comma-separated
-`MCP_CONNECTOR_PROVIDERS`, in addition to the existing default-off
-`MCP_CONNECTOR_PREVIEW_ENABLED`. Browsing the catalog does not change either.
+never client secrets or tokens. Every catalog profile is read directly: there is no
+selection list. With the existing default-off `MCP_CONNECTOR_PREVIEW_ENABLED` on, a
+profile that needs no operator secret (dynamic registration or anonymous) is
+offered, and the rest stay absent until configured as below. Switch a provider off
+with the comma-separated `MCP_CONNECTOR_PROVIDERS_DISABLED` (empty by default).
+Browsing the catalog does not change either.
 Profiles without dynamic registration require their own registered app and
 `MCP_PROVIDER_<PROFILE_ID>_CLIENT_ID` / `_CLIENT_SECRET` on the server.
 Use uppercase IDs with hyphens replaced by underscores. Scope selection uses

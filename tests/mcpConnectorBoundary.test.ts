@@ -68,7 +68,7 @@ test("only actual embedded text becomes a source and model input is byte-bounded
   assert.throws(() => normalizeMcpResult({ content: [{ type: "text", text: "가".repeat(4000) }] }));
 });
 test("a disabled preview does not register any provider and selection stays in one conversation", () => {
-  assert.deepEqual(mcpServers({ NODE_ENV: "test", MCP_CONNECTOR_PREVIEW_ENABLED: "false", MCP_CONNECTOR_SERVERS: "not even parsed" }), []);
+  assert.deepEqual(mcpServers({ NODE_ENV: "test", MCP_CONNECTOR_PREVIEW_ENABLED: "false", MCP_CONNECTOR_SYNTHETIC_PORT: "not even parsed" }), []);
   selectMcpConnection("a", "connection-a"); assert.equal(selectedMcpConnection("a"), "connection-a");
   assert.equal(selectedMcpConnection("b"), undefined); selectMcpConnection("a");
 });

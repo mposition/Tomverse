@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { request } from "node:http";
 import { spawnSync } from "node:child_process";
-import { createGithubPreviewSetup, githubPreviewAppConfig, githubPreviewManifest } from "../scripts/mcp-github-app-setup";
+import { readFileSync } from "node:fs";
+import { createGithubPreviewSetup, githubPreviewAppConfig, githubPreviewDisabledProviders, githubPreviewManifest } from "../scripts/mcp-github-app-setup";
+import { mcpServers } from "@/lib/mcpConnectorPolicy";
 const app = { client_id: "Iv1.synthetic", client_secret: "synthetic-client-secret-123", slug: "tomverse-local-synthetic", owner: { login: "mposition" },
   permissions: { issues: "write", metadata: "read" }, pem: "synthetic-pem", webhook_secret: "synthetic-webhook" };
 
@@ -77,4 +79,14 @@ test("unknown manifest exchange outcomes cannot be replayed, and setup expires",
     now = 15 * 60_000;
     assert.equal((await get("/", cookie)).status, 403);
   } finally { setup.server.closeAllConnections(); await new Promise<void>(resolve => setup.server.close(() => resolve())); }
+});
+
+test("the GitHub-only preview switches off every catalog preset but keeps the built-in GitHub profile", () => {
+  const catalog = JSON.parse(readFileSync("config/mcp/provider-presets.json", "utf8")) as { profiles: Array<{ id: string }> };
+  const disabled = githubPreviewDisabledProviders(catalog.profiles);
+  assert.equal(disabled.split(",").includes("github"), false);
+  const servers = mcpServers({ NODE_ENV: "test", MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_PROVIDERS_DISABLED: disabled,
+    MCP_GITHUB_OAUTH_CLIENT_ID: "synthetic-client", MCP_GITHUB_OAUTH_CLIENT_SECRET: "synthetic-secret",
+    MCP_GITHUB_REPOSITORY: "mposition/TomverseCode", MCP_GITHUB_REPOSITORY_ID: "1309523852" });
+  assert.deepEqual(servers.map(server => server.id), ["github"]);
 });

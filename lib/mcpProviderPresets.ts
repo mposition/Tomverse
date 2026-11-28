@@ -15,13 +15,23 @@ function userSelectableScopes(allowedScopes: readonly string[], envScope: string
   return [...new Set(envScope === undefined ? allowedScopes : envScope.split(/\s+/).filter(Boolean))].slice(0, 512);
 }
 
-/** Only operator-selected profiles become callable; users choose scopes within the bound. Catalog browsing grants nothing. */
+/**
+ * Providers the operator switched off with the comma-separated
+ * MCP_CONNECTOR_PROVIDERS_DISABLED (empty by default). Unknown IDs are ignored.
+ */
+export function disabledMcpProviderIds(env: ProviderEnvironment = process.env) {
+  return new Set((env.MCP_CONNECTOR_PROVIDERS_DISABLED || "").split(",").map(id => id.trim()).filter(Boolean));
+}
+
+/**
+ * Every catalog preset is a candidate; no selection list is read. A preset becomes callable only when it can
+ * connect without operator secrets (dynamic registration or no auth) or the operator supplied its registered app
+ * and scope bounds. Users choose scopes within the bound. Catalog browsing grants nothing.
+ */
 export function selectedMcpProviderPolicies(env: ProviderEnvironment = process.env) {
-  const ids = (env.MCP_CONNECTOR_PROVIDERS || "").split(",").map(id => id.trim()).filter(Boolean);
-  if (ids.length > 256 || new Set(ids).size !== ids.length) throw new Error("invalid_mcp_provider_selection");
-  return ids.flatMap(id => {
-    const preset = MCP_PROVIDER_PRESETS.find(profile => profile.id === id);
-    if (!preset) return [];
+  const disabled = disabledMcpProviderIds(env);
+  return MCP_PROVIDER_PRESETS.filter(profile => !disabled.has(profile.id)).flatMap(preset => {
+    const id = preset.id;
     // GitHub retains the existing reviewed repository-specific App profile.
     if (preset.auth === "github" || preset.auth === "configure") return [];
     const base = { id: preset.id, name: preset.name, url: preset.url, readTools: [], auth: preset.auth };

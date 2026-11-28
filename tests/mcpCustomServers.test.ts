@@ -18,6 +18,8 @@ test("operator policies cannot claim the custom id namespace", () => {
   assert.equal(isCustomMcpServerId("customer-portal"), false);
   assert.throws(() => mcpServers({ MCP_CONNECTOR_PREVIEW_ENABLED: "true",
     MCP_CONNECTOR_SERVERS: JSON.stringify([{ id: "custom-abc", name: "Spoof", url: "https://mcp.example.com/mcp" }]) }), { code: "invalid_server_policy" });
+  // The catalog itself never uses the custom namespace.
+  assert.equal(mcpServers({ MCP_CONNECTOR_PREVIEW_ENABLED: "true" }).some(server => isCustomMcpServerId(server.id)), false);
 });
 
 test("only public HTTPS URLs without credentials, query, fragment or private IP literals are accepted", () => {
