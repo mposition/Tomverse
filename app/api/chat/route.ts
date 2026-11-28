@@ -4395,6 +4395,10 @@ async function handleChatPost(
                     // Named to the model and left out; an earlier image never
                     // fails the turn for the allowance the new one needs.
                     const leaveOutEarlierImage = () => {
+                        // Counted against the earlier files' share like any other
+                        // line that goes to the model.
+                        totalExtractedCharacters += PAST_IMAGE_OMITTED_TEXT.length;
+                        pastAttachmentTokens += estimatePromptTokens(PAST_IMAGE_OMITTED_TEXT);
                         textAttachments.push({
                             name,
                             kind: PAST_ATTACHMENT_OMITTED_KIND,
@@ -4683,7 +4687,6 @@ async function handleChatPost(
                         maxCharacters: number,
                         pages?: number[]
                     ): Promise<MistralOcrResult | null> => {
-                        paidExternalWorkStarted = true;
                         const flightKey = access.userId
                             ? `${access.userId}:${createHash("sha256").update(buffer).digest("hex")}:${pages?.join(",") ?? "all"}:${maxCharacters}`
                             : null;
@@ -4692,6 +4695,8 @@ async function handleChatPost(
                         // one, which runs by itself.
                         const shared = flightKey ? pdfOcrInFlight.get(flightKey) : undefined;
                         if (shared) return shared;
+                        // Only the request that starts the paid call has started paid work.
+                        paidExternalWorkStarted = true;
                         const call = (async () => {
                             const ocrResult = await extractPdfTextWithMistralOcr(
                                 buffer,
@@ -4907,6 +4912,7 @@ async function handleChatPost(
                                 unreadPages: textlessPdfPages,
                                 partialPages: budgetPartialPage === null ? [] : [budgetPartialPage],
                                 budgetUnreadPages,
+                                pageCountUnknown: false,
                                 cacheable: false,
                             });
                             return "ok";
@@ -4917,7 +4923,22 @@ async function handleChatPost(
 
                     if (extractedPdfText) {
                         const added = addExtractedText(format.promptKind, extractedPdfText);
-                        if (added && ocrOutcome) settlePdfReading(ocrOutcome);
+                        if (ocrOutcome) {
+                            // An earlier file's OCR text that did not fit its share is
+                            // named as left out; the pages and the cache block follow
+                            // the same path as when it was included.
+                            settlePdfReading(
+                                added
+                                    ? ocrOutcome
+                                    : {
+                                          unreadPages: Array.from({ length: pdfPageCount }, (_, index) => index + 1),
+                                          partialPages: [],
+                                          budgetUnreadPages: [],
+                                          pageCountUnknown: pdfPageCount === 0,
+                                          cacheable: false,
+                                      }
+                            );
+                        }
                         return "ok";
                     }
                     if (fromArchive) return "no-text";

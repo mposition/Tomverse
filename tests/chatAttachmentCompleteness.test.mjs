@@ -146,7 +146,7 @@ test("OCR sharing is keyed by the character budget, and a cut or short result is
     assert.match(route, /expectedPages: Array\.from\(\{ length: pdfPageCount \}/);
     assert.ok(route.includes("pdfPageCount = extraction.pageCount;"));
     // An earlier file's scanned text that did not fit its share still names the pages.
-    assert.match(route, /settlePdfReading\(\{\s*unreadPages: textlessPdfPages,\s*partialPages: budgetPartialPage === null \? \[\] : \[budgetPartialPage\],\s*budgetUnreadPages,\s*cacheable: false,/);
+    assert.match(route, /settlePdfReading\(\{\s*unreadPages: textlessPdfPages,\s*partialPages: budgetPartialPage === null \? \[\] : \[budgetPartialPage\],\s*budgetUnreadPages,\s*pageCountUnknown: false,\s*cacheable: false,/);
     // The notice's room is set aside before the text is read: extraction, OCR and the gate use one budget function.
     assert.ok(route.includes("pdfTextCharacterBudget(remainingCharacters)"));
     assert.ok(route.includes("? pdfTextCharacterBudget(remainingCharacters) <= 0"));
@@ -197,7 +197,7 @@ test("every way a scanned PDF is read settles through one decision: the notice a
     // The wholly scanned file and the partly scanned one use the same function.
     assert.ok(pdf.includes("ocrOutcome = pdfReadingOutcome({"));
     assert.match(pdf, /const outcome = pdfReadingOutcome\(\{\s*expectedPages: textlessPdfPages,/);
-    assert.ok(pdf.includes("if (added && ocrOutcome) settlePdfReading(ocrOutcome);"));
+    assert.ok(pdf.includes("added\n                                    ? ocrOutcome"));
     // No other place decides a cache block for a PDF.
     assert.equal((pdf.match(/textCacheBlocked = true/g) ?? []).length, 1);
     // And the cache write is still refused when a file part was sent.
@@ -227,4 +227,33 @@ test("the page count comes from the validation when the text pass failed; unknow
     const route = source("app/api/chat/route.ts");
     assert.equal(route.split("pdfPageCount = (await validatePdfSafely(buffer)).pageCount;").length - 1, 2);
     assert.ok(route.includes("pageCountUnknown: pdfPageCount === 0,"));
+});
+
+// Review r-20261128-055301-8b701c.
+test("an earlier file's OCR text left out for its share still names the pages and blocks the cache", () => {
+    const route = source("app/api/chat/route.ts");
+    assert.ok(!route.includes("if (added && ocrOutcome) settlePdfReading(ocrOutcome);"));
+    assert.match(route, /if \(ocrOutcome\) \{[\s\S]{0,400}settlePdfReading\(\s*added\s*\? ocrOutcome\s*: \{[\s\S]{0,300}pageCountUnknown: pdfPageCount === 0,\s*cacheable: false,/);
+    // Every settle input carries the whole outcome shape.
+    for (const literal of route.match(/settlePdfReading\(\{[\s\S]*?cacheable: false,/g) ?? []) {
+        assert.ok(literal.includes("pageCountUnknown:"), literal);
+    }
+});
+
+test("only the request that starts the paid OCR call counts as having started paid work", () => {
+    const route = source("app/api/chat/route.ts");
+    const start = route.indexOf("const runPdfOcr = async (");
+    const body = route.slice(start, route.indexOf("return call;", start));
+    const shared = body.indexOf("if (shared) return shared;");
+    const flag = body.indexOf("paidExternalWorkStarted = true;");
+    assert.ok(shared > 0 && flag > shared, "the flag is set after the shared result is returned");
+    assert.equal(body.split("paidExternalWorkStarted = true;").length - 1, 1);
+});
+
+test("an earlier image left out is counted against the earlier files' share like any line sent", () => {
+    const route = source("app/api/chat/route.ts");
+    const start = route.indexOf("const leaveOutEarlierImage = () => {");
+    const body = route.slice(start, route.indexOf('return "ok" as const;', start));
+    assert.ok(body.includes("totalExtractedCharacters += PAST_IMAGE_OMITTED_TEXT.length;"));
+    assert.ok(body.includes("pastAttachmentTokens += estimatePromptTokens(PAST_IMAGE_OMITTED_TEXT);"));
 });
