@@ -419,6 +419,11 @@ test("an image the completions route would refuse is refused here, even with a m
     assert.equal(response.status, 400, url);
     assert.equal((await response.json()).error.code, code, url);
   }
+  // The count across all messages, as the completions route counts it.
+  const many = Array.from({ length: 17 }, () => ({ role: "user", content: [{ type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=" } }] }));
+  const tooMany = await handleCodeRouteOnly(post({ messages: [...many, { role: "user", content: "Compare them." }] }), makeDeps({ runnable }));
+  assert.equal(tooMany.status, 413);
+  assert.equal((await tooMany.json()).error.code, "too_many_images");
   // A valid inline image goes through to the model that reads it.
   const ok = await handleCodeRouteOnly(ask("data:image/png;base64,iVBORw0KGgo="), makeDeps({ runnable }));
   assert.equal(ok.status, 200);

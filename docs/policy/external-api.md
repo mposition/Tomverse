@@ -526,9 +526,10 @@ Default off (`EXTERNAL_API_ROUTE_ONLY_ENABLED`, section 2). Code:
   CLI running the task keeps its model for the whole task and the server never
   sees its tool calls. A pick that cannot take the request (its window, images
   or features) is answered 400 `unsupported_request`, never recommended, since
-  nothing after this route refuses it as the completions route would. Images
-  are checked as that route converts them (inline data URLs of a supported type
-  and size; a remote URL is refused, never fetched). The choice
+  nothing after this route refuses it as the completions route would. The
+  completions route's own request checks then run for the pick (images: inline
+  data URLs, type, size and count; tools; options), so a request it would
+  refuse is refused here with the same error. The choice
   writes no conversation memory: that is written only when admission accepts a
   request on a model.
 - **Nothing is run or charged.** No admission, no credit reservation, no
