@@ -32,6 +32,7 @@ import {
 import { chatTurnToolsCopy } from "@/locales/chatTurnTools";
 import { AnswerQuoteButton } from "@/components/chat/AnswerQuoteButton";
 import { AnswerTurnActions } from "@/components/chat/AnswerTurnActions";
+import { AnswerCreditsLabel } from "@/components/chat/AnswerCreditsLabel";
 import { UserTurnEditor } from "@/components/chat/UserTurnEditor";
 import { useAnswerReadyNotice } from "@/components/chat/useAnswerReadyNotice";
 import { useSupersededIds } from "@/components/chat/useSupersededIds";
@@ -139,6 +140,12 @@ type ChatMessageListProps = {
    * success the page has already moved to the new conversation.
    */
   onBranchFromAnswer?: (messageId: string) => Promise<void>;
+  /**
+   * Chat, signed in: show under each answer the credits it was actually
+   * charged (`Message.settledCredits`, lib/chatAnswerCreditsCore.ts). Off in
+   * Review and for guests, whose answers never carry the figure anyway.
+   */
+  showAnswerCredits?: boolean;
   onRetryWithoutAttachments?: () => void;
   /**
    * Re-sends the last prompt with a set of already-missing stored files
@@ -800,6 +807,7 @@ export function ChatMessageList({
   onCompareInReview,
   compareRequiresCompleted = false,
   onBranchFromAnswer,
+  showAnswerCredits = false,
   onRetryWithoutAttachments,
   onContinueWithoutUnavailableAttachments,
   onRetryConcurrency,
@@ -1280,6 +1288,18 @@ export function ChatMessageList({
             // "finished normally", both are "normal".
             const isActivelyGenerating =
               !isUser && !msg.researchRunId && isSending && idx === messages.length - 1 && msg.role === "assistant";
+            // What this finished answer was charged, once settlement wrote it
+            // (lib/chatAnswerCreditsCore.ts). Absent shows nothing: a guest, an
+            // unsettled or refunded turn, and an answer from before the link.
+            const answerCredits =
+              showAnswerCredits &&
+              !isUser &&
+              !imported &&
+              !isActivelyGenerating &&
+              typeof msg.settledCredits === "number" &&
+              msg.settledCredits >= 1
+                ? msg.settledCredits
+                : undefined;
 
             // Only shown before the first token arrives (msg.content is
             // still empty) -- once real text starts streaming in, the
@@ -1731,10 +1751,11 @@ export function ChatMessageList({
                         );
                       })()}
                     {!isUser && !imported && !isActivelyGenerating && !msg.researchRunId && !msg.imageTurn &&
-                      msg.content.trim() && (msg.status === undefined || msg.status === "normal" || msg.status === "incomplete") && (
+                      msg.content.trim() && (msg.status === undefined || msg.status === "normal" || msg.status === "incomplete") ? (
                       <AnswerTurnActions
                         messageId={msg.id}
                         content={msg.content}
+                        credits={answerCredits}
                         branch={
                           onBranchFromAnswer && !importedTranscript && (msg.status === undefined || msg.status === "normal")
                             ? {
@@ -1758,7 +1779,13 @@ export function ChatMessageList({
                             : undefined
                         }
                       />
-                    )}
+                    ) : answerCredits !== undefined ? (
+                      // A stopped answer that was still charged for what it
+                      // wrote has no tools row; its figure stands alone.
+                      <div className="mt-1 flex items-center">
+                        <AnswerCreditsLabel credits={answerCredits} />
+                      </div>
+                    ) : null}
                     {!isUser && supersededIds.has(msg.id) && (
                       <p data-testid="chat-superseded-note" className="mt-2 text-[12px] leading-4 text-zinc-500 dark:text-zinc-400">
                         {chatTurnToolsCopy[lang].superseded}
