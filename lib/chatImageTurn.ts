@@ -166,6 +166,9 @@ const reviewPanelAnswers = (input: ChatImageTurnInput): PanelAnswer[] | null => 
         throw invalid();
     }
     const groupKey = chatImageTurnGroupKey(input.assistantMessageId);
+    // Panels pair with image models by position in the list as sent; the
+    // answer id's suffix is the image model's index in the sorted group
+    // (lib/chatImageTurnRead.ts), whatever order the client sent them in.
     const sorted = [...group].sort();
     const answers = group.map((imageModelId, position) => ({
         id: `${groupKey}_${sorted.indexOf(imageModelId)}`,
@@ -352,10 +355,14 @@ export async function startChatImageTurn(
                 );
             } catch (error) {
                 // Two replays racing to write the same missing answers: the
-                // second insert meets the first one's rows. Read again outside
-                // the aborted transaction; if every panel now has this
-                // conversation's image answer, the replay has what it came for.
-                const settled = error instanceof ChatAccessError && error.code === "ASSISTANT_MESSAGE_CONFLICT" &&
+                // second meets the first one's rows at the insert, or -- when
+                // the first filled the last of the message quota -- at the
+                // quota check, since it read them as missing before the quota
+                // lock. Read again outside the aborted transaction; if every
+                // panel now has this conversation's image answer, the replay
+                // has what it came for.
+                const code = (error as { code?: unknown } | null)?.code;
+                const settled = (code === "ASSISTANT_MESSAGE_CONFLICT" || code === "MESSAGE_STORAGE_QUOTA_EXCEEDED") &&
                     await readPanelRows(prisma, panelAnswers).then((rows) => panelAnswers.every((answer) =>
                         rows.some((row) => row.id === answer.id && isThisImageAnswer(row, input.conversationId))));
                 if (!settled) throw error;

@@ -351,3 +351,36 @@ test("two replays racing for the same missing answers both succeed; a foreign ro
     messages.set(`${GROUP}_0`, { id: `${GROUP}_0`, conversationId: "conv-1", role: "assistant", content: "a text answer" }) };
   await rejects(() => turn.startChatImageTurn(panelInput(1)), "ASSISTANT_MESSAGE_CONFLICT");
 });
+
+test("a racing replay that fills the last of the quota leaves the other replay its answers", async () => {
+  reset();
+  const { turn } = await load();
+  await turn.startChatImageTurn(panelInput(1, { imageGroupPanelModelIds: undefined }));
+  // The other replay commits the missing answer after this one read it as
+  // missing; the quota now has no room, so this one stops at the quota check.
+  process.env.API_MAX_MESSAGES_PER_CONVERSATION = "2";
+  const racing = {
+    id: `${GROUP}_0`, conversationId: "conv-1", role: "assistant", content: "[Image generated] a red fox", modelId: "google-chat",
+  };
+  race = { tag: "replay", at: "read", write: () => { messages.set(racing.id, { ...racing }); messageCount = 2; } };
+  const result = await turn.startChatImageTurn(panelInput(1));
+  assert.deepEqual(result.imageModelIds, ["gpt-image-2"]);
+  // With no other writer, a full quota is still the refusal.
+  reset();
+  await turn.startChatImageTurn(panelInput(1, { imageGroupPanelModelIds: undefined }));
+  process.env.API_MAX_MESSAGES_PER_CONVERSATION = "1";
+  messageCount = 1;
+  await rejects(() => turn.startChatImageTurn(panelInput(1)), "MESSAGE_STORAGE_QUOTA_EXCEEDED");
+});
+
+test("panels pair with image models as sent; answer ids follow the sorted group", async () => {
+  reset();
+  const { turn } = await load();
+  // Sent in reverse: the panel list follows the sent order.
+  await turn.startChatImageTurn(panelInput(0, {
+    imageGroupModelIds: [IMAGES[1], IMAGES[0]],
+    imageGroupPanelModelIds: [PANELS[1], PANELS[0]],
+  }));
+  assert.equal(messages.get(`${GROUP}_0`)?.modelId, "google-chat");
+  assert.equal(messages.get(`${GROUP}_1`)?.modelId, "openai-chat");
+});
