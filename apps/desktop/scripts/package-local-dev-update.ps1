@@ -139,11 +139,47 @@ if (-not $BuildOnly) {
         if ([IO.File]::Exists($temporaryFeed)) { [IO.File]::Delete($temporaryFeed) }
         if ([IO.File]::Exists($feed) -and [IO.File]::Exists($backupFeed)) { [IO.File]::Delete($backupFeed) }
     }
+
+    # App Installer's launch check never blocks a packaged desktop app: Windows starts the installed
+    # build first and can only apply the release on the launch after that. Apply it on this PC now:
+    # install from the feed when the app is closed. While the app runs, a feed install fails with
+    # 0x80073D02 and removes what it staged, so stage the MSIX and register it by full name: that
+    # registration fails while the app runs but stays pending and is applied at the next launch.
+    # The MSIX-staged build is no longer tied to the feed, which is harmless here because this
+    # script updates this PC on every release, and the next closed-app install ties it again.
+    # The Appx module loads only in Windows PowerShell.
+    $localInstall = & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -NonInteractive -Command {
+        param($Identity, $Feed, $Asset, $Version)
+        $ErrorActionPreference = 'Stop'
+        function Test-InUse($record) { $record.Exception.HResult -eq 0x80073D02 -or $record.Exception.Message -match '0x80073D02' }
+        try {
+            $installed = Get-AppxPackage -Name $Identity
+            if (-not $installed) { return 'not installed on this PC' }
+            if ([version]$installed.Version -ge [version]$Version) { return "already $($installed.Version)" }
+            try {
+                Add-AppxPackage -Path $Feed -AppInstallerFile
+                return 'installed now'
+            } catch { if (-not (Test-InUse $_)) { throw } }
+            Add-AppxPackage -Path $Asset -Stage
+            try {
+                Add-AppxPackage -MainPackage "$($Identity)_$($Version)_x64__$($installed.PublisherId)"
+                return 'installed now'
+            } catch { if (-not (Test-InUse $_)) { throw } }
+            return 'applies at the next launch'
+        } catch {
+            return "failed: $($_.Exception.Message.Trim())"
+        }
+    } -args $identity, $feed, $asset, $releaseVersion.ToString()
+    $localInstall = @($localInstall | Where-Object { $_ -is [string] })[-1]
+    if (-not $localInstall -or $localInstall.StartsWith('failed')) {
+        Write-Warning "The channel is published, but this PC's Local Dev install was not updated ($localInstall). Close the app and run: Add-AppxPackage -AppInstallerFile '$feed'"
+    }
 }
 
 [pscustomobject]@{
     Package = $asset
     AppInstaller = if (-not $BuildOnly) { $feed }
+    LocalInstall = if (-not $BuildOnly) { $localInstall }
     Version = $releaseVersion.ToString()
     Signer = $certificate.Thumbprint
     SHA256 = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash
