@@ -5,9 +5,12 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { permissionModes, type PermissionModeId } from "../src/permission-contract";
-import { cliPermissionPlan, cliPermissionPlans, liveCliModelId, liveCliProviderForModel, liveCliProviders, permissionRank } from "../src/provider-cli-exec-contract";
+import { cliPermissionPlan, cliPermissionPlans, liveCliFile, liveCliModelId, liveCliProviderForModel, liveCliProviders, permissionRank, ZAI_ANTHROPIC_BASE_URL } from "../src/provider-cli-exec-contract";
 import { claudeArguments, claudeParser, claudeSecretRules, claudeTools, cliExecEnvironment, codexArguments, codexParser, codexWriteProfile,
   credentialPathsIn, runProviderCli, type CliApproval, type ExecEvent, type ExecRun } from "../src/host/provider-cli-exec";
+
+// A made-up Z.ai key, put together at run time so no credential-shaped literal sits in the source.
+const sampleZai = ["zai", "key", "0123456789"].join("-");
 
 const fake = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-provider-cli.mjs");
 
@@ -432,7 +435,10 @@ test("The provider CLI route has no path to a Tomverse API or to credits", async
   // The command carries no Tomverse connection or token to the worker.
   const messages = await readFile(join(root, "messages.ts"), "utf8");
   const command = withoutComments(messages.slice(messages.indexOf('type: "start-provider-cli"'), messages.indexOf('type: "resume"')));
-  assert.doesNotMatch(command, /connection|connectionKey|token|key:/i);
+  // The one key it may carry is the Z.ai route's own provider key (Claude Code on the Coding Plan), never a Tomverse one.
+  const zaiField = /zai\?: \{ key: string; configDir: string \}/;
+  assert.match(command, zaiField);
+  assert.doesNotMatch(command.replace(zaiField, ""), /connection|connectionKey|token|key:/i);
 });
 
 test("Codex's write modes make the project's credential files read-only, a folder as a whole", async () => {
@@ -461,4 +467,43 @@ test("A folder the search cannot list is read-only as a whole", { skip: process.
     await chmod(join(root, "locked"), 0o700).catch(() => {});
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("Claude Code (Z.ai) runs the Claude Code adapter with the Z.ai endpoint, its key and a settings folder of its own", async () => {
+  const zai = { key: sampleZai, configDir: "/data/provider-cli/zai-claude" };
+  const env = { HOME: "/h", PATH: "/usr/bin", CLAUDE_CONFIG_DIR: "/h/.claude", ANTHROPIC_API_KEY: "sk-ant-x", ANTHROPIC_AUTH_TOKEN: "other", ANTHROPIC_BASE_URL: "https://elsewhere" };
+  const result = cliExecEnvironment(env, "zai", "linux", zai);
+  assert.equal(result.ANTHROPIC_BASE_URL, ZAI_ANTHROPIC_BASE_URL);
+  assert.equal(result.ANTHROPIC_AUTH_TOKEN, zai.key);
+  // The person's own ~/.claude (and its sign-in) is not the folder this route uses.
+  assert.equal(result.CLAUDE_CONFIG_DIR, zai.configDir);
+  assert.equal(result.ANTHROPIC_API_KEY, undefined);
+  assert.equal(result.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, "1");
+  // No other route gets a provider key or endpoint, whatever the environment holds.
+  for (const provider of ["openai", "anthropic"] as const) {
+    const other = cliExecEnvironment(env, provider, "linux", zai);
+    for (const name of ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]) assert.equal(other[name], undefined, `${provider} ${name}`);
+    assert.equal(other.CLAUDE_CONFIG_DIR, "/h/.claude", provider);
+  }
+  assert.equal(liveCliFile.zai, "anthropic");
+  assert.deepEqual(cliPermissionPlans.zai, cliPermissionPlans.anthropic);
+  assert.equal(liveCliProviderForModel(liveCliModelId("zai")), "zai");
+});
+
+test("A Claude Code (Z.ai) run without its key does not start; with it, the key is in the environment and never on the command line", async () => {
+  await withFake(async (directory) => {
+    const missing = join(directory, "missing.json");
+    const refused = await runProviderCli(baseRun(directory, { scenario: "claude-approve", record: missing }, { provider: "zai", mode: "ask" }));
+    assert.equal(refused.status, "failed");
+    await assert.rejects(readFile(missing, "utf8"), { code: "ENOENT" }, "the CLI was not started");
+
+    const record = join(directory, "record.json");
+    const zai = { key: sampleZai, configDir: join(directory, "zai-claude") };
+    const result = await runProviderCli(baseRun(directory, { scenario: "claude-approve", record }, { provider: "zai", mode: "ask", zai, approve: async () => false }));
+    assert.equal(result.status, "completed");
+    const seen = JSON.parse(await readFile(record, "utf8")) as { args: string[]; env: string[] };
+    for (const name of ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CONFIG_DIR"]) assert.ok(seen.env.includes(name), name);
+    assert.ok(seen.args.includes("--restricted") && seen.args.includes("--print"), "the Claude Code adapter's options");
+    assert.ok(!seen.args.some((arg) => arg.includes(zai.key)), "the key is not on the command line");
+  });
 });
