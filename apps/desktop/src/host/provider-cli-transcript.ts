@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { isSecretPath } from "../../../tomverse-cli/src/workspace.js";
+import { commandNamesSecretPath, isSecretPath } from "../../../tomverse-cli/src/workspace.js";
 import type { ApprovalRequest, Change, Entry } from "../contract";
 import { LIVE_CLI_LIMITS } from "../provider-cli-exec-contract";
 import type { CliApproval, ExecEvent } from "./provider-cli-exec";
@@ -105,7 +105,10 @@ export function approvalRequestFor(approval: CliApproval, root: string, clean: (
   if (approval.tool === "Bash" || approval.tool === "PowerShell") {
     const command = whole(input.command, SHOWN_LIMITS.command);
     const extras = rest(["command", "timeout", "run_in_background"]);
-    if (typeof command !== "string" || !extras || (input.timeout !== undefined && typeof input.timeout !== "number") ||
+    // A command naming a credential file is refused, never shown: Claude Code's deny rules cover its file tools, and its own
+    // read-only checks cover only the commands it runs without asking, so a command it asks about could read one if approved.
+    if (typeof command !== "string" || commandNamesSecretPath(String(input.command)) || commandNamesSecretPath(command) || !extras ||
+        (input.timeout !== undefined && typeof input.timeout !== "number") ||
         (input.run_in_background !== undefined && typeof input.run_in_background !== "boolean")) return null;
     return { ...base, ...extras, command: { mode: "shell", file: base.tool, args: [], cwd: clean(root), display: command, env: [],
       timeoutMs: typeof input.timeout === "number" && input.timeout > 0 ? Math.min(input.timeout, 3_600_000) : 120_000,

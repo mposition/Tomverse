@@ -116,6 +116,13 @@ test("A request the card cannot show in full, or that names a credential file, g
   assert.match(withFlag.explanation ?? "", /dangerouslyDisableSandbox/);
   const replaceAll = need(ask("Edit", { file_path: "a.ts", old_string: "a", new_string: "b", replace_all: true }));
   assert.match(replaceAll.explanation ?? "", /replace_all/);
+  // A shell command naming a credential file is refused too: approving it would read what the deny rules keep from the file tools.
+  for (const command of ["node -e \"console.log(require('fs').readFileSync('.env','utf8'))\"", "Get-Content -LiteralPath C:\\work\\.env.local",
+    "type ~/.ssh/id_ed25519", "python read.py < .git/config", "cp secrets.yaml out/", "cat ./server.pem"]) {
+    assert.equal(ask("Bash", { command }), null, command);
+    assert.equal(ask("PowerShell", { command }), null, command);
+  }
+  assert.ok(ask("Bash", { command: "npm test -- --grep secret" }), "a word that is not a path is not a file name");
   // A credential file is never asked about, in any tool that names a path.
   for (const path of [".env", "config/.npmrc", "keys/server.pem", ".ssh/config", "a/.git/config", "credentials.json"]) {
     assert.equal(ask("Write", { file_path: path, content: "x" }), null, path);
