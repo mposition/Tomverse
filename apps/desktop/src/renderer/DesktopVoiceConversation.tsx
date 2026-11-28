@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AudioLines } from "lucide-react";
-import { VoiceConversationPanel, voiceConversationCopy } from "@tomverse/chat-ui";
+import { VoiceConversationPanel } from "@tomverse/chat-ui";
 import { createVoiceConversationClient, type VoiceAnswerReceipt, type VoiceConversationView } from "../../../../components/chat/voiceConversationClient";
 import { monitorVoiceAudioLevels } from "../../../../components/chat/voiceAudioLevels";
 import type { Language } from "../../../../lib/language";
@@ -9,23 +8,22 @@ import { desktopVoiceFetch } from "./voice-transport";
 import "@tomverse/chat-ui/voice.css";
 import "./voice.css";
 
-const CREDITS_PER_MINUTE = 36;
+/** The per-minute price the voice window shows; the menu entry that opens the window names the same figure. */
+export const CREDITS_PER_MINUTE = 36;
 
 /**
  * The Chat voice conversation, with the screen and the connection the web and the mobile app use. Only two things
  * are Desktop's own: the server is reached through the main process, and the microphone is opened by the main
  * process for the one session the person starts.
  */
-export function DesktopVoiceConversation({ language, capability, conversationId, scopeKey, primary, disabled, selectionLabel, searchEnabled, onRequest, onSessionEnded }: {
+export function DesktopVoiceConversation({ language, capability, conversationId, scopeKey, open, onOpenChange, selectionLabel, searchEnabled, onRequest, onSessionEnded }: {
   language: Language; capability: VoiceConversationCapability;
   conversationId: string | null; scopeKey: string;
-  /** Whether the button takes the Send button's place: the draft is empty and nothing is being sent. */
-  primary: boolean; disabled: boolean;
+  /** The window is opened from the composer's voice menu, which owns this state. */
+  open: boolean; onOpenChange: (open: boolean) => void;
   selectionLabel: string; searchEnabled: boolean;
   onRequest: (text: string) => Promise<VoiceAnswerReceipt>; onSessionEnded?: () => void;
 }) {
-  const copy = voiceConversationCopy(language);
-  const [open, setOpen] = useState(false);
   const [state, setState] = useState<VoiceConversationView | null>(null);
   const client = useRef<ReturnType<typeof createVoiceConversationClient> | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -36,10 +34,10 @@ export function DesktopVoiceConversation({ language, capability, conversationId,
     client.current?.destroy();
     client.current = null;
     void window.desktop.disarmVoice().catch(() => {});
-    setOpen(false);
+    onOpenChange(false);
     setState(null);
     callbacks.current.onSessionEnded?.();
-  }, []);
+  }, [onOpenChange]);
   // The main process ends the session on sign-out, on sleep, and when the server withdraws the feature.
   useEffect(() => {
     const unsubscribe = window.desktop.subscribeVoiceStop(() => { void client.current?.stop(); });
@@ -82,8 +80,6 @@ export function DesktopVoiceConversation({ language, capability, conversationId,
   }
 
   return <>
-    {primary && <button type="button" className="send voice-conversation-open" data-testid="voice-conversation-open"
-      aria-label={copy.title} title={copy.title} disabled={disabled} onClick={() => setOpen(true)}><AudioLines size={18} /></button>}
     {open && <dialog ref={dialog} className="desktop-voice-dialog" aria-labelledby="voice-conversation-title"
       onCancel={(event) => { event.preventDefault(); close(); }}>
       <VoiceConversationPanel language={language} state={state} selectionLabel={selectionLabel} searchEnabled={searchEnabled}

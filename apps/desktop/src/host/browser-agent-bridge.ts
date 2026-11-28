@@ -97,6 +97,8 @@ export function createBrowserAgentBridge(deps: BridgeDeps) {
     }
     const view = agent && deps.tab(agent.tab);
     if (!view) return fail("The browser tab was closed. Open the page again with browser_navigate.");
+    // A page the person opened on their own network is theirs: the agent never reads or acts on it, even in the tab it holds.
+    if (view.kind === "private") return fail("The tab shows a page on the user's own network, which you may not use. Open a page with browser_navigate.");
     // The second switch is read on every request: once it is off, a public page is not read or acted on, whoever held the tab meanwhile.
     if (view.kind === "web" && !deps.webEnabled()) return fail("Public websites are turned off for the agent. Only a local page can be used.");
     // A web tab the person moved on (or a page that moved by itself) is on a site the agent was not given: nothing is read or done there.
@@ -122,6 +124,9 @@ export function createBrowserAgentBridge(deps: BridgeDeps) {
     hostsFor(tab: string): ReadonlySet<string> | null {
       return agent?.tab === tab && agent.control === "active" && agent.hosts.size > 0 ? agent.hosts : null;
     },
+
+    /** The agent holds this tab right now (the person has not taken it back): a page in it is not asked for permissions or downloads. */
+    holds(tab: string): boolean { return agent?.tab === tab && agent.control === "active"; },
 
     /** The tab the agent opened, whoever is steering it right now. */
     agentTab(): string | undefined { return agent?.tab; },

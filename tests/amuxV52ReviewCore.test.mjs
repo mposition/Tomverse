@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { decideAmuxV52ReviewDisposition, formatAmuxV52ReviewScope,
+import { AMUX_V52_REVIEW_SCOPE_TRANSPORT_MAX_BYTES, amuxV52ReviewScopeFits,
+  amuxV52ReviewScopeWithDependencies, decideAmuxV52ReviewDisposition, formatAmuxV52ReviewScope,
   validAmuxV52ReviewEvidence } from "../lib/amux/v52ReviewCore.ts";
 
 const evidence = (overrides = {}) => ({
@@ -18,14 +19,35 @@ test("review scope preserves the largest valid Task title and completion criteri
     `${index}:` + "C".repeat(496));
   const scope = formatAmuxV52ReviewScope(title, criteria);
   assert.ok(scope.length > 4_000);
-  assert.ok(scope.length <= 20_000);
   assert.match(scope, /Title: T{500}/);
   assert.ok(scope.endsWith(`- ${criteria.at(-1)}`));
-  // Owner decision 2026-11-15: the 8,192-character cap is lifted to the transport's bound
-  // (the scope rides one SSH command argument): 20,000 characters.
-  assert.doesNotThrow(() => formatAmuxV52ReviewScope("T", ["C".repeat(8_193)]));
-  assert.throws(() => formatAmuxV52ReviewScope("T", ["C".repeat(20_001)]),
-    /exceeds server limit/);
+  // Owner decision 2026-11-28: no character cap; the bound is the transport's bytes.
+  assert.doesNotThrow(() => formatAmuxV52ReviewScope("T", ["C".repeat(20_001)]));
+  assert.doesNotThrow(() => formatAmuxV52ReviewScope("T", ["C".repeat(79_000)]));
+  assert.throws(() => formatAmuxV52ReviewScope("T", ["C".repeat(AMUX_V52_REVIEW_SCOPE_TRANSPORT_MAX_BYTES)]),
+    /exceeds the transport/);
+  // Korean counts by its bytes: three per character.
+  assert.equal(amuxV52ReviewScopeFits("가".repeat(26_000)), true);
+  assert.equal(amuxV52ReviewScopeFits("가".repeat(27_000)), false);
+});
+
+// 2026-11-28 (AMUX-PUBLIC-004): its review was rejected for missing context;
+// its criteria named AMUX-PUBLIC-002's list, which the reviewer never saw.
+test("review scope carries the cards the Task depends on whole while they fit, and names the rest", () => {
+  const scope = formatAmuxV52ReviewScope("T", ["Every item on AMUX-PUBLIC-002's list is fixed."]);
+  assert.equal(amuxV52ReviewScopeWithDependencies(scope, []), scope);
+  const list = "| key | fix |\n" + "| pricing.copy.x | 문구를 고칩니다 |\n".repeat(400);
+  const withList = amuxV52ReviewScopeWithDependencies(scope, [{ label: "AMUX-PUBLIC-002", text: list }]);
+  assert.ok(withList.startsWith(`${scope}\n\nThe cards this Task depends on`));
+  assert.ok(withList.endsWith(`## AMUX-PUBLIC-002\n${list}`), "whole");
+  // One that does not fit is named, never cut; the ones after it are named too.
+  const huge = "x".repeat(AMUX_V52_REVIEW_SCOPE_TRANSPORT_MAX_BYTES);
+  const mixed = amuxV52ReviewScopeWithDependencies(scope, [
+    { label: "A", text: list }, { label: "B", text: huge }, { label: "C", text: "small" }]);
+  assert.ok(mixed.includes(`## A\n${list}`));
+  assert.doesNotMatch(mixed, /## B|## C/);
+  assert.match(mixed, /Not included, larger than the review request can carry:\n- B \(\d+ characters\)\n- C \(5 characters\)$/);
+  assert.equal(amuxV52ReviewScopeFits(mixed), true);
 });
 
 test("review evidence binds one job and an independent reviewer", () => {

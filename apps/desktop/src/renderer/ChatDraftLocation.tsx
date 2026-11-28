@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Loader2, MapPin, X } from "lucide-react";
 import { CHAT_LOCATION_OFF, createChatLocationSession } from "@tomverse/chat-core";
 import { LanguageProvider, useLanguage } from "@/components/LanguageProvider";
@@ -19,8 +19,19 @@ export function useChatLocation(scope: string | null) {
     session.setIdentity(scope);
     return () => session.setIdentity(null);
   }, [scope, session]);
+  // After a failed read the host says whether Windows itself has location off; only then is the message more specific.
+  const [osCheck, setOsCheck] = useState<{ failure: typeof state; off: boolean }>();
+  useEffect(() => {
+    if (!state.error) return;
+    let current = true;
+    window.desktop.osLocationStatus().then((status) => { if (current) setOsCheck({ failure: state, off: status === "off" }); }, () => undefined);
+    return () => { current = false; };
+  }, [state]);
+  // The answer belongs to the failure it was asked about; a later read starts without it.
+  const windowsOff = Boolean(state.error) && osCheck?.failure === state && osCheck.off;
   return {
-    scope, state, enabled: session.isEnabled(scope),
+    scope, state, windowsOff, enabled: session.isEnabled(scope),
+    openWindowsSettings: () => { void window.desktop.openOsLocationSettings().catch(() => undefined); },
     enable: () => session.enable(scope),
     disable: session.disable,
     /** The fix for the message being sent, or nothing when the switch is off or the read failed. */
@@ -36,7 +47,7 @@ export type ChatLocation = ReturnType<typeof useChatLocation>;
 export function ChatLocationTool({ location, disabled }: { location: ChatLocation; disabled: boolean }) {
   const { t } = useLanguage();
   const { state, enabled } = location;
-  const status = state.error ? t(`chat.locationError${state.error}`)
+  const status = state.error ? t(location.windowsOff ? "chat.locationWindowsOff" : `chat.locationError${state.error}`)
     : state.pending ? t("chat.locationReading") : t("chat.locationDisclosure");
   return <button type="button" role="switch" className="composer-tool-row" data-testid="tools-location-row"
     aria-checked={enabled} aria-labelledby="chat-location-label" aria-describedby="chat-location-description"
@@ -61,7 +72,10 @@ function LocationStatus({ location }: { location: ChatLocation }) {
   if (!enabled && !state.pending && !state.error) return null;
   return <div className="chat-location-status" data-testid="chat-location-status">
     {state.pending ? <Loader2 size={15} className="location-spin" aria-hidden="true" /> : <MapPin size={15} aria-hidden="true" />}
-    <span role="status">{state.error ? t(`chat.locationError${state.error}`) : state.pending ? t("chat.locationReading") : t("chat.locationActive")}</span>
+    <span role="status">{state.error ? t(location.windowsOff ? "chat.locationWindowsOff" : `chat.locationError${state.error}`)
+      : state.pending ? t("chat.locationReading") : t("chat.locationActive")}</span>
+    {state.error && location.windowsOff && <button type="button" className="chat-location-settings" data-testid="chat-location-open-windows-settings"
+      onClick={location.openWindowsSettings}>{t("chat.locationOpenWindowsSettings")}</button>}
     <button type="button" className="icon" aria-label={t("chat.locationDisable")} data-testid="chat-location-disable"
       onClick={location.disable}><X size={14} aria-hidden="true" /></button>
   </div>;

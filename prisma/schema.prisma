@@ -143,6 +143,7 @@ model User {
   mobileDevices                        MobileDevice[]
   mobileTokenFamilies                  MobileTokenFamily[]
   externalApiKeys                      ExternalApiKey[]
+  externalApiDesktopRequests           ExternalApiRequest[]   @relation("ExternalApiDesktopRequests")
   mobileLoginGrants                    MobileLoginGrant[]
   mobileAuthEvents                     MobileAuthEvent[]
   quotaScopes                          QuotaScope[]
@@ -2312,15 +2313,24 @@ model ExternalApiKey {
   @@index([userId, createdAt])
 }
 
-/// One external inference request: the content-free link between a key and
-/// the shared ChatCreditReservation that holds and settles its credits. Every
-/// amount lives on the reservation; this row stores no prompt, output, tool
-/// argument, image or key material.
+/// One external inference request: the content-free link between a key (or
+/// Desktop Code's signed-in session) and the shared ChatCreditReservation that
+/// holds and settles its credits. Every amount lives on the reservation; this
+/// row stores no prompt, output, tool argument, image or key material.
 model ExternalApiRequest {
   id                   String                @id
-  keyId                String
-  key                  ExternalApiKey        @relation(fields: [keyId], references: [id], onDelete: Cascade)
+  /// The API key the request came with; NULL exactly when it came with a
+  /// Desktop session instead (desktopUserId).
+  keyId                String?
+  key                  ExternalApiKey?       @relation(fields: [keyId], references: [id], onDelete: Cascade)
   userId               String
+  /// Desktop Code's signed-in session (docs/policy/external-api.md section
+  /// 11.2): the account id, set exactly when the request came with a Desktop
+  /// session rather than a key, and NULL for a key request. Its own relation,
+  /// so account deletion removes the row (a key request goes with its key).
+  /// Idempotency and receipts are scoped by it as a key request's are by keyId.
+  desktopUserId        String?
+  desktopUser          User?                 @relation("ExternalApiDesktopRequests", fields: [desktopUserId], references: [id], onDelete: Cascade)
   reservationId        String                @unique
   reservation          ChatCreditReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
   /// SHA-256 of the client's Idempotency-Key header, when it sent one.
@@ -2351,8 +2361,10 @@ model ExternalApiRequest {
   completedAt          DateTime?
 
   @@unique([keyId, idempotencyKeyDigest])
+  @@unique([desktopUserId, idempotencyKeyDigest])
   @@index([userId, createdAt])
   @@index([keyId, createdAt])
+  @@index([desktopUserId, createdAt])
   @@index([createdAt])
 }
 

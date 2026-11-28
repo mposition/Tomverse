@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -46,8 +47,8 @@ async function runInWorktree(confirmed: boolean) {
     process.env.TOMVERSE_HOME = home;
     application = await launchNativeFixture(descriptor);
     const page = await application.firstWindow();
-    await page.getByRole("button", { name: "Open local folder" }).click();
-    await page.getByLabel("Code mode").selectOption("agent");
+    await openCodeProject(page);
+    await selectCodeMode(page, "agent");
     // The worktree the task starts in is planned once the project is read; the draft is restored around the same time.
     await expect.poll(async () => (await page.evaluate(() => window.desktop.state())).codeGitWorkspace?.kind).toBe("git");
     const composer = page.getByRole("textbox", { name: "Code request", exact: true });

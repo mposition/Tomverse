@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PLUGIN_SCOPE_LIMITS } from "../../../lib/mcpConnectorClientContract";
+import { PLUGIN_SCOPE_LIMITS } from "../../../lib/pluginScopeLimits";
 
 /**
  * Connector (Plugin, MCP) management for Desktop. The renderer names an action; the main process

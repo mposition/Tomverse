@@ -335,13 +335,40 @@ export function desktopRemotePasskeyEnabled() {
 
 export const DESKTOP_CHAT_CAPABILITIES = "/api/products/chat/capabilities";
 export const DESKTOP_CHAT_HISTORY = "/api/conversations";
+/** The Plugins page's platform catalogue (static, no account data). Desktop reads it while the Desktop plugins switch is on. */
+export const DESKTOP_PLUGIN_CATALOG = "/api/mcp/providers";
 export const DESKTOP_CHAT_SEARCH = "/api/conversations/search";
+
+/**
+ * Desktop Code on the signed-in Desktop session instead of an API key (owner decision 2026-11-27,
+ * docs/policy/external-api.md section 11.2). Default off. While it is on, exactly the coding API calls the bundled
+ * agent engine makes (apps/tomverse-cli/src/gateway.ts) take the Desktop bearer from the Desktop origin; the route
+ * turns it into the same account caller a key becomes (lib/externalApiCaller.ts), so the plan check, rate limits,
+ * credits, concurrency and receipts are the key path's own. Tools outside Desktop keep using API keys, and so do the
+ * coding API's other addresses (Responses, Anthropic Messages).
+ */
+export function desktopCodeSessionEnabled() {
+  return process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true" && process.env.TOMVERSE_DESKTOP_CODE_SESSION_ENABLED === "true";
+}
+
+export const DESKTOP_CODE_SESSION_READS: readonly string[] = ["/api/code/v1/models", "/api/code/v1/usage", "/api/code/v1/requests/status"];
+export const DESKTOP_CODE_SESSION_WRITES: readonly string[] = ["/api/code/v1/chat/completions", "/api/code/v1/web-search"];
+
+/** Whether this exact method and path is a coding API call a Desktop session may make now. */
+export function desktopCodeSessionRoute(path: string, method: string): boolean {
+  if (!desktopCodeSessionEnabled()) return false;
+  if (DESKTOP_CODE_SESSION_READS.includes(path)) return method === "GET";
+  if (DESKTOP_CODE_SESSION_WRITES.includes(path)) return method === "POST";
+  return false;
+}
 
 const ownResourceRead = /^\/api\/(?:conversations|artifacts)\/[A-Za-z0-9_-]{1,128}$/;
 
 export function desktopReadApiRoute(path: string, method: string): boolean {
+  if (method === "GET" && desktopCodeSessionRoute(path, method)) return true;
   return method === "GET" && (path === DESKTOP_CHAT_CAPABILITIES || path === DESKTOP_CHAT_HISTORY ||
     path === DESKTOP_CHAT_SEARCH || ownResourceRead.test(path) ||
+    (path === DESKTOP_PLUGIN_CATALOG && desktopPluginsEnabled()) ||
     /^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/continuation$/.test(path) ||
     (desktopReviewWriteEnabled() && (path === DESKTOP_IMAGE_GENERATIONS ||
       /^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/generations$/.test(path) ||
@@ -446,6 +473,7 @@ export function desktopChatTurnField(key: string): boolean {
 }
 
 export function desktopWriteApiRoute(path: string, method: string): boolean {
+  if (method === "POST" && desktopCodeSessionRoute(path, method)) return true;
   if (path === DESKTOP_REMOTE_SYNC) return (method === "POST" || method === "DELETE") && process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true";
   if (path === DESKTOP_DEEP_RESEARCH_STATUS) return method === "POST" && (desktopDeepResearchEnabled() || desktopReviewDeepResearchEnabled());
   if (path === DESKTOP_CHAT_CONTEXT) return method === "POST" && (desktopChatWriteEnabled() || desktopReviewWriteEnabled());
