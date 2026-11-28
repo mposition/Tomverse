@@ -103,10 +103,11 @@ test("Desktop settings follow the account tab order and return to the workspace 
     await code.getByRole("button", { name: "Task permissions", exact: true }).click();
     await expect(page.getByRole("main").getByText("Manual", { exact: true })).toBeVisible();
     await code.getByRole("button", { name: "Local task history", exact: true }).click();
-    const retention = page.getByRole("checkbox", { name: "Save to local history", exact: true });
-    await retention.uncheck();
+    // Code tasks are always saved, so this view manages the history and offers no switch.
+    await expect(page.getByRole("button", { name: "Manage history", exact: true })).toBeVisible();
+    await expect(page.getByRole("checkbox", { name: "Save to local history", exact: true })).toHaveCount(0);
     await page.getByRole("button", { name: "Close", exact: true }).click();
-    await expect(retention).not.toBeChecked();
+    await expect(page.getByRole("checkbox", { name: "Save to local history", exact: true })).toHaveCount(0);
   } finally {
     await application?.close();
     await rm(profile, { recursive: true, force: true, maxRetries: 5 });

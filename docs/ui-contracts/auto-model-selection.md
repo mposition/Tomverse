@@ -245,3 +245,23 @@ A refused, failed or identity-stale write leaves the confirmed Auto UI intact.
 - No user-facing string may name a bucket, a percentage, a salt, a cohort or a
   readiness gate.
 - A change that violates this contract is a release blocker.
+
+## 8. Code in the desktop app uses the same picker
+
+The Code composer's model control is the Chat picker, not a second design
+(`apps/desktop/src/renderer/CodeModelPicker.tsx` over `DesktopModelPicker` and
+`ModelPickerPanel` with `catalogueOnly`).
+
+- It lists the **coding catalogue** the Code connection returns, never the Chat
+  catalogue. A row's name, provider, credits and capabilities are the
+  catalogue's own (`apps/desktop/src/code-model-catalog.ts`).
+- Smart Adaptive is the switch above the list, as in Chat. It selects the
+  catalogue's `smart-adaptive` entry, so it is offered exactly when the
+  catalogue lists that entry beside at least one model, and the §7 rule holds:
+  it is never a row.
+- The task reasoning effort sits in the picker's effort slot, where Chat's does.
+- The coding catalogue has no Chat use cases, so the picker opens on the full
+  list, without the recommended screen, the use-case filter or the "Chat uses
+  one answer model" line.
+- With no catalogue (no Code connection yet, still loading, or failed) the
+  control is disabled and names that state; it does not open an empty list.
