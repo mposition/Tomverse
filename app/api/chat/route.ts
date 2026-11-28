@@ -5807,6 +5807,12 @@ async function handleChatPost(
                   withinReservationTransaction: scheduledTaskReservationGuard(access.userId),
                   // Undefined outside a scheduled run; inside one, the person keeps a slot.
                   subjectSlotsKeptFree: scheduledTaskSubjectSlotsKeptFree(),
+                  // The answer this turn is saved as, so it can show what it
+                  // cost. Only when the turn is saved: the same condition the
+                  // persistence below uses.
+                  ...(session?.user?.id && conversationId && assistantMessageId
+                      ? { assistantMessageId }
+                      : {}),
               });
         leaseOwnership = chatLeaseAcquired(accessGrant.leaseId);
         usageReservation = accessGrant.usageReservation;

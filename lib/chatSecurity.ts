@@ -2822,6 +2822,14 @@ export const acquireChatAccess = async (
          * its existing insert/idempotency contract.
          */
         guestAutoPrehold?: GuestAutoPreholdConversion;
+        /**
+         * The saved Chat answer this reservation pays for, recorded on the new
+         * row so that answer can show what it cost. Written with the insert
+         * and never read by reservation, settlement or refund: it changes no
+         * amount and no status. The Chat route passes it only for a signed-in
+         * turn of a saved conversation; every other caller leaves it out.
+         */
+        assistantMessageId?: string;
     }
 ): Promise<{
     leaseId: string;
@@ -4358,6 +4366,11 @@ export const acquireChatAccess = async (
                     planReservedCredits,
                     addOnReservedCredits,
                     expiresAt: reservationExpiresAt,
+                    // Only on a signed-in user's row: a guest turn has no saved
+                    // answer to show a cost under.
+                    ...(options?.assistantMessageId && access.userId
+                        ? { assistantMessageId: options.assistantMessageId }
+                        : {}),
                 },
             });
         }
