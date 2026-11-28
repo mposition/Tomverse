@@ -461,7 +461,7 @@
     "highlight.js": "^11.12.0",
     "js-tiktoken": "1.0.21",
     "katex": "^0.18.2",
-    "lucide-react": "^1.75.0",
+    "lucide-react": "^1.80.0",
     "mermaid": "^11.12.0",
     "next": "16.4.6",
     "next-auth": "^4.24.15",
