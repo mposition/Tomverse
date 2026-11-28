@@ -26,6 +26,8 @@ const created: Array<Record<string, unknown>> = [];
 /** Rows written by the all-panels insert, and every id already stored. */
 const createdMany: Array<Record<string, unknown>> = [];
 const storedIds = new Set<string>();
+/** Rows that already hold an id, as `message.findMany` reads them. */
+let heldRows: Array<{ id: string; conversationId: string; role: string; content: string }> = [];
 /** `${userId}:${groupKey}` -> the reserved group's conversation. */
 const reservedGroups = new Map<string, { conversationId: string }>();
 let groupQueries = 0;
@@ -41,6 +43,10 @@ const prismaMock = {
   message: {
     findFirst: async () => source,
     findUnique: async () => existing,
+    // What already holds those ids: rows a test placed, and rows a sibling
+    // panel's request wrote.
+    findMany: async ({ where }: { where: { id: { in: string[] } } }) =>
+      [...heldRows, ...createdMany as typeof heldRows].filter((row) => where.id.in.includes(row.id)),
     create: async ({ data }: { data: Record<string, unknown> }) => {
       created.push(data);
       return data;
@@ -114,6 +120,7 @@ const reset = () => {
   created.length = 0;
   createdMany.length = 0;
   storedIds.clear();
+  heldRows = [];
   reservedGroups.clear();
   groupQueries = 0;
   reused = false;
@@ -428,4 +435,41 @@ test("a group counts as reserved only for a Review panel id in its own conversat
   // A plain Chat answer id is never a later panel of anything.
   assert.equal(await reserved(REVIEW_GROUP), false);
   assert.equal(await reserved("6f1c1d3e-3333-4a2b-9c3d-000000000003_0"), false);
+});
+
+/*
+  Review finding (B3, 2026-11-28): only this request's own panel id was
+  checked for a collision, and the all-panels write skips a row that exists.
+  A sibling panel id already held by a text answer, a user message or another
+  conversation's row meant the group was reserved and that panel's image never
+  got an answer. Every panel id is now checked before anything is reserved.
+*/
+test("a sibling panel id held by anything but this conversation's image answer is refused before reserving", async () => {
+  const { turn } = await load();
+  const sibling = `${REVIEW_GROUP}_0`;
+  for (const [label, row] of [
+    ["a text answer here", { id: sibling, conversationId: "conv-1", role: "assistant", content: "a text answer" }],
+    ["a user message here", { id: sibling, conversationId: "conv-1", role: "user", content: "[Image generated] spoof" }],
+    ["another conversation's image answer", { id: sibling, conversationId: "conv-other", role: "assistant", content: "[Image generated] elsewhere" }],
+  ] as const) {
+    reset();
+    conversation = { kind: "chat", productKey: "review", continuationBridge: null };
+    heldRows = [{ ...row }];
+    await rejects(() => turn.startChatImageTurn(reviewPanel(1)), "ASSISTANT_MESSAGE_CONFLICT");
+    assert.equal(requests.length, 0, `${label}: nothing reserved`);
+    assert.equal(createdMany.length, 0, `${label}: nothing written`);
+  }
+});
+
+test("a sibling panel id that is already this conversation's image answer is a replay, not a conflict", async () => {
+  const { turn } = await load();
+  reset();
+  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
+  const sibling = `${REVIEW_GROUP}_0`;
+  heldRows = [{ id: sibling, conversationId: "conv-1", role: "assistant", content: "[Image generated] earlier" }];
+  storedIds.add(sibling);
+  await turn.startChatImageTurn(reviewPanel(1));
+  assert.equal(requests.length, 1);
+  // Only the free id is written; the sibling's row stays as it was.
+  assert.deepEqual(createdMany.map((row) => row.id), [`${REVIEW_GROUP}_1`]);
 });

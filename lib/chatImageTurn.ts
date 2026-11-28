@@ -194,6 +194,25 @@ export async function startChatImageTurn(
         panelAnswers.find((answer) => answer.id === input.assistantMessageId)?.modelId !== input.modelId)) {
         throw new ChatAccessError(400, "IMAGE_MODEL_SELECTION_INVALID", "Invalid comparison image selection.");
     }
+    // Every panel's answer id has to be free, or already this conversation's
+    // image answer (a sibling panel or a replay wrote it), before anything is
+    // reserved. The write below skips a row that exists, so a panel id held by
+    // a text answer or by another conversation would otherwise leave that
+    // panel's image paid for with no answer to show it. This request's own id
+    // was checked above; the others are checked the same way here. The
+    // conversation is this user's (checked at the top), so its rows are too.
+    if (panelAnswers) {
+        const held = await prisma.message.findMany({
+            where: { id: { in: panelAnswers.map((answer) => answer.id) } },
+            select: { id: true, conversationId: true, role: true, content: true },
+        });
+        if (held.some((row) =>
+            row.conversationId !== input.conversationId ||
+            row.role !== "assistant" ||
+            !row.content.startsWith(CHAT_IMAGE_TURN_CONTENT_PREFIX))) {
+            throw new ChatAccessError(409, "ASSISTANT_MESSAGE_CONFLICT", "That answer id is taken.");
+        }
+    }
     // An edit starts from the question's own photo, looked up from the saved
     // message so a request can never point an edit at another file.
     let editSource: { attachmentId: string } | undefined;
