@@ -276,6 +276,15 @@ test("A link in the project that leads to a credential file is refused whatever 
         assert.equal(classifyAcpPermission(request(toolCall), { cwd, plan: plans.read_only }).verdict, "deny", `${target} read_only`);
       }
     }
+    // A link whose target does not exist yet (here outside the project) is neither inside nor allowed: where it leads is unknown.
+    const dangling: string[] = [];
+    try { await symlink(join(root, "outside-folder"), join(cwd, "gone"), process.platform === "win32" ? "junction" : "dir"); dangling.push("gone/new.txt"); } catch { /* not supported here */ }
+    try { await symlink(join(root, "outside.txt"), join(cwd, "later.txt"), "file"); dangling.push("later.txt"); } catch { /* not supported here */ }
+    for (const target of dangling) {
+      assert.equal(realPathOf(target, cwd), null, target);
+      assert.ok(!insideProject(target, cwd), target);
+      assert.equal(classifyAcpPermission(request({ kind: "edit", title: "Edit", locations: [{ path: join(cwd, target) }] }), { cwd, plan: plans.allow_all }).verdict, "refuse", target);
+    }
     // An ordinary path next to them is not.
     assert.ok(!namesCredential("notes.txt", cwd));
     assert.ok(!namesCredential("docs/new.md", cwd));

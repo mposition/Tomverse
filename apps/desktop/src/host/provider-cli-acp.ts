@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { commandNamesSecretPath, isSecretPath } from "../../../tomverse-cli/src/workspace.js";
 import type { PermissionModeId } from "../permission-contract";
@@ -127,7 +127,8 @@ const within = (child: string, parent: string) => {
 
 /**
  * The path with every link of its nearest existing folder resolved: the real path of that folder plus the part that does not
- * exist yet. A link in the project that leads to a credential file resolves to the credential file. Null when it cannot be read.
+ * exist yet. A link in the project that leads to a credential file resolves to the credential file. Null when it cannot be read,
+ * including a link whose target does not exist yet: where it would lead is not known until the CLI writes through it.
  */
 export function realPathOf(path: string, cwd: string): string | null {
   if (hasControl(path)) return null;
@@ -137,6 +138,8 @@ export function realPathOf(path: string, cwd: string): string | null {
     try { return join(realpathSync.native(existing), ...[...rest].reverse()); } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== "ENOENT" && code !== "ENOTDIR") return null;
+      // Something is there although its real path is missing: a link to a target that does not exist yet.
+      if (code === "ENOENT") { try { lstatSync(existing); return null; } catch { /* nothing there: a part not created yet */ } }
       const parent = dirname(existing);
       if (parent === existing) return null;
       rest.push(basename(existing));
