@@ -176,7 +176,9 @@ map to the existing no-results state.
 
 Use `MCP_GITHUB_OAUTH_CLIENT_ID`, `MCP_GITHUB_OAUTH_CLIENT_SECRET`,
 `MCP_GITHUB_REPOSITORY` and `MCP_GITHUB_REPOSITORY_ID` for the built-in profile.
-The catalog's `github` entry is never offered, so it cannot collide with this profile.
+The catalog's `github` entry is never offered, so it cannot collide with this profile,
+but do not also register another server with ID `github` in `MCP_CONNECTOR_SERVERS`:
+the two would share one ID and the server lookup fails.
 The alternative explicit JSON profile is in
 `config/mcp/github-tomverse-code.example.json`; its secret is an environment
 reference. The issuer is exactly `https://github.com/login/oauth`; the code/token
