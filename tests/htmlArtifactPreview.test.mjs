@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -10,6 +11,7 @@ import {
   buildHtmlPreviewSrcdoc,
   isHtmlPreviewSmallEnough,
   isHtmlPreviewable,
+  stripPreviewResourceHints,
   withEmbedderNonce,
 } from "../lib/htmlArtifactPreview.ts";
 
@@ -147,4 +149,36 @@ test("the embedder's nonce goes on the page's script, style and stylesheet eleme
   for (const nonce of [null, undefined, "", "short", "abc\" onload=\"x", "a b c d e f g h", "x".repeat(300)]) {
     assert.equal(withEmbedderNonce("<p>x</p>", nonce, () => { throw new Error("must not parse"); }), "<p>x</p>");
   }
+});
+
+// A policy does not stop resource hints, and a hostname is a place to put text.
+test("resource-hint links are removed by the browser's parser, and a page without them is returned as written", () => {
+  const removed = [];
+  let asked = null;
+  const parse = (text) => ({
+    querySelectorAll: (selector) => {
+      asked = selector;
+      return text.includes("preconnect") ? [1, 2].map((n) => ({ remove: () => removed.push(n) })) : [];
+    },
+    documentElement: { outerHTML: "<html>without hints</html>" },
+  });
+  assert.equal(stripPreviewResourceHints('<link rel="preconnect" href="https://x.example">', parse), "<html>without hints</html>");
+  assert.deepEqual(removed, [1, 2]);
+  assert.equal(stripPreviewResourceHints("<p>no hints</p>", parse), "<p>no hints</p>");
+  for (const rel of ["dns-prefetch", "preconnect", "prefetch", "prerender"]) {
+    assert.ok(asked.includes(`link[rel~="${rel}" i]`), rel);
+  }
+});
+
+test("the frame switches off DNS prefetching ahead of the page, after our policy", () => {
+  const { inner } = split(buildHtmlPreviewSrcdoc("<p>x</p>"));
+  const policy = inner.indexOf("Content-Security-Policy");
+  const prefetch = inner.indexOf('http-equiv="x-dns-prefetch-control" content="off"');
+  assert.ok(policy >= 0 && prefetch > policy, "ours is the second element");
+  assert.ok(prefetch < inner.indexOf("<p>x</p>"));
+});
+
+test("the panel strips resource hints before it hands the page the embedder's nonce", () => {
+  const panel = readFileSync(new URL("../components/chat/HtmlArtifactPreviewPanel.tsx", import.meta.url), "utf8");
+  assert.match(panel, /withEmbedderNonce\(stripPreviewResourceHints\(html, parse\), nonce, parse\)/);
 });
