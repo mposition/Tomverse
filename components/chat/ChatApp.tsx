@@ -92,6 +92,7 @@ import {
 import type { ChatContentState } from "@/lib/chatContentState";
 import type { ModelRuntimeStatus } from "@/lib/chatRuntimeStatus";
 import { consumeChatStream } from "@/lib/chatStreamConsumer";
+import { CHAT_REASONING_DISPLAY_HEADER } from "@/lib/chatReasoningDisplay";
 import {
   decideChatStreamReattach,
   handOffInterruptedChatAttempt,
@@ -2556,7 +2557,7 @@ function ChatAppComponent({
           controller.signal.throwIfAborted();
           if (!isGuestMode && !researchMode) observeJourneyDispatch(panelIdentityKey, targetChatId, sourceUserMessageId);
           return fetch(path, {
-          method: "POST", headers: { "Content-Type": "application/json", ...(researchMode ? { "Accept-Language": lang } : {}), ...(turnPassages ? {[PASSAGE_HEADER]:turnPassages} : {}) },
+          method: "POST", headers: { "Content-Type": "application/json", ...(researchMode ? { "Accept-Language": lang } : {}), ...(turnPassages ? {[PASSAGE_HEADER]:turnPassages} : {}), ...(transcriptScope === "conversation" ? { [CHAT_REASONING_DISPLAY_HEADER]: "1" } : {}) },
           body,
           signal: controller.signal,
         });
@@ -3047,6 +3048,7 @@ function ChatAppComponent({
                     ? autoRewrite : undefined,
                   isGeneratingArtifact: progress.isGeneratingArtifact,
                   mcpProgress: progress.mcpProgress,
+                  ...(progress.reasoning ? { reasoning: progress.reasoning } : {}),
                   ...(progress.generatingArtifactFormat
                     ? {
                         generatingArtifactFormat:
@@ -3160,6 +3162,8 @@ function ChatAppComponent({
           undefined,
           {
             searchMetadata,
+            // The summary streamed beside the answer, folded once it ends.
+            ...(streamed.reasoning ? { reasoning: { ...streamed.reasoning, done: true } } : {}),
             // `medium` is a Desktop-only step; the web composer has no label for it.
             appliedReasoningEffort: trailer?.appliedReasoningEffort === "medium" ? undefined : trailer?.appliedReasoningEffort,
             // Always written, so a retry that produces no file clears the
