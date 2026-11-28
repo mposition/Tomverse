@@ -7,8 +7,13 @@ import {
   parseAnswerCreditsResponse,
   settledAnswerCredits,
 } from "../lib/chatAnswerCreditsCore.ts";
-import { watchAnswerCredits } from "../lib/chatAnswerCreditsClient.ts";
+import {
+  answerCreditsConversationId,
+  createAnswerCreditWatches,
+  watchAnswerCredits,
+} from "../lib/chatAnswerCreditsClient.ts";
 import { toChatRequestMessage, toGuestPersistableMessage } from "../lib/chatMessageSerialization.ts";
+import { readFileSync } from "node:fs";
 
 const row = (assistantMessageId: string | null, status: string, settledCredits: number) => ({
   assistantMessageId,
@@ -156,4 +161,107 @@ test("the figure stays out of the /api/chat transcript and the guest snapshot", 
   };
   assert.equal("settledCredits" in toChatRequestMessage(answer), false);
   assert.equal("settledCredits" in toGuestPersistableMessage(answer), false);
+});
+
+/* ------------------------------------------------------ which panels ask -- */
+
+test("only a signed-in Chat panel on a saved conversation asks", () => {
+  const chat = { transcriptScope: "conversation" as const, currentProduct: "chat", isGuestMode: false };
+  assert.equal(answerCreditsConversationId({ ...chat, conversationId: "c1" }), "c1");
+  // A conversation with no server id has no saved turn to link a charge to.
+  for (const conversationId of [null, undefined, "", "   ", "guest-chat"]) {
+    assert.equal(answerCreditsConversationId({ ...chat, conversationId }), null, String(conversationId));
+  }
+  assert.equal(answerCreditsConversationId({ ...chat, isGuestMode: true, conversationId: "c1" }), null);
+  assert.equal(answerCreditsConversationId({ ...chat, currentProduct: "review", conversationId: "c1" }), null);
+  assert.equal(answerCreditsConversationId({ ...chat, transcriptScope: "model", conversationId: "c1" }), null);
+});
+
+/* ------------------------------------------- a panel's watches end with it -- */
+
+const fakeWatches = () => {
+  const started: Array<{ messageId: string; report: (credits: number) => void; stopped: boolean }> = [];
+  const watches = createAnswerCreditWatches((input) => {
+    const entry = { messageId: input.messageId, report: input.onSettled, stopped: false };
+    started.push(entry);
+    return () => {
+      entry.stopped = true;
+    };
+  });
+  return { started, watches };
+};
+
+test("stopping a panel's watches ends every ask still running", () => {
+  const { started, watches } = fakeWatches();
+  watches.follow({ conversationId: "c1", messageId: "a1", onSettled: () => {} });
+  watches.follow({ conversationId: "c1", messageId: "a2", onSettled: () => {} });
+  assert.equal(watches.size, 2);
+  watches.stopAll();
+  assert.equal(watches.size, 0);
+  assert.deepEqual(started.map((entry) => entry.stopped), [true, true]);
+  // The set is reusable after a conversation switch.
+  watches.follow({ conversationId: "c2", messageId: "b1", onSettled: () => {} });
+  assert.equal(watches.size, 1);
+});
+
+test("one watch per answer, and a watch that reported leaves the set", () => {
+  const { started, watches } = fakeWatches();
+  const reported: number[] = [];
+  watches.follow({ conversationId: "c1", messageId: "a1", onSettled: (credits) => reported.push(credits) });
+  watches.follow({ conversationId: "c1", messageId: "a1", onSettled: (credits) => reported.push(credits) });
+  assert.equal(started.length, 1, "the second ask for the same answer started nothing");
+  started[0]!.report(3);
+  assert.deepEqual(reported, [3]);
+  assert.equal(watches.size, 0);
+  watches.stopAll();
+  assert.equal(started[0]!.stopped, false, "a finished watch is not stopped again");
+
+  // A watch that reports before it returns is never kept.
+  const eager = createAnswerCreditWatches((input) => {
+    input.onSettled(1);
+    return () => {};
+  });
+  eager.follow({ conversationId: "c1", messageId: "a1", onSettled: () => {} });
+  assert.equal(eager.size, 0);
+});
+
+/* --------------------------------------------- where the panel starts one -- */
+
+const chatApp = readFileSync(new URL("../components/chat/ChatApp.tsx", import.meta.url), "utf8");
+const between = (start: string, end: string) => {
+  const from = chatApp.indexOf(start);
+  assert.ok(from >= 0, `missing ${start}`);
+  const to = chatApp.indexOf(end, from);
+  assert.ok(to > from, `missing ${end} after ${start}`);
+  return chatApp.slice(from, to);
+};
+
+test("an answer recovered by the attempt poll, or already finished on send, asks for its charge", () => {
+  const poll = between("const pollOne = async", "const loop = async");
+  const pollCompleted = poll.slice(poll.indexOf("if (completedMessage) {"));
+  assert.match(pollCompleted, /followAnswerCreditsRef\.current\(key, attempt\.conversationId, assistantMessageId\)/);
+
+  const post = between('if (response.headers.get("X-Chat-Response-Mode") === "durable-attempt")', "if (!response.body)");
+  const postCompleted = post.slice(post.lastIndexOf("if (completedMessage) {"));
+  assert.match(postCompleted, /followAnswerCreditsRef\.current\(runKey, attempt\.conversationId, assistantMessageId\)/);
+});
+
+test("the panel's asks stop when it unmounts or shows another conversation", () => {
+  assert.match(
+    chatApp,
+    /useEffect\(\(\) => \{\s*answerCreditWatchesRef\.current \?\?= createAnswerCreditWatches\(\);\s*const watches = answerCreditWatchesRef\.current;\s*return \(\) => watches\.stopAll\(\);\s*\}, \[initialConversationId\]\);/
+  );
+  // Every start goes through the panel's set; none is left unowned.
+  assert.equal(chatApp.includes("watchAnswerCredits("), false);
+  // And an answer finishing after the panel moved on starts nothing.
+  const follow = between("followAnswerCreditsRef.current = (key, conversationId, answerId) => {", "answerCreditWatchesRef.current.follow(");
+  assert.match(follow, /savedConversationId !== shownConversationIdRef\.current\) return;/);
+});
+
+test("a stopped answer asks only through the saved-conversation check", () => {
+  const follow = between("followAnswerCreditsRef.current = (key, conversationId, answerId) => {", "answerCreditWatchesRef.current.follow(");
+  assert.match(follow, /answerCreditsConversationId\(\{/);
+  assert.match(follow, /if \(!savedConversationId \|\|/);
+  const stop = between('assistantText.trim() ? assistantText : t("chat.responseCancelled")', "isGuestVerificationError(error)");
+  assert.match(stop, /followAnswerCreditsRef\.current\(runKey, targetChatId, assistantMessageId\)/);
 });

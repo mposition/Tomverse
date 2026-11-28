@@ -70,3 +70,70 @@ export function watchAnswerCredits(input: {
     controller.abort();
   };
 }
+
+/**
+ * The conversation whose answer credits a panel may ask after, or null.
+ *
+ * Only a signed-in Chat panel on a saved conversation: those are the only
+ * turns the server links to their answer, so anything else would ask a
+ * question with no possible answer. A conversation without a server id (none
+ * yet, or the guest placeholder) is not saved.
+ */
+export function answerCreditsConversationId(input: {
+  transcriptScope?: "model" | "conversation";
+  currentProduct?: string;
+  isGuestMode: boolean;
+  conversationId: string | null | undefined;
+}): string | null {
+  if (
+    input.transcriptScope !== "conversation" ||
+    input.currentProduct !== "chat" ||
+    input.isGuestMode
+  ) {
+    return null;
+  }
+  const id = input.conversationId?.trim();
+  return id && id !== "guest-chat" ? id : null;
+}
+
+/**
+ * The credit watches one panel has running, so they stop with it.
+ *
+ * One watch per answer: asking again for an answer already being watched
+ * keeps the first. A watch leaves the set once it reports, and `stopAll` ends
+ * every one that has not -- the panel calls it when it unmounts or moves to
+ * another conversation, so no ask outlives the screen it was for.
+ */
+export function createAnswerCreditWatches(
+  watch: typeof watchAnswerCredits = watchAnswerCredits
+) {
+  const running = new Map<string, () => void>();
+  return {
+    follow(input: {
+      conversationId: string;
+      messageId: string;
+      onSettled: (credits: number) => void;
+    }): void {
+      const key = `${input.conversationId}\0${input.messageId}`;
+      if (running.has(key)) return;
+      let reported = false;
+      const stop = watch({
+        conversationId: input.conversationId,
+        messageId: input.messageId,
+        onSettled: (credits) => {
+          reported = true;
+          running.delete(key);
+          input.onSettled(credits);
+        },
+      });
+      if (!reported) running.set(key, stop);
+    },
+    stopAll(): void {
+      for (const stop of running.values()) stop();
+      running.clear();
+    },
+    get size(): number {
+      return running.size;
+    },
+  };
+}

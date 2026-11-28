@@ -9,7 +9,7 @@ import { CONTINUATION_RECEIPT_HEADER, receiptForAttempt, type ContinuationReceip
 import { PASSAGE_HEADER } from "@/lib/continuationPassages";
 import type { ChatPanelLocationIntent, RouterLocationTurn } from "@/lib/chatLocationClient";
 import { selectedMcpConnection } from "@/lib/mcpConnectorSelection";
-import { watchAnswerCredits } from "@/lib/chatAnswerCreditsClient";
+import { answerCreditsConversationId, createAnswerCreditWatches } from "@/lib/chatAnswerCreditsClient";
 
 import { reviewProviderTranscript } from "@/lib/reviewProviderTranscript";
 import { chatLocationSession, readRouterLocationRequest, requireRouterLocationVersion } from "@/lib/chatLocationClient";
@@ -774,6 +774,50 @@ function ChatAppComponent({
     onResponseCompleteRef.current = onResponseComplete;
   });
 
+  /*
+    What a finished answer was charged, asked after once its settlement lands
+    (lib/chatAnswerCreditsClient.ts). Read-only; it never touches the charge.
+
+    Only for the conversation this panel shows: the asks stop when the panel
+    unmounts or moves to another conversation, and an answer that finishes
+    after it has moved on starts none. Through a ref for the same reason as
+    the handlers above -- the send callback and the attempt poll read it
+    without taking it as a dependency.
+  */
+  const shownConversationIdRef = useRef(initialConversationId);
+  const answerCreditWatchesRef = useRef<ReturnType<typeof createAnswerCreditWatches> | null>(null);
+  const followAnswerCreditsRef = useRef<
+    (key: string, conversationId: string | null | undefined, answerId: string) => void
+  >(() => undefined);
+  useLayoutEffect(() => {
+    shownConversationIdRef.current = initialConversationId;
+    followAnswerCreditsRef.current = (key, conversationId, answerId) => {
+      const savedConversationId = answerCreditsConversationId({
+        transcriptScope,
+        currentProduct,
+        isGuestMode,
+        conversationId,
+      });
+      if (!savedConversationId || savedConversationId !== shownConversationIdRef.current) return;
+      answerCreditWatchesRef.current ??= createAnswerCreditWatches();
+      answerCreditWatchesRef.current.follow({
+        conversationId: savedConversationId,
+        messageId: answerId,
+        onSettled: (settledCredits) =>
+          writeChatRuntimeMessages(key, (current) =>
+            current.map((message) =>
+              message.id === answerId ? { ...message, settledCredits } : message
+            )
+          ),
+      });
+    };
+  });
+  useEffect(() => {
+    answerCreditWatchesRef.current ??= createAnswerCreditWatches();
+    const watches = answerCreditWatchesRef.current;
+    return () => watches.stopAll();
+  }, [initialConversationId]);
+
   // `runtime.isLoaded` is already per (identity, conversation, model): the
   // snapshot a panel reads can only describe the key it asked for, so there is
   // no separate "which view is this?" comparison to get wrong.
@@ -1536,6 +1580,9 @@ function ChatAppComponent({
               message.id === assistantMessageId ? completedMessage : message
             );
           });
+          // A reattached or reloaded answer that finished while polled shows
+          // its charge as a streamed one does.
+          if (!controller.signal.aborted) followAnswerCreditsRef.current(key, attempt.conversationId, assistantMessageId);
           if (!controller.signal.aborted) observeJourneyReply({ owner: panelIdentityKey, epoch: pollingJourneyEpoch,
             conversationId: attempt.conversationId, sourceUserMessageId: attempt.sourceUserMessageId,
             status: completedMessage.status === "incomplete" ? "incomplete" : "normal", nonempty: Boolean(completedMessage.content.trim()) });
@@ -1778,22 +1825,6 @@ function ChatAppComponent({
             : {}),
         }
       );
-    };
-    // Once this answer's settlement lands, show what it was charged
-    // (lib/chatAnswerCreditsClient.ts). Chat, signed in: the only turns the
-    // server links to their answer. Read-only; it never touches the charge.
-    const followAnswerCredits = (answerId: string) => {
-      if (transcriptScope !== "conversation" || currentProduct !== "chat" || isGuestMode) return;
-      watchAnswerCredits({
-        conversationId: targetChatId,
-        messageId: answerId,
-        onSettled: (settledCredits) =>
-          writeChatRuntimeMessages(runKey, (current) =>
-            current.map((message) =>
-              message.id === answerId ? { ...message, settledCredits } : message
-            )
-          ),
-      });
     };
     /*
       What this one request searches with. The override wins where it is given
@@ -2791,6 +2822,8 @@ function ChatAppComponent({
           );
         }
         if (completedMessage) {
+          // The attempt had already finished: its answer is saved and settled.
+          followAnswerCreditsRef.current(runKey, attempt.conversationId, assistantMessageId);
           observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch, conversationId: attempt.conversationId,
             sourceUserMessageId: attempt.sourceUserMessageId, status: completedMessage.status === "incomplete" ? "incomplete" : "normal", nonempty: Boolean(completedMessage.content.trim()) });
           onResponseComplete?.(
@@ -3018,7 +3051,8 @@ function ChatAppComponent({
         );
         // Only an answer the server stored replaces the turn before it.
         replacement.complete(completionStatus, { saved: !trailer?.persistence });
-        if (!trailer?.persistence) followAnswerCredits(assistantMessageId);
+        // Only a saved answer is linked to its charge.
+        if (!trailer?.persistence) followAnswerCreditsRef.current(runKey, targetChatId, assistantMessageId);
         if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
           conversationId: targetChatId, sourceUserMessageId, status: completionStatus,
           nonempty: Boolean(assistantText.trim()) || fileOnlyAnswer });
@@ -3119,8 +3153,10 @@ function ChatAppComponent({
             assistantText.trim() ? assistantText : t("chat.responseCancelled"),
             "cancelled"
           );
-          // A stop after some text is charged for what was written.
-          if (assistantText.trim()) followAnswerCredits(assistantMessageId);
+          // A stop after some text is charged for what was written. Only a
+          // turn of a saved conversation has a charge to show; the ref
+          // refuses any other (answerCreditsConversationId).
+          if (assistantText.trim()) followAnswerCreditsRef.current(runKey, targetChatId, assistantMessageId);
         }
       } else if (isGuestVerificationError(error)) {
         // The challenge itself ended without a token (failed / cancelled /
