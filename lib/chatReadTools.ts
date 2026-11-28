@@ -81,7 +81,8 @@ export async function withChatReadTools(context: ChatReadToolContext): Promise<{
     const env = context.env ?? process.env;
     const urlOn = chatUrlReadingEnabled(env);
     const historyOn = chatHistoryReferenceEnabled(env);
-    if ((!urlOn && !historyOn) || !chatReadToolsEligible(context)) return none;
+    // The id checks repeat the gate so TypeScript keeps both narrowed below.
+    if ((!urlOn && !historyOn) || !chatReadToolsEligible(context) || !context.userId || !context.conversationId) return none;
     const parts: ChatReadPart[] = [];
     if (urlOn) {
         // Offered only when the user pasted a link: a turn with no link pays no definition tokens.
