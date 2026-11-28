@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { expect, type ElectronApplication } from "@playwright/test";
-import { FakeGateway, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
+import { DEFAULT_MODELS, FakeGateway, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
 import { openCodeProject } from "./code-project-fixture";
 import { launchNativeFixture } from "./launch-native-fixture";
 import type { Page } from "@playwright/test";
@@ -47,7 +47,12 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
   const codex = join(bin, `codex${exe}`);
   const claude = join(bin, `claude${exe}`);
   // The Tomverse coding API is the tripwire: a provider CLI task must not reach it.
-  const gateway = await new FakeGateway({ script: () => ({ text: "Unexpected Tomverse API execution." }) }).start();
+  // The catalogue names one Anthropic model with its provider id: Claude Code then offers that Tomverse model, and Codex (whose catalogue
+  // model names none) keeps its own default.
+  const opus = { id: "claude-fixture-opus", object: "model", tomverse: { name: "Claude Fixture Opus", provider: "anthropic", reasoning_efforts: [],
+    capabilities: { tools: true, vision: true, reasoning: true }, protocols: ["chat_completions"], context_window_tokens: 200_000, max_output_tokens: 8_000,
+    credits_per_request: 9, provider_model_id: "claude-fixture-opus-upstream" } };
+  const gateway = await new FakeGateway({ models: [...DEFAULT_MODELS, opus], script: () => ({ text: "Unexpected Tomverse API execution." }) }).start();
   let app: ElectronApplication | undefined;
   let closed = false;
   try {
@@ -109,14 +114,14 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
       await page.getByTestId(`permission-item-${mode}`).click();
       await expect(picker).toHaveAttribute("data-mode", mode);
     };
-    const chooseCli = async (name: "Codex" | "Claude Code") => {
+    const chooseCli = async (name: "Codex" | "Claude Fixture Opus") => {
       // A provider CLI runs on the person's own subscription: its row shows no Tomverse credit usage and no estimate.
       await codeModelControl(page).click();
       await expect(codeModelPicker(page).locator('[data-testid="model-option"][data-model-id^="provider-cli:"]').first()).toBeVisible();
       await expect(codeModelPicker(page).getByTestId("model-credit-badge")).toHaveCount(0);
       await expect(codeModelPicker(page).getByTestId("model-selection-summary")).not.toContainText(/estimate/i);
       await page.keyboard.press("Escape");
-      await chooseCodeModel(page, { model: name === "Codex" ? "provider-cli:openai" : "provider-cli:anthropic" });
+      await chooseCodeModel(page, { model: name === "Codex" ? "provider-cli:openai" : "provider-cli:anthropic:claude-fixture-opus" });
       await expect(codeModelControl(page)).toContainText(name);
     };
     const send = async (prompt: string) => {
@@ -166,7 +171,12 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
 
     // Claude Code, Ask: each approval comes to the person's card; a denial reaches the CLI, an approval runs the tool.
     await setPermission("ask");
-    await chooseCli("Claude Code");
+    // Claude Code lists the catalogue's Anthropic model by its Tomverse name, with the CLI that runs it, not the CLI itself.
+    await codeModelControl(page).click();
+    await expect(codeModelPicker(page).locator('[data-model-id="provider-cli:anthropic"]')).toHaveCount(0);
+    await expect(codeModelPicker(page).locator('[data-model-id="provider-cli:anthropic:claude-fixture-opus"]')).toContainText("Claude Code");
+    await page.keyboard.press("Escape");
+    await chooseCli("Claude Fixture Opus");
     const [denyWindow] = await Promise.all([app.waitForEvent("window", { timeout: 30_000 }), send("Run the build")]);
     await expect(denyWindow.getByText("echo hi")).toBeVisible();
     await expect(denyWindow.getByRole("button", { name: "Allow always" })).toHaveCount(0);
@@ -174,6 +184,8 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
     await expect(page.getByText("denied: The person declined this action in Tomverse Desktop.")).toBeVisible({ timeout: 30_000 });
     run = await seen();
     assert.equal(run.response?.response.response.behavior, "deny");
+    // The model runs by its provider's own id, read from the catalogue by the host.
+    assert.equal(run.args[run.args.indexOf("--model") + 1], "claude-fixture-opus-upstream");
     assert.ok(run.args.includes("--restricted") && run.args.includes("--no-session-persistence"));
     assert.equal(run.args[run.args.indexOf("--tools") + 1], "Read,Glob,Edit,Write,Bash,PowerShell".split(",").filter((tool) => tool !== "PowerShell" || process.platform === "win32").join(","));
     assert.ok(!run.args.includes("--allowedTools"));

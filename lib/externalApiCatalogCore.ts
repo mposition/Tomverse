@@ -285,6 +285,8 @@ export const toOpenAiModelEntry = (model: ExternalApiModelCapabilities, advertis
         context_window_tokens: model.contextWindowTokens,
         max_output_tokens: model.maxOutputTokens,
         credits_per_request: model.creditWeight,
+        // The provider's own id: a client that runs the model on its own provider subscription (Desktop Code's provider CLIs) names it so.
+        ...(model.providerModelId ? { provider_model_id: model.providerModelId } : {}),
     },
 });
 

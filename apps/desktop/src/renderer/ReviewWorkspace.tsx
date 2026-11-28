@@ -402,12 +402,34 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
     }}>
       <AttachmentDraftStatus draft={attachments} busy={run.running} />
       <ChatLocationStatus location={location} language={language} />
-      <div className="review-setup">
-        {capability.easy && <div className="review-mode-toggle" role="group" aria-label={copy.mode}>
+      {capability.easy && <div className="review-setup">
+        <div className="review-mode-toggle" role="group" aria-label={copy.mode}>
           {(["easy", "professional"] as const).map((value) => <button type="button" key={value} aria-pressed={mode === value}
             disabled={run.running} onClick={() => setModeChoice(value)}>{welcome[value]}</button>)}
-        </div>}
-        {mode === "easy" ? <div className="review-participants" role="group" aria-label={welcome.providers}>
+        </div>
+      </div>}
+      <textarea id="review-draft-input" aria-label={copy.question} placeholder={copy.ask} value={history.draft}
+        disabled={run.running || attachments.uploading || preparing} onPaste={attachments.onPaste}
+        onChange={(event) => history.setDraft(event.currentTarget.value)} onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
+            event.preventDefault();
+            event.currentTarget.form?.requestSubmit();
+          }
+        }} />
+      <div className="composer-actions">
+        {(attachments.enabled || composerTools || deviceLocation || researchOffer) && <ComposerTools language={language} key={toolsScope}
+          disabled={run.running || attachments.uploading || preparing}
+          onResearch={researchOffer ? () => setResearchSetup(toolsScope) : undefined}
+          researchBlocked={researchRoom ? undefined : copy.researchNeedsRoom}
+          onDrive={online && attachments.googleDrive ? () => void attachments.importDrive() : undefined} driveFull={attachments.driveFull}
+          options={composerTools ? { webSearchMode: shownWebSearchMode(Boolean(id), history.conversation?.webSearchMode, undefined), memoryMode: history.conversation?.memoryMode,
+            assistantProfileId: history.conversation?.assistantProfile?.profileId, ...toolChanges } : undefined}
+          setOptions={(change) => setToolDraft({ scope: toolsScope, changes: { ...toolChanges, ...change } })}>
+          {deviceLocation && <ChatLocationTool location={location} disabled={run.running || attachments.uploading || preparing} />}
+          {attachments.enabled && <AttachmentPicker draft={attachments} busy={run.running} tool />}
+        </ComposerTools>}
+        <span className="spacer"/>
+        {mode === "easy" ? <div className="review-participants review-composer-picks" role="group" aria-label={welcome.providers}>
           <span className="review-participants-label">{welcome.providers} <b>{choices.length} / {limit}</b></span>
           {shownProviders.map((provider) => {
             const on = choices.includes(provider);
@@ -433,30 +455,8 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
           </span>)}
           {!choices.length && <span className="review-chip review-chip--empty">{welcome.choose}</span>}
         </DesktopModelPicker>}
-      </div>
-      <textarea id="review-draft-input" aria-label={copy.question} placeholder={copy.ask} value={history.draft}
-        disabled={run.running || attachments.uploading || preparing} onPaste={attachments.onPaste}
-        onChange={(event) => history.setDraft(event.currentTarget.value)} onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
-            event.preventDefault();
-            event.currentTarget.form?.requestSubmit();
-          }
-        }} />
-      <div className="composer-actions">
-        {(attachments.enabled || composerTools || deviceLocation || researchOffer) && <ComposerTools language={language} key={toolsScope}
-          disabled={run.running || attachments.uploading || preparing}
-          onResearch={researchOffer ? () => setResearchSetup(toolsScope) : undefined}
-          researchBlocked={researchRoom ? undefined : copy.researchNeedsRoom}
-          onDrive={online && attachments.googleDrive ? () => void attachments.importDrive() : undefined} driveFull={attachments.driveFull}
-          options={composerTools ? { webSearchMode: shownWebSearchMode(Boolean(id), history.conversation?.webSearchMode, undefined), memoryMode: history.conversation?.memoryMode,
-            assistantProfileId: history.conversation?.assistantProfile?.profileId, ...toolChanges } : undefined}
-          setOptions={(change) => setToolDraft({ scope: toolsScope, changes: { ...toolChanges, ...change } })}>
-          {deviceLocation && <ChatLocationTool location={location} disabled={run.running || attachments.uploading || preparing} />}
-          {attachments.enabled && <AttachmentPicker draft={attachments} busy={run.running} tool />}
-        </ComposerTools>}
         {dictation && <DraftDictation language={language} scope={"review:" + (history.selected?.id ?? "new")}
           disabled={run.running || attachments.uploading || preparing} draft={history.draft} setDraft={history.setDraft} />}
-        <span className="spacer"/>
         {/* With an empty draft, a spoken instruction takes the Send button's place: it is sent as typed words are, and nothing is read back. */}
         {run.running
           ? <button className="send stop" type="button" aria-label={copy.stop} onClick={() => void window.desktop.stopChat()}><Square size={16} /></button>

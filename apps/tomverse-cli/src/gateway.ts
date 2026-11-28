@@ -25,6 +25,8 @@ export type CatalogModel = {
     contextWindowTokens: number;
     maxOutputTokens: number;
     creditsPerRequest: number;
+    /** The provider's own id of the model, when the server names it. */
+    providerModelId?: string;
 };
 
 type CatalogEntry = {
@@ -38,6 +40,7 @@ type CatalogEntry = {
         context_window_tokens?: unknown;
         max_output_tokens?: unknown;
         credits_per_request?: unknown;
+        provider_model_id?: unknown;
     };
 };
 
@@ -316,6 +319,8 @@ export class Gateway {
             contextWindowTokens: Number(entry.tomverse?.context_window_tokens ?? 0),
             maxOutputTokens: Number(entry.tomverse?.max_output_tokens ?? 0),
             creditsPerRequest: Number(entry.tomverse?.credits_per_request ?? 0),
+            ...(typeof entry.tomverse?.provider_model_id === "string" && entry.tomverse.provider_model_id
+                ? { providerModelId: entry.tomverse.provider_model_id.slice(0, 160) } : {}),
         }));
     }
 

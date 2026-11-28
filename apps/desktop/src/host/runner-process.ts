@@ -616,7 +616,7 @@ async function executeProviderCli(command: Extract<WorkerCommand, { type: "start
     task.status = "running";
     refresh();
     const result = await runProviderCli({
-      provider: command.provider, file: command.file, argsPrefix: command.argsPrefix, cwd: command.project.path, prompt: text, zai: command.zai,
+      provider: command.provider, file: command.file, argsPrefix: command.argsPrefix, model: command.model, cwd: command.project.path, prompt: text, zai: command.zai,
       mode: command.permission, env: process.env, signal: control.abort.signal,
       onEvent: (event) => { transcript.apply(event); refreshSoon(); },
       approve: async (approval, signal) => {
@@ -1889,8 +1889,9 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     codeSessionTokens.set(data.identity, data.token);
   } else if (data.type === "catalog") {
     void gatewayFor(data.connection).models().then((catalog) => {
-      send({ type: "catalog", requestId: data.requestId, models: catalog.filter(supportsCodeApi).map(({ id, name, provider, reasoningEfforts, creditsPerRequest, vision, reasoning, contextWindowTokens }) => ({
+      send({ type: "catalog", requestId: data.requestId, models: catalog.filter(supportsCodeApi).map(({ id, name, provider, reasoningEfforts, creditsPerRequest, vision, reasoning, contextWindowTokens, providerModelId }) => ({
         id, name, provider, efforts: reasoningEfforts ?? [], credits: creditsPerRequest, vision, reasoning, contextWindowTokens,
+        ...(providerModelId ? { providerModelId } : {}),
       })) });
     }).catch((error) => send({ type: "catalog-failed", requestId: data.requestId,
       // The server's own refusal of the account's plan (lib/externalApiAccess.ts): Code is Pro and above, with a key or a session.

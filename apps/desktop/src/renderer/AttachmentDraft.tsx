@@ -206,7 +206,8 @@ export function AttachmentDraftStatus({ draft, busy = false }: { draft: DesktopA
   const { removeReference } = desktopShellCopy[draft.language];
   return <>
     {draft.files.length > 0 && <ul className="attachment-draft" aria-label={copy.filesToAttach}>
-      {draft.files.map((item) => <li key={item.id}><span>{item.name}</span>
+      {draft.files.map((item) => <li key={item.id} className={item.file && previewable(item.mediaType) ? "has-preview" : undefined}>
+        {item.file && previewable(item.mediaType) && <DraftPreview file={item.file} />}<span>{item.name}</span>
         <button className="icon" type="button" disabled={busy || draft.uploading} aria-label={removeReference.replace("{path}", () => item.name)}
           onClick={() => void draft.remove(item)}><X size={14} /></button>
       </li>)}
@@ -218,6 +219,20 @@ export function AttachmentDraftStatus({ draft, busy = false }: { draft: DesktopA
     {draft.notice && <p className="notice" role="status">{draft.notice === "googleDriveError" ?
       <LanguageProvider initialLang={draft.language} forceInitialLang><GoogleDriveError /></LanguageProvider> : copy[draft.notice]}</p>}
   </>;
+}
+
+/** Image types the window can draw itself; other images (HEIC, TIFF) keep the name chip. */
+const previewable = (mediaType: string) => /^image\/(png|jpeg|gif|webp|bmp|avif)$/.test(mediaType);
+
+/** A thumbnail of an image waiting to be sent, read from the local file; nothing is uploaded to show it. */
+function DraftPreview({ file }: { file: File }) {
+  const image = useRef<HTMLImageElement>(null);
+  useEffect(() => {
+    const url = URL.createObjectURL(file);
+    if (image.current) image.current.src = url;
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  return <img ref={image} className="attachment-draft-thumb" alt="" data-testid="attachment-draft-thumb" draggable={false} />;
 }
 
 function GoogleDriveError() {

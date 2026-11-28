@@ -49,6 +49,8 @@ export type WorkerCommand =
    */
   | { type: "start-provider-cli"; runId: string; project: ProjectRoot; provider: LiveCliProvider; file: string; prompt: string;
     permission: PermissionModeId; protectedRoot: string; references?: WorkspaceReference[]; history?: { id: string; directory: string };
+    /** The provider's own id of the Tomverse model the person chose; without it the CLI runs its default model. */
+    model?: string;
     /** A test runs a stand-in script through the Node binary this way; set only where fixtures are allowed. */
     argsPrefix?: string[];
     /** The Z.ai route only: its key and Claude Code settings folder, held in memory for this run. */

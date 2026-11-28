@@ -53,6 +53,7 @@ import { desktopIdentityProvider, desktopLoginEmail, type DesktopEmailResult, ty
 import { link, open, readFile, realpath, unlink } from "node:fs/promises";
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from "node:path";
+import { carryAttachmentCopies, copyOutsideFile, discardAttachmentCopy, savePastedImage } from "./code-attachments";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { z } from "zod";
@@ -60,10 +61,10 @@ import { readOsLocationStatus, WINDOWS_LOCATION_SETTINGS_URI, type OsLocationSta
 import { Journal, deleteSession, listSessions, Workspace, writeFileAtomic } from "../../../tomverse-cli/src/runtime.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
 import { permissionCommand, type PermissionModeId } from "../permission-contract";
-import { liveCliExecution, liveCliFile, liveCliProviderForModel, liveCliProviders, type LiveCliProvider } from "../provider-cli-exec-contract";
+import { cliModelArgumentPattern, liveCliCatalogProvider, liveCliChoiceForModel, liveCliExecution, liveCliFile, liveCliProviderForModel, liveCliProviders, type LiveCliProvider } from "../provider-cli-exec-contract";
 import { subagentStopInput } from "../orchestrate-contract";
 import { DesktopPermissions } from "./permission-host";
-import { codePermissionProfile, codeReferenceKind, codeReferencePath, decisions, MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES,
+import { codePermissionProfile, codePastedImage, codeReferenceKind, codeReferencePath, decisions, MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES,
   MAX_HANDOFF_EXCERPT_CHARACTERS, backgroundInput, codeExtensionsInput, codeMemoryInput, followUpInput, historyTurnInput, queueInput, sessionId, startInput, workspaceHandoffInput,
   type ApprovalRequest, type CodeReference, type CompactHistoryResult, type DeleteHistoryResult,
   type Decision, type ForkTurnResult, type RecoveryResult, type RewindTurnResult, type Snapshot, type Task, type UndoChangeResult, type WorkspaceHandoff, type WorkspaceHandoffInput } from "../contract";
@@ -303,6 +304,10 @@ let projectRoot: ProjectRoot | null = null;
 let codeGitProject: GitProject | "unavailable" | null = null;
 let codeWorktreeDraft: { home: string; id: string } | undefined;
 const codeReferences = new Map<string, CodeReference>();
+/** The references whose file this app copied into the attachment folder (code-attachments.ts): only these are ever deleted. */
+const ownedCopies = new Set<string>();
+/** Counts the drafts the references belong to: a copy that finishes after its draft was cleared joins no other draft. */
+let referenceDraft = 0;
 let historyCursor: string | null = null;
 const historyStorage = new Map<string, string>();
 const historyWorktreePaths = new Map<string, string>();
@@ -1210,8 +1215,14 @@ function startNativeTask(cliFixture: NonNullable<typeof cliRunFixture>, project:
  */
 async function startProviderCliTask(project: ProjectRoot, draft: Pick<z.infer<typeof startInput>, "prompt" | "model" | "mode" | "saveHistory">,
     executionMode: CodeExecutionMode | undefined, references: Task["references"]) {
-  const provider = liveCliProviderForModel(draft.model);
+  const choice = liveCliChoiceForModel(draft.model);
+  const provider = choice?.provider;
   const file = provider ? liveCliFile[provider] : undefined;
+  // A Tomverse model the person chose runs by its provider's own id, read from the catalogue this window was given; the window never names that id.
+  const chosen = choice?.catalogueModelId ? state.models.find(({ id, provider: owner }) => id === choice.catalogueModelId && owner === liveCliCatalogProvider[choice.provider]) : undefined;
+  if (choice?.catalogueModelId && !(chosen?.providerModelId && cliModelArgumentPattern.test(chosen.providerModelId))) {
+    throw new Error("The selected model is unavailable on this CLI.");
+  }
   const saved = file ? state.cliPaths[file] : undefined;
   const zai = provider === "zai" && zaiKey ? { key: zaiKey, configDir: zaiClaudeConfigDir() } : undefined;
   if (!provider || !saved || executionMode !== "provider_cli" || !state.capabilities?.providerCliExec || !worker ||
@@ -1249,8 +1260,11 @@ async function startProviderCliTask(project: ProjectRoot, draft: Pick<z.infer<ty
   runId = randomUUID();
   state.busy = true;
   codeReferences.clear();
+  ownedCopies.clear();
+  referenceDraft++;
   try {
     send({ type: "start-provider-cli", runId, project, provider, file: resolved.file, prompt: draft.prompt, permission,
+      ...(chosen?.providerModelId ? { model: chosen.providerModelId } : {}),
       protectedRoot: app.getPath("userData"), references, ...(home && id ? { history: { id, directory: nativeSessionDirectory(home, id) } } : {}),
       ...(providerCliExecFixture ? { argsPrefix: providerCliExecFixture.argsPrefix } : {}), ...(zai ? { zai } : {}) });
   } catch {
@@ -1270,6 +1284,8 @@ function startCliFixtureTask(task: Task, command: Extract<WorkerCommand, { type:
   runId = command.runId;
   state.busy = true;
   codeReferences.clear();
+  ownedCopies.clear();
+  referenceDraft++;
   try {
     send(command);
   } catch {
@@ -1617,6 +1633,8 @@ async function chooseRemote(project: ProjectRoot) {
     assertProjectRoot(project);
     if (state.root !== project.path || projectRoot?.identity !== project.identity) {
       codeReferences.clear();
+      ownedCopies.clear();
+      referenceDraft++;
       workspaceHandoff = null;
       // Allow all never follows the person to another project, a remote one included.
       if (permissionHost.current === "allow_all" && permissionHost.run({ action: "set-mode", mode: "ask" }).ok) {
@@ -1769,6 +1787,8 @@ function adoptCodeSession(owner: StoredDesktopSession) {
   linkAttempt = null;
   pendingInspection?.settle(null);
   codeReferences.clear();
+  ownedCopies.clear();
+  referenceDraft++;
   workspaceHandoff = null;
   const linked = { accountId: owner.accountId, connection: codeSessionConnection(owner.accountId, accountOrigin ?? DESKTOP_LIVE_ORIGIN) };
   linkedCode = linked;
@@ -1793,6 +1813,8 @@ function dropCodeSession() {
   if (!linkedCode?.connection.session || state.busy || pendingMutation || parallel.lanes.busy()) return;
   pendingInspection?.settle(null);
   codeReferences.clear();
+  ownedCopies.clear();
+  referenceDraft++;
   workspaceHandoff = null;
   linkedCode = null;
   codeToken = null;
@@ -1927,6 +1949,8 @@ async function chooseRoot(target: string) {
     const projectChanged = state.root !== root || projectRoot?.identity !== project.identity;
     if (projectChanged) {
       codeReferences.clear();
+      ownedCopies.clear();
+      referenceDraft++;
       workspaceHandoff = null;
     }
     projectRoot = project;
@@ -1942,6 +1966,43 @@ async function chooseRoot(target: string) {
   } finally {
     choosing = false;
   }
+}
+
+/** An image pasted into the Code composer: saved in the project's attachment folder and attached like a chosen file. */
+async function pasteCodeImage(input: z.infer<typeof codePastedImage>) {
+  const root = state.root;
+  const project = projectRoot;
+  const connection = codeConnection();
+  const namespace = workspaceNamespace();
+  const session = chatSession.signal;
+  if (!root || !project || project.remote || !namespace || state.busy || signingOut || closing) {
+    throw new Error("Open a Code project of this computer to attach an image.");
+  }
+  if (codeReferences.size >= MAX_CODE_REFERENCES) return { references: [...codeReferences.values()], rejected: 1 };
+  assertProjectRoot(project);
+  // The draft this image was pasted into: a sign-out, another account, project or task meanwhile gets nothing of it.
+  // A task started meanwhile cleared the draft (a new generation) or is running: either way the image is dropped.
+  const draft = referenceDraft;
+  const stillDraft = () => projectRoot === project && state.root === root && workspaceNamespace() === namespace && codeConnection() === connection &&
+    referenceDraft === draft && !state.busy && !session.aborted && !signingOut && !closing;
+  const workspace = new Workspace(root, [app.getPath("userData")]);
+  let saved: string | undefined;
+  let rejected = 0;
+  try {
+    saved = relative(root, await savePastedImage(root, input)).split(sep).join("/");
+    const reference = workspace.reference(saved);
+    if (!stillDraft()) throw new Error("The Code project changed.");
+    // The name is the app's own (date and a sanitized stem); with a Code key it is also kept free of that key.
+    if (connection && cleanText(reference.path, connection.key) !== reference.path) throw new Error("The image cannot be attached.");
+    const id = randomUUID();
+    codeReferences.set(id, { id, ...reference });
+    ownedCopies.add(id);
+  } catch (error) {
+    if (saved) await discardAttachmentCopy(workspace, saved).catch(() => {});
+    if (!stillDraft()) throw error;
+    rejected++;
+  }
+  return { references: [...codeReferences.values()], rejected };
 }
 
 async function chooseCodeReferences(kind: CodeReference["kind"]) {
@@ -1968,6 +2029,7 @@ async function chooseCodeReferences(kind: CodeReference["kind"]) {
       throw new Error("The Code project changed.");
     }
     let rejected = 0;
+    const draft = referenceDraft;
     if (!canceled) {
       assertProjectRoot(project);
       const workspace = new Workspace(root, [app.getPath("userData")]);
@@ -1977,15 +2039,37 @@ async function chooseCodeReferences(kind: CodeReference["kind"]) {
           continue;
         }
         try {
-          const reference = workspace.reference(path);
+          // A file from outside the project is copied into the project's attachment folder (code-attachments.ts) and attached there.
+          const outside = relative(root, path);
+          // Outside means a parent step or another drive; a project file named "..notes.txt" is inside.
+          const copied = kind === "file" && (/^\.\.(?:[\\/]|$)/.test(outside) || isAbsolute(outside)) ? await copyOutsideFile(root, path) : undefined;
+          const copiedPath = copied ? relative(root, copied).split(sep).join("/") : undefined;
+          // The copy took a while: a sign-out, another account, project or draft meanwhile gets nothing of it.
+          if (copiedPath && (window !== mainWindow || session.aborted || connection !== codeConnection() || namespace !== workspaceNamespace() ||
+              projectRoot !== project || referenceDraft !== draft || signingOut || closing)) {
+            await discardAttachmentCopy(workspace, copiedPath).catch(() => {});
+            throw new Error("The Code project changed.");
+          }
+          let reference: ReturnType<Workspace["reference"]>;
+          try { reference = workspace.reference(copied ?? path); }
+          catch (error) {
+            if (copiedPath) await discardAttachmentCopy(workspace, copiedPath).catch(() => {});
+            throw error;
+          }
           if (reference.kind !== kind || !codeReferencePath.safeParse(reference.path).success ||
               cleanText(reference.path, connection.key) !== reference.path) {
+            // A copy that cannot be attached is not left behind.
+            if (copiedPath) await discardAttachmentCopy(workspace, copiedPath).catch(() => {});
             rejected++;
             continue;
           }
-          if ([...codeReferences.values()].some((item) => item.path === reference.path)) continue;
+          if ([...codeReferences.values()].some((item) => item.path === reference.path)) {
+            if (copiedPath) await discardAttachmentCopy(workspace, copiedPath).catch(() => {});
+            continue;
+          }
           const id = randomUUID();
           codeReferences.set(id, { id, ...reference });
+          if (copied) ownedCopies.add(id);
         } catch {
           rejected++;
         }
@@ -2721,6 +2805,8 @@ function clearAccountWorkspace() {
   attachmentTransfer?.controller.abort();
   attachmentReceipts.clear();
   codeReferences.clear();
+  ownedCopies.clear();
+  referenceDraft++;
   void voice.end();
   chatSession.abort();
   workspaceHandoff = null;
@@ -2783,6 +2869,8 @@ async function linkCodeKey(key: string, owner: StoredDesktopSession, persist: bo
     pendingInspection?.settle(null);
     if (codeConnection()?.key !== key) {
       codeReferences.clear();
+      ownedCopies.clear();
+      referenceDraft++;
       workspaceHandoff = null;
     }
     linkedCode = { accountId: owner.accountId, connection: { key,
@@ -4481,7 +4569,15 @@ function registerIpc() {
   main("desktop:confirm-handoff", (value) => confirmWorkspaceHandoff(workspaceHandoffInput.parse(value)));
   main("desktop:remove-handoff", (value) => removeWorkspaceHandoff(z.uuid().parse(value)));
   main("desktop:choose-code-references", (value) => chooseCodeReferences(codeReferenceKind.parse(value)));
-  main("desktop:remove-code-reference", (value) => { codeReferences.delete(z.uuid().parse(value)); });
+  main("desktop:remove-code-reference", async (value) => {
+    const id = z.uuid().parse(value);
+    const reference = codeReferences.get(id);
+    codeReferences.delete(id);
+    // A copy this app made for the draft goes with it; any other file, the attachment folder's included, is never touched.
+    const owned = ownedCopies.delete(id);
+    if (owned && reference && state.root) await discardAttachmentCopy(new Workspace(state.root, [app.getPath("userData")]), reference.path).catch(() => {});
+  });
+  main("desktop:paste-code-image", (value) => pasteCodeImage(codePastedImage.parse(value)));
   main("desktop:new-task", async () => {
     if (state.busy || pendingMutation || choosing) return;
     discardTransientTask(state.task);
@@ -4518,6 +4614,9 @@ function registerIpc() {
       if (!reference) throw new Error("Select the project references again.");
       return { path: reference.path, kind: reference.kind };
     });
+    // The copies this app made sit in a folder Git ignores, so a worktree gets them after it is made rather than from the commit.
+    const copiedPaths = new Set((draft.referenceIds ?? []).flatMap((referenceId) => ownedCopies.has(referenceId) ? [codeReferences.get(referenceId)!.path] : []));
+    const committed = references.filter(({ path }) => !copiedPaths.has(path));
     if (draft.permissionProfile === "accept_edits" && (readProjectPermissionProfile() !== "accept_edits" || draft.mode !== "agent" || preference !== "tomverse_api")) {
       throw new Error("Accept Edits is unavailable for this execution route.");
     }
@@ -4577,17 +4676,27 @@ function registerIpc() {
       choosing = true;
       try {
         worktree = await createManagedWorktree(sourceProject, git, reservation.home, reservation.id, workspace?.base ?? git.bases[0]!, {
-          references,
+          references: committed,
           checkReady(project) {
             if (projectRoot !== sourceProject || codeConnection() !== connection || !worker || session.aborted || signingOut ||
                 suspended || closing || installingUpdate() || state.codeExecutionPreference !== preference) {
               throw new Error("The Code connection changed.");
             }
             const checkout = new Workspace(project.path, [app.getPath("userData"), codeProjectLocks()]);
-            for (const reference of references) {
+            for (const reference of committed) {
               if (checkout.reference(reference.path).kind !== reference.kind) throw new Error("A selected reference is unavailable in this branch.");
             }
           },
+          // The copies come from the project before the worktree is recorded; a failed copy takes out only what it put in,
+          // so the unchanged checkout is discarded. The copy takes a while, so the connection is checked again after it.
+          ...(copiedPaths.size ? {
+            prepare: (project: ProjectRoot) => carryAttachmentCopies(new Workspace(sourceProject.path, [app.getPath("userData")]), project.path, [...copiedPaths], () => {
+              if (projectRoot !== sourceProject || codeConnection() !== connection || !worker || session.aborted || signingOut ||
+                  suspended || closing || installingUpdate() || state.codeExecutionPreference !== preference) {
+                throw new Error("The Code connection changed.");
+              }
+            }),
+          } : {}),
         });
       } catch {
         codeWorktreeDraft = undefined;
@@ -4606,6 +4715,8 @@ function registerIpc() {
         start: { type: "start", runId: id, project, scope: taskScope, protectedRoot: app.getPath("userData"), connection, input, references, preference, ...picturesOf(input.prompt) } });
       if (handoffId) removeWorkspaceHandoff(handoffId);
       codeReferences.clear();
+      ownedCopies.clear();
+      referenceDraft++;
       codeWorktreeDraft = undefined;
       broadcast();
       return;
@@ -4631,6 +4742,8 @@ function registerIpc() {
       ...picturesOf(input.prompt), ...codeRunTools() });
     if (handoffId) removeWorkspaceHandoff(handoffId);
     codeReferences.clear();
+    ownedCopies.clear();
+    referenceDraft++;
     codeWorktreeDraft = undefined;
     broadcast();
   };

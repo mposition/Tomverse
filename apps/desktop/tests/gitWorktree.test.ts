@@ -58,6 +58,20 @@ test("managed Agent worktrees use the selected commit and validate the original 
   assert.equal(existsSync(join(home, cancelledId)), false);
   assert.equal(git(root, "branch", "--list", worktreeBranch(cancelledId)), "");
 
+  // What Git does not carry (the composer's attachment copies) is put in before the worktree is recorded; a failed copy
+  // is taken out again, so the unchanged checkout and its branch are discarded.
+  const carriedId = randomUUID();
+  await assert.rejects(createManagedWorktree(source, repo, home, carriedId, base, {
+    prepare: async (project) => {
+      mkdirSync(join(project.path, ".tomverse-attachments"));
+      writeFileSync(join(project.path, ".tomverse-attachments", "half-copied.png"), "partial");
+      throw new Error("copy failed");
+    },
+    unprepare: async (project) => rmSync(join(project.path, ".tomverse-attachments"), { recursive: true, force: true }),
+  }), /copy failed/);
+  assert.equal(existsSync(join(home, carriedId)), false);
+  assert.equal(git(root, "branch", "--list", worktreeBranch(carriedId)), "");
+
   const changedId = randomUUID();
   await assert.rejects(createManagedWorktree(source, repo, home, changedId, base, {
     checkReady(project) {

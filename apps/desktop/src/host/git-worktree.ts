@@ -136,7 +136,9 @@ async function discardUnstartedCheckout(repo: GitProject, slot: string, branch: 
 }
 
 export async function createManagedWorktree(source: ProjectRoot, repo: GitProject, home: string, id: string, base: CodeWorktreeBase,
-  { references = [], checkReady }: { references?: readonly WorkspaceReference[]; checkReady?: (project: ProjectRoot) => void } = {}): Promise<ManagedWorktree> {
+  { references = [], checkReady, prepare, unprepare }: { references?: readonly WorkspaceReference[]; checkReady?: (project: ProjectRoot) => void;
+    /** Puts what Git does not carry into the new checkout; `unprepare` takes it out again if the worktree does not start. */
+    prepare?: (project: ProjectRoot) => Promise<void>; unprepare?: (project: ProjectRoot) => Promise<void> } = {}): Promise<ManagedWorktree> {
   assertProjectRoot(source);
   if (!repo.bases.some(choice => choice.ref === base.ref && choice.commit === base.commit)) throw new Error("Choose a current starting branch.");
   const [commit, commonDirectory] = await Promise.all([
@@ -161,6 +163,10 @@ export async function createManagedWorktree(source: ProjectRoot, repo: GitProjec
     const managed = { ...project, worktree: { checkout, gitDirectory, branch } };
     assertProjectRoot(managed);
     checkReady?.(managed);
+    if (prepare) {
+      try { await prepare(managed); }
+      catch (error) { await unprepare?.(managed).catch(() => {}); throw error; }
+    }
     writeFileSync(join(slot, "worktree.json"), JSON.stringify({ identity: project.identity, gitDirectory, base }), { flag: "wx", mode: 0o600 });
     return { project: managed, info: { path: project.path, branch, base } };
   } catch (error) {

@@ -20,10 +20,30 @@ export const liveCliExecution = (provider: LiveCliProvider) =>
 /** Z.ai's Anthropic-compatible endpoint for the Coding Plan (docs.z.ai, Claude Code). */
 export const ZAI_ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic";
 
-/** The composer's model id for a provider CLI that runs with its own default model. */
-export const liveCliModelId = (provider: LiveCliProvider) => `provider-cli:${provider}` as const;
+/** The Tomverse catalogue provider whose models each CLI runs on the person's own subscription. */
+export const liveCliCatalogProvider = { openai: "openai", anthropic: "anthropic", zai: "zhipu" } as const satisfies Record<LiveCliProvider, string>;
+
+/**
+ * The composer's model id for a provider CLI: with a Tomverse catalogue model id the CLI runs that model (its provider's own
+ * model id, which the host looks up in the catalogue), without one the CLI runs with its own default model.
+ */
+export const liveCliModelId = (provider: LiveCliProvider, catalogueModelId?: string) =>
+  catalogueModelId ? `provider-cli:${provider}:${catalogueModelId}` : `provider-cli:${provider}`;
+/** A catalogue model id the composer may name: the coding catalogue's own id shape. */
+const catalogueModelIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/;
+/** A provider model id the host may pass to a CLI as `--model`: never an option, a path or more than one argument. */
+export const cliModelArgumentPattern = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,159}$/;
+export function liveCliChoiceForModel(id: string): { provider: LiveCliProvider; catalogueModelId?: string } | null {
+  for (const provider of liveCliProviders) {
+    const base = liveCliModelId(provider);
+    if (id === base) return { provider };
+    const rest = id.startsWith(base + ":") ? id.slice(base.length + 1) : "";
+    if (catalogueModelIdPattern.test(rest)) return { provider, catalogueModelId: rest };
+  }
+  return null;
+}
 export function liveCliProviderForModel(id: string): LiveCliProvider | null {
-  return liveCliProviders.find((provider) => liveCliModelId(provider) === id) ?? null;
+  return liveCliChoiceForModel(id)?.provider ?? null;
 }
 
 /** How much each permission mode lets a task do, lowest first. The CLI is never started above the mode the person chose. */

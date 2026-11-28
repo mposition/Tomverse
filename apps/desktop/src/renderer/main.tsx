@@ -31,7 +31,7 @@ import { reviewHandoffCopy } from "../../../../locales/reviewHandoff";
 import type { AccountPreferences, AccountTheme } from "../account-settings-contract";
 import { MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES, MAX_HANDOFF_EXCERPT_CHARACTERS, type ApprovalRequest, type CodeReference, type DesktopApi, type Snapshot,
   type CodeWorktreeChoice, type Model, type StartInput, type Task } from "../contract";
-import { liveCliFile, liveCliModelId, liveCliNames } from "../provider-cli-exec-contract";
+import { liveCliCatalogProvider, liveCliFile, liveCliModelId, liveCliNames } from "../provider-cli-exec-contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, cliProviders, codeRouteFor, kimiFixtureExecution, providerClis, qwenFixtureExecution, vibeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, type CliProvider } from "../code-execution";
 import { DraftDictation, useSpokenCommand } from "./DraftDictation";
 import { ChatDraftPlace } from "./ChatDraftLocation";
@@ -504,9 +504,16 @@ function Desktop() {
     snapshot?.claudeFixtureModel ? claudeFixtureExecution : codexFixtureExecution;
   const cliFixtureModel = snapshot?.codeExecutionPreference === "provider_cli"
     ? snapshot.antigravityFixtureModel ?? snapshot.grokFixtureModel ?? snapshot.miniMaxFixtureModel ?? snapshot.vibeFixtureModel ?? snapshot.kimiFixtureModel ?? snapshot.qwenFixtureModel ?? snapshot.claudeFixtureModel ?? snapshot.codexFixtureModel : undefined;
-  // The person's own Codex or Claude Code (the server's route is on, and the file is saved and trusted): each runs with its own default model.
+  // The person's own Codex or Claude Code (the server's route is on, and the file is saved and trusted). The composer lists the Tomverse
+  // models each CLI can run, by their catalogue names; a CLI the catalogue names no model for runs with its own default model.
   const liveCliModels: Model[] = !cliFixtureModel && snapshot?.codeExecutionPreference === "provider_cli"
-    ? (snapshot.providerCliExec ?? []).map((provider) => ({ id: liveCliModelId(provider), name: cliName(liveCliNames[provider], language), provider: liveCliFile[provider], efforts: [] })) : [];
+    ? (snapshot.providerCliExec ?? []).flatMap((provider): Model[] => {
+      const offered = (snapshot.models ?? []).filter((model) => model.provider === liveCliCatalogProvider[provider] && model.providerModelId);
+      return offered.length
+        ? offered.map((model) => ({ id: liveCliModelId(provider, model.id), name: model.name, provider: model.provider, efforts: [],
+          vision: model.vision, reasoning: model.reasoning, contextWindowTokens: model.contextWindowTokens, via: cliName(liveCliNames[provider], language) }))
+        : [{ id: liveCliModelId(provider), name: cliName(liveCliNames[provider], language), provider: liveCliFile[provider], efforts: [] }];
+    }) : [];
   const liveCli = liveCliModels.length > 0;
   const cliRoute = Boolean(cliFixtureModel) || liveCli;
   // The route is on but no Codex or Claude Code file is saved and trusted yet: the API models cannot run here, and the status says what to do.
@@ -779,6 +786,27 @@ function Desktop() {
     });
     setRequesting(false);
     menu?.querySelector("summary")?.focus();
+  }
+
+  /** Images pasted into the composer are saved in the project's attachment folder and attached as project files. */
+  async function attachPastedImages(images: readonly File[]) {
+    const namespace = previousNamespace.current;
+    setRequesting(true);
+    await act(async () => {
+      let rejected = 0;
+      for (const image of images) {
+        // What view_image reads at most (code-attachments.ts); a larger image is refused before it is read.
+        if (image.size > 3 * 1024 * 1024) { rejected++; continue; }
+        const result = await window.desktop.pasteCodeImage({ name: image.name, mediaType: image.type as "image/png", bytes: new Uint8Array(await image.arrayBuffer()) })
+          .catch(() => ({ references: undefined, rejected: 1 }));
+        if (previousNamespace.current !== namespace) return;
+        if (result.references) setCodeReferences(result.references);
+        rejected += result.rejected;
+      }
+      if (rejected) setNotice("rejectedReferences");
+    });
+    setRequesting(false);
+    composer.current?.focus();
   }
 
   async function queueDraft() {
@@ -1122,6 +1150,14 @@ ${text}` : text;
               <textarea ref={composer} aria-label={copy.codeRequest} aria-describedby={online ? "code-readiness" : "desktop-offline"}
                 placeholder={task ? copy.followUp : copy.firstRequest} value={prompt}
                 onChange={(event) => changeDraft(event.currentTarget.value)} maxLength={MAX_CODE_PROMPT_CHARACTERS}
+                onPaste={(event) => {
+                  const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
+                  // An attachment always starts a new task (canFollowUp is off while references wait), so none is dropped by a follow-up.
+                  if (!images.length || !snapshot?.draftNamespace || !snapshot.root || snapshot.remote) return;
+                  // Copied text still pastes as text; only an image-only paste is taken over.
+                  if (!event.clipboardData.getData("text/plain")) event.preventDefault();
+                  void attachPastedImages(images);
+                }}
                 onKeyDown={(event) => {
                   if (slashMenu.onKeyDown(event)) return;
                   if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
@@ -1141,14 +1177,6 @@ ${text}` : text;
               <PromptAttachmentChips scope={attachmentScope} language={language} disabled={Boolean(busy)} />
             </div>
             <div className="composer-actions">
-              <CodeProjectPicker language={language} view={snapshot?.codeProjects} label={projectLabel} disabled={Boolean(busy || pausedForInput)}
-                hasTask={Boolean(task)} cloudOffered={snapshot?.capabilities?.cloudExecution === true} remoteOpen={Boolean(snapshot?.remote)}
-                openIsGit={snapshot?.remote || !snapshot?.root ? null : snapshot.codeGitWorkspace ? snapshot.codeGitWorkspace.kind === "git" : null}
-                remoteEnabled={snapshot?.remoteEnabled === true} onOpened={codeProjectOpened} onOpenCloud={() => openSettings("execution")} />
-              {snapshot?.root && !snapshot.remote && <WorktreeToggle language={language} git={snapshot.codeGitWorkspace} choice={workspaceChoice}
-                disabled={Boolean(busy || pausedForInput)} reason={codeMode !== "agent" ? "readOnly" : codeRoute.executionMode !== "tomverse_api" ? "apiOnly" : null}
-                select={(choice) => setWorkspaceSelection({ key: workspaceKey, choice })}
-                onRemember={(on) => { const id = snapshot.codeProjects?.selectedId; if (id) void window.desktop.codeProjects({ action: "set-worktree", id, worktree: on }); }} />}
               {snapshot?.draftNamespace && !snapshot.remote && <details className="model-menu code-attach-menu">
                 <summary className="icon" aria-label={copy.attachReferences}><Plus size={18} /></summary>
                 <div className="model-popover">
@@ -1158,6 +1186,14 @@ ${text}` : text;
                     onClick={(event) => void attachCodeReferences("folder", event.currentTarget)}><Folder size={15} /> {copy.attachFolders}</button>
                 </div>
               </details>}
+              <CodeProjectPicker language={language} view={snapshot?.codeProjects} label={projectLabel} disabled={Boolean(busy || pausedForInput)}
+                hasTask={Boolean(task)} cloudOffered={snapshot?.capabilities?.cloudExecution === true} remoteOpen={Boolean(snapshot?.remote)}
+                openIsGit={snapshot?.remote || !snapshot?.root ? null : snapshot.codeGitWorkspace ? snapshot.codeGitWorkspace.kind === "git" : null}
+                remoteEnabled={snapshot?.remoteEnabled === true} onOpened={codeProjectOpened} onOpenCloud={() => openSettings("execution")} />
+              {snapshot?.root && !snapshot.remote && <WorktreeToggle language={language} git={snapshot.codeGitWorkspace} choice={workspaceChoice}
+                disabled={Boolean(busy || pausedForInput)} reason={codeMode !== "agent" ? "readOnly" : codeRoute.executionMode !== "tomverse_api" ? "apiOnly" : null}
+                select={(choice) => setWorkspaceSelection({ key: workspaceKey, choice })}
+                onRemember={(on) => { const id = snapshot.codeProjects?.selectedId; if (id) void window.desktop.codeProjects({ action: "set-worktree", id, worktree: on }); }} />}
               {snapshot?.projectPermissionProfile && codeMode === "agent" && codeRoute.executionMode === "tomverse_api" &&
                 <PermissionProfileSelect profile={snapshot.projectPermissionProfile} language={language} disabled={busy || pausedForInput} act={act} />}
               <ComposerPermission view={snapshot?.permissions} language={language} apiRoute={codeRoute.executionMode === "tomverse_api" || liveCli} cliRoute={liveCli}

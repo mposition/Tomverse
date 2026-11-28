@@ -54,6 +54,12 @@ export const MAX_CODE_PROMPT_CHARACTERS = 24_000;
 export const MAX_HANDOFF_EXCERPT_CHARACTERS = 2_400;
 export const codeReferenceKind = z.enum(["file", "folder"]);
 export const codeReferencePath = z.string().min(1).max(2048);
+/** A clipboard image for Code: the types the agents' image tools read, at most 3 MB, what view_image reads (code-attachments.ts). */
+export const codePastedImage = z.object({
+  name: z.string().max(200),
+  mediaType: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
+  bytes: z.instanceof(Uint8Array).refine((bytes) => bytes.byteLength > 0 && bytes.byteLength <= 3 * 1024 * 1024),
+}).strict();
 export const codePermissionProfile = z.enum(["manual", "accept_edits"]);
 export type CodePermissionProfile = z.infer<typeof codePermissionProfile>;
 export const codeWorktreeCommit = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
@@ -168,7 +174,11 @@ export type WorkspaceHandoff = { id: string; target: WorkspaceHandoffInput["targ
 export type Decision = z.infer<typeof decisions>;
 /** One entry of the coding catalogue. The optional facts are what the model picker shows beside the name. */
 export type Model = { id: string; name: string; provider: string; efforts: string[];
-  credits?: number; vision?: boolean; reasoning?: boolean; contextWindowTokens?: number };
+  credits?: number; vision?: boolean; reasoning?: boolean; contextWindowTokens?: number;
+  /** The provider's own model id: what a provider CLI is told to run when the person picks this model there. */
+  providerModelId?: string;
+  /** The provider CLI that runs this composer entry, named under it in the picker. */
+  via?: string };
 export type RunStatus = "starting" | "running" | "approval" | "stopping" | "completed" | "clarification" | "blocked" | "stopped" | "unknown" | "failed";
 export type CodeEventEntry = { role: "event"; text: string; notice?: DesktopDetail };
 /** turn: the position of a user message among the turns of a saved task, for rewinding and forking there. */
@@ -551,6 +561,8 @@ export type DesktopApi = {
   retryCodeCatalog(): Promise<void>;
   chooseCodeReferences(kind: WorkspaceReference["kind"]): Promise<{ references: CodeReference[]; rejected: number }>;
   removeCodeReference(id: string): Promise<void>;
+  /** An image pasted into the Code composer, saved in the project's attachment folder and attached as a project file. */
+  pasteCodeImage(input: z.input<typeof codePastedImage>): Promise<{ references: CodeReference[]; rejected: number }>;
   newTask(): Promise<void>;
   confirmHandoff(input: WorkspaceHandoffInput): Promise<WorkspaceHandoff | null>;
   removeHandoff(id: string): Promise<void>;

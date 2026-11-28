@@ -35,7 +35,8 @@ export type ColumnsState = {
 };
 
 /** A saved Review with one question and three answers behind a faked server; nothing leaves this computer. */
-export async function launchReviewColumns(options: { width?: number; height?: number; research?: boolean } = {}) {
+/** `capabilities` adds what the fixture server names beyond its own (attachments, plugins). */
+export async function launchReviewColumns(options: { width?: number; height?: number; research?: boolean; capabilities?: Record<string, unknown> } = {}) {
   if (!columnsOrigin) throw new Error("DESKTOP_E2E_AUTH_ORIGIN is not set.");
   const profile = await mkdtemp(join(tmpdir(), "tomverse-review-columns-"));
   await writeFile(join(profile, "language.txt"), "en");
@@ -89,7 +90,7 @@ export async function launchReviewColumns(options: { width?: number; height?: nu
         if (url.pathname === "/api/products/chat/capabilities") {
           return Response.json({ autoSelection: { offered: false }, desktopReview: { easy: true, modelLimit: 3, plan: "Max" }, desktopReviewAnalysis: true, desktopComposerTools: true,
             desktopTurnLocation: true, desktopReviewContext: true, desktopReviewTools: true, desktopVoiceInput: true,
-            ...(fixture.research ? { desktopReviewDeepResearch: true } : {}) });
+            ...(fixture.research ? { desktopReviewDeepResearch: true } : {}), ...fixture.capabilities });
         }
         if (url.pathname === "/api/models/catalog") {
           const researchModel = { id: "perplexity/sonar-deep-research", name: "Perplexity Sonar Deep Research", provider: "perplexity", usageClass: "deep-research" };
@@ -163,7 +164,7 @@ export async function launchReviewColumns(options: { width?: number; height?: nu
         }
         return new Response(null, { status: 404 });
       };
-    }, { origin: columnsOrigin, review: columnsReview, models: columnModels, question: columnsQuestion, research: options.research === true });
+    }, { origin: columnsOrigin, review: columnsReview, models: columnModels, question: columnsQuestion, research: options.research === true, capabilities: options.capabilities ?? {} });
     if (options.width) {
       await app.evaluate(({ BrowserWindow }, size) => { BrowserWindow.getAllWindows()[0]?.setSize(size.width, size.height); },
         { width: options.width, height: options.height ?? 1000 });

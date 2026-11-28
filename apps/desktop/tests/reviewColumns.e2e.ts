@@ -83,9 +83,9 @@ test("Desktop Review shows one column per model, as the web does", { timeout: 12
       await expect(chip).toBeFocused();
       await expect(desktop.getByRole("status").filter({ hasText: "moved to position 2 of 3" })).toHaveText(`${gpt!.name} moved to position 2 of 3.`);
       // Easy lists the providers; Professional lists the models.
-      await expect(desktop.locator(".review-setup .review-chip")).toHaveText(["Google", "OpenAI", "xAI"]);
+      await expect(desktop.locator(".review-composer-slot .composer-actions .review-chip")).toHaveText(["Google", "OpenAI", "xAI"]);
       await desktop.getByRole("button", { name: "Professional", exact: true }).click();
-      await expect(desktop.locator(".review-setup .review-chip")).toHaveText([gemini!.name, gpt!.name, grok!.name]);
+      await expect(desktop.locator(".review-composer-slot .composer-actions .review-chip")).toHaveText([gemini!.name, gpt!.name, grok!.name]);
       await chip.focus();
       await desktop.keyboard.press("Alt+ArrowLeft");
       await desktop.keyboard.press("Alt+ArrowLeft");
@@ -95,7 +95,7 @@ test("Desktop Review shows one column per model, as the web does", { timeout: 12
     await t.test("dragging a header onto another column reorders the columns", async () => {
       await column(grok!).locator(".review-column-head").dragTo(column(gpt!));
       assert.deepEqual(await columnOrder(desktop), [grok!.id, gpt!.id, gemini!.id]);
-      await expect(desktop.locator(".review-setup .review-chip")).toHaveText([grok!.name, gpt!.name, gemini!.name]);
+      await expect(desktop.locator(".review-composer-slot .composer-actions .review-chip")).toHaveText([grok!.name, gpt!.name, gemini!.name]);
     });
 
     await t.test("one model can be asked alone and only its column continues", async () => {
@@ -145,9 +145,9 @@ test("Desktop Review shows one column per model, as the web does", { timeout: 12
     await t.test("a model can be switched off, which leaves it out of the next send", async () => {
       await column(grok!).getByRole("button", { name: /^Pause panel \d, Grok 4\.5/ }).click();
       await expect(column(grok!)).toHaveAttribute("data-off", "true");
-      await expect(desktop.locator(".review-setup .review-chip")).toHaveText([gpt!.name, gemini!.name]);
+      await expect(desktop.locator(".review-composer-slot .composer-actions .review-chip")).toHaveText([gpt!.name, gemini!.name]);
       await column(grok!).getByRole("button", { name: /^Resume panel \d, Grok 4\.5/ }).click();
-      await expect(desktop.locator(".review-setup .review-chip")).toHaveCount(3);
+      await expect(desktop.locator(".review-composer-slot .composer-actions .review-chip")).toHaveCount(3);
     });
 
     await t.test('the "+" menu turns web search on for the Review and each model gets the position with the next question', async () => {

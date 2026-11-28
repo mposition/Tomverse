@@ -299,6 +299,12 @@ pre, code { font-family: var(--font-code); }
 .attachment-draft li, .saved-attachments li { display: flex; gap: 6px; align-items: center; min-width: 0; max-width: 100%;
   background: var(--raised); border: 1px solid var(--line); padding: 4px 8px; border-radius: 8px; font-size: 12px; }
 .attachment-draft li span, .saved-attachments li span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* An image waiting to be sent shows as a thumbnail with its name below, as Chat on the web shows it. */
+.attachment-draft li.has-preview { position: relative; flex-direction: column; align-items: stretch; gap: 4px; width: 92px; padding: 4px; }
+.attachment-draft li.has-preview span { font-size: 11px; padding-inline: 2px; }
+.attachment-draft li.has-preview .icon { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; min-height: 0; padding: 0;
+  border-radius: 999px; background: var(--surface); border: 1px solid var(--line); }
+.attachment-draft-thumb { display: block; width: 100%; height: 64px; object-fit: cover; border-radius: 6px; background: var(--surface); }
 .saved-attachments { margin-block: 6px; }
 .generated-files { display: grid; gap: 6px; padding: 0; margin: 8px 0 0; list-style: none; }
 .generated-file { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 6px 8px;
@@ -708,8 +714,11 @@ summary.code-task-list-row:hover .code-task-list-title { text-decoration: underl
 .review-mode-toggle button { min-height: 30px; padding: 4px 14px; border-radius: 999px; color: var(--muted); font-size: 12.5px; white-space: nowrap; }
 .review-mode-toggle button[aria-pressed="true"] { background: var(--action); color: #fff; font-weight: 600; }
 .review-mode-toggle button:disabled { opacity: .55; cursor: wait; }
-.review-participants, .review-setup .desktop-model-trigger { min-width: 0; flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.review-setup .desktop-model-trigger { min-height: 36px; padding: 2px 6px; text-align: left; }
+/* The providers (Easy) or the models (Professional) sit where Chat keeps its model picker: after the spacer, left of the microphone. */
+.review-participants, .review-composer-slot .composer-actions .desktop-model-trigger { min-width: 0; flex: 0 1 auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+.review-composer-slot .composer-actions .desktop-model-trigger { min-height: 36px; padding: 2px 6px; text-align: left; }
+.review-composer-slot .composer-actions .review-chip { min-height: 28px; font-size: 12px; }
+@media (max-width: 720px) { .review-composer-slot .composer-actions .review-participants-label { display: none; } }
 .review-participants-label { flex: none; margin-right: 2px; color: var(--muted); font-size: 12px; }
 .review-participants-label b { margin-left: 4px; font-weight: 600; color: var(--text); }
 .review-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; max-width: 100%; padding: 3px 10px 3px 4px; border: 1px solid var(--line); border-radius: 999px; background: var(--raised); font-size: 12.5px; }

@@ -6,7 +6,7 @@ import { StringDecoder } from "node:string_decoder";
 import { killTree, killTreeSync } from "../../../tomverse-cli/src/commands.js";
 import { isSecretPath } from "../../../tomverse-cli/src/workspace.js";
 import type { PermissionModeId } from "../permission-contract";
-import { cliPermissionPlan, LIVE_CLI_LIMITS, ZAI_ANTHROPIC_BASE_URL, type CliPermissionPlan, type LiveCliProvider } from "../provider-cli-exec-contract";
+import { cliModelArgumentPattern, cliPermissionPlan, LIVE_CLI_LIMITS, ZAI_ANTHROPIC_BASE_URL, type CliPermissionPlan, type LiveCliProvider } from "../provider-cli-exec-contract";
 import { codeProcessLaunch } from "./code-process-launch";
 
 /**
@@ -108,13 +108,14 @@ export async function credentialPathsIn(root: string): Promise<string[]> {
  * On Windows the sandbox is named here: without the config file Codex has none there and refuses every command, reads
  * included. The unelevated sandbox needs no administrator setup.
  */
-export function codexArguments(input: { cwd: string; plan: CliPermissionPlan; platform?: NodeJS.Platform; readOnlyPaths?: readonly string[] }): string[] {
+export function codexArguments(input: { cwd: string; plan: CliPermissionPlan; platform?: NodeJS.Platform; readOnlyPaths?: readonly string[]; model?: string }): string[] {
   const { grants } = input.plan;
   const permission = grants === "read_only" ? ["--sandbox", "read-only"]
     : grants === "auto_review" || grants === "allow_all" ? codexWriteProfile(input.readOnlyPaths ?? []) : null;
   if (!permission) throw new Error("Codex has no approval route for this permission.");
   const windows = (input.platform ?? process.platform) === "win32" ? ["-c", 'windows.sandbox="unelevated"'] : [];
-  return ["exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", ...windows, "-C", input.cwd, ...permission, "-"];
+  return ["exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", ...windows, "-C", input.cwd, ...permission,
+    ...modelArgument("--model", input.model), "-"];
 }
 
 /**
@@ -125,7 +126,7 @@ export function codexArguments(input: { cwd: string; plan: CliPermissionPlan; pl
  * confined the way Codex's sandbox is. Claude Code itself still runs a few commands it classes as read-only (such as `echo`)
  * without asking; the credential deny rules apply to those too.
  */
-export function claudeArguments(input: { plan: CliPermissionPlan; sessionId: string; platform?: NodeJS.Platform }): string[] {
+export function claudeArguments(input: { plan: CliPermissionPlan; sessionId: string; platform?: NodeJS.Platform; model?: string }): string[] {
   const { grants } = input.plan;
   const tools = claudeTools(grants, input.platform);
   const mode = grants === "read_only" ? ["--permission-mode", "dontAsk", "--permission-prompts", "none"]
@@ -133,7 +134,15 @@ export function claudeArguments(input: { plan: CliPermissionPlan; sessionId: str
   return ["--print", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
     "--restricted", "--disable-slash-commands", "--no-session-persistence", "--session-id", input.sessionId, "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
     "--tools", tools.join(","), "--disallowedTools", claudeSecretRules.join(","),
-    ...(grants === "allow_all" ? ["--allowedTools", tools.filter((tool) => !claudeShell.includes(tool)).join(",")] : []), ...mode];
+    ...(grants === "allow_all" ? ["--allowedTools", tools.filter((tool) => !claudeShell.includes(tool)).join(",")] : []), ...mode,
+    ...modelArgument("--model", input.model)];
+}
+
+/** The Tomverse model the person chose, by its provider's own id; none keeps the CLI's default. Anything else is refused, never passed. */
+function modelArgument(flag: string, model: string | undefined): string[] {
+  if (model === undefined) return [];
+  if (!cliModelArgumentPattern.test(model)) throw new Error("The selected model cannot be passed to the CLI.");
+  return [flag, model];
 }
 
 const inherited = ["SystemRoot", "WINDIR", "ComSpec", "PATHEXT", "OS", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "ProgramData", "ProgramFiles",
@@ -317,6 +326,8 @@ export type ExecRun = {
   file: string;
   /** Arguments placed before the CLI's own (a test runs a stand-in script through the Node binary this way). */
   argsPrefix?: readonly string[];
+  /** The provider's own id of the Tomverse model the person chose; without it the CLI runs its default model. */
+  model?: string;
   cwd: string;
   prompt: string;
   mode: PermissionModeId;
@@ -385,7 +396,7 @@ export async function runProviderCli(run: ExecRun): Promise<ExecResult> {
     return result("failed", null, { error: "The project has too many credential files to protect. Use Read only, or another route." });
   }
   const args = [...(run.argsPrefix ?? []),
-    ...(run.provider === "openai" ? codexArguments({ cwd: run.cwd, plan, platform: run.platform, readOnlyPaths }) : claudeArguments({ plan, sessionId, platform: run.platform }))];
+    ...(run.provider === "openai" ? codexArguments({ cwd: run.cwd, plan, platform: run.platform, readOnlyPaths, model: run.model }) : claudeArguments({ plan, sessionId, platform: run.platform, model: run.model }))];
   if (run.provider === "zai" && !run.zai?.key) return result("failed", null, { error: "Add the Z.ai Coding Plan key in Settings > Development CLIs." });
   if (run.signal.aborted) return result("stopped", null);
 
