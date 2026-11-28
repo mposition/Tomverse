@@ -1430,8 +1430,10 @@ authority는 그와 별개로 **여전히 필요합니다.** 호주의 `inferred
   4번처럼 **별도 preference**로 끌 수 있습니다(`/settings/notifications`). "모든
   마케팅 수신 거부"는 이것을 끄지 않습니다. DB CHECK가 transactional에 purpose를
   금지하므로, 끌 수 있는 비마케팅 메일은 service입니다.
-- **작업마다 끄기**: `ScheduledTask.emailOnFinish`(기본 true), 예약 작업 설정의
-  "끝나면 이메일로 알림". 발송 스위치가 켜진 배포에서만 보입니다.
+- **작업마다 끄기**: `ScheduledTask.emailOnFinish`(만들 때 생략하면 true), 예약 작업
+  설정의 "끝나면 이메일로 알림". 발송 스위치가 켜진 배포에서만 보입니다. 수정 요청에
+  이 필드가 없으면 기존 값을 그대로 둡니다 — 필드를 모르는 옛 화면이나 API 클라이언트가
+  사용자가 끈 알림을 다시 켜지 못하게 하기 위해서입니다.
 - **내용은 상태와 링크뿐입니다.** 작업 이름, 실행 시각(계정 언어·작업 시간대), 답변이
   있는 대화 링크(일시정지면 예약 작업 설정 링크), 끄는 곳 링크. **답변도 질문도 넣지
   않습니다.** 이 절에 요약을 넣는 규칙이 없으므로 넣지 않습니다.
@@ -1439,11 +1441,16 @@ authority는 그와 별개로 **여전히 필요합니다.** 호주의 `inferred
   one-click 링크 대신 본문에 알림 설정 링크를 둡니다(`requiresUnsubscribe: false`).
 - **발송 경계** (`lib/scheduledTaskNotice.ts`): `SCHEDULED_TASK_EMAIL_ENABLED`가
   정확히 `true`일 때만 큐에 넣습니다. 꺼져 있으면 아무것도 읽거나 쓰지 않습니다.
-  그다음 작업 토글, purpose(`consentGateVerdict`, drain이 발송 때 다시 판정), 그리고
   **실행 한 번에 한 통**: `ScheduledTaskRun.noticeQueuedAt`을 NULL일 때만 outbox 행과
   같은 transaction에서 표시합니다. 재시도·재조정·중복 종료는 표시를 보고 아무것도
-  넣지 않고, enqueue가 실패하면 표시도 함께 되돌아갑니다. 실행 종료는 알림 실패와
-  무관하게 먼저 commit됩니다.
+  넣지 않습니다. **같은 transaction 안에서** 작업 행을 잠근 채 작업 토글을 읽고
+  (`lib/scheduledTaskNoticeGate.ts`, 설정 저장과 직렬화), purpose를
+  `consentGateVerdict`로 판정합니다. 어느 하나라도 거절하면 표시도 함께 되돌아갑니다.
+  실행 종료는 알림 실패와 무관하게 먼저 commit됩니다.
+- **발송 직전 재확인**: drain이 purpose 판정 바로 뒤에서 작업 토글을 다시 읽습니다.
+  큐에 든 뒤 토글이 꺼졌거나 작업이 삭제됐으면 보내지 않고 `skipped`로 닫습니다.
+  `skipReason`은 닫힌 목록이라 새 값을 만들지 않고 `no_consent`를 쓰며, 구분된 이유
+  (`task_email_off`, `task_deleted`)는 로그 `scheduled_task_notice_not_sent`에 남깁니다.
 - **발송 경로**: 표준 lane 그대로(Resend, 기존 transactional 도메인, idempotency key,
   재시도 곡선). 새 공급자·도메인이 없습니다. 발송 결과가 불명확한 메일을 다시 보내지
   않는 것은 lane의 기존 규칙입니다.

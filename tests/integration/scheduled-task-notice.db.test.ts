@@ -12,7 +12,13 @@ import { queueScheduledRunNotice } from "@/lib/scheduledTaskNotice";
 import { scheduledTaskReservationGuard } from "@/lib/scheduledTaskReservationGuard";
 import { scheduledTaskRunSession } from "@/lib/scheduledTaskRunContext";
 import { runScheduledTasksTick, type ChatDispatch } from "@/lib/scheduledTaskRunner";
-import { quoteScheduledRunCredits } from "@/lib/scheduledTaskService";
+import {
+  createScheduledTask,
+  quoteScheduledRunCredits,
+  scheduledTaskInputSchema,
+  scheduledTaskUpdateSchema,
+  updateScheduledTask,
+} from "@/lib/scheduledTaskService";
 import { drainStandardEmailDeliveries } from "@/lib/standardEmailLane";
 
 /**
@@ -255,4 +261,137 @@ test("retried and concurrent queueing of one run writes one notice", async () =>
   assert.equal(await queueScheduledRunNotice({ runId: run.id, kind: "paused" }), "already_queued");
   assert.equal(await prisma.emailDelivery.count(), 1);
   assert.equal(await prisma.emailEvent.count(), 1);
+});
+
+/* --------------------------------------------- the task's switch, re-asked -- */
+
+const finishedRun = async (userId: string, taskId: string, revision: number) =>
+  prisma.scheduledTaskRun.create({
+    data: {
+      taskId,
+      userId,
+      taskRevision: revision,
+      scheduledFor: new Date(Date.now() - 60_000),
+      status: "succeeded",
+      outcome: "completed",
+      assistantMessageId: randomUUID(),
+      leaseExpiresAt: new Date(),
+      finishedAt: new Date(),
+    },
+  });
+
+const stubProvider = () => {
+  const sent: unknown[] = [];
+  mock.method(globalThis, "fetch", async (_url: unknown, init: RequestInit) => {
+    sent.push(JSON.parse(String(init.body)));
+    return new Response(JSON.stringify({ id: `resend-${randomUUID()}` }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  return sent;
+};
+
+test("a switch turned off while the notice is being queued wins: nothing is queued", async () => {
+  switchOn();
+  const userId = await seedUser();
+  const task = await seedTask(userId);
+  const run = await finishedRun(userId, task.id, task.revision);
+
+  // A settings save holds the task row, as updateScheduledTask does, and turns
+  // the email off. The notice reaches its locked read of the switch while the
+  // save is still open, so it waits and then reads the committed value.
+  let releaseSave!: () => void;
+  const saveMayCommit = new Promise<void>((resolve) => {
+    releaseSave = resolve;
+  });
+  let locked!: () => void;
+  const saveHoldsLock = new Promise<void>((resolve) => {
+    locked = resolve;
+  });
+  const save = prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "ScheduledTask" WHERE "id" = ${task.id} FOR UPDATE`;
+    await tx.scheduledTask.update({ where: { id: task.id }, data: { emailOnFinish: false } });
+    locked();
+    await saveMayCommit;
+  });
+  await saveHoldsLock;
+  const queued = queueScheduledRunNotice({ runId: run.id, kind: "answered" });
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  releaseSave();
+  await save;
+
+  assert.equal(await queued, "task_off");
+  assert.equal(await prisma.emailDelivery.count(), 0);
+  assert.equal((await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id: run.id } })).noticeQueuedAt, null);
+});
+
+test("a notice already queued is not sent once its task's switch is off", async () => {
+  switchOn();
+  const userId = await seedUser();
+  const task = await seedTask(userId);
+  const run = await finishedRun(userId, task.id, task.revision);
+  assert.equal(await queueScheduledRunNotice({ runId: run.id, kind: "answered" }), "queued");
+  await prisma.scheduledTask.update({ where: { id: task.id }, data: { emailOnFinish: false } });
+
+  const sent = stubProvider();
+  const drained = await drainStandardEmailDeliveries();
+  assert.equal(sent.length, 0, "nothing reached the provider");
+  assert.equal(drained.sent, 0);
+  const delivery = await prisma.emailDelivery.findFirstOrThrow();
+  assert.equal(delivery.status, "skipped");
+  assert.equal(delivery.skipReason, "no_consent");
+});
+
+test("a notice already queued is not sent once its task is deleted", async () => {
+  switchOn();
+  const userId = await seedUser();
+  const task = await seedTask(userId);
+  const run = await finishedRun(userId, task.id, task.revision);
+  assert.equal(await queueScheduledRunNotice({ runId: run.id, kind: "answered" }), "queued");
+  await prisma.scheduledTask.delete({ where: { id: task.id } });
+
+  const sent = stubProvider();
+  await drainStandardEmailDeliveries();
+  assert.equal(sent.length, 0);
+  const delivery = await prisma.emailDelivery.findFirstOrThrow();
+  assert.equal(delivery.status, "skipped");
+  assert.equal(delivery.skipReason, "no_consent");
+});
+
+test("an edit that does not name the email switch leaves it as it was", async () => {
+  const userId = await seedUser();
+  const confirmCredits = await quoteScheduledRunCredits({ userId, modelId: MODEL_ID, prompt: PROMPT, webSearch: false });
+  const fields = {
+    title: "Morning news",
+    prompt: PROMPT,
+    modelId: MODEL_ID,
+    webSearch: false,
+    frequency: "daily",
+    timeOfDay: "08:00",
+    confirmCredits,
+  };
+  // Created with the switch off, and with it omitted (which means on).
+  const off = await createScheduledTask(userId, scheduledTaskInputSchema.parse({ ...fields, emailOnFinish: false }));
+  const defaulted = await createScheduledTask(userId, scheduledTaskInputSchema.parse(fields));
+  assert.equal(off.emailOnFinish, false);
+  assert.equal(defaulted.emailOnFinish, true);
+
+  // A screen or client from before the field: the body has no emailOnFinish.
+  const parsed = scheduledTaskUpdateSchema.parse({ ...fields, title: "Renamed", expectedRevision: off.revision });
+  assert.ok(!("action" in parsed));
+  const edited = await updateScheduledTask(userId, off.id, parsed as Parameters<typeof updateScheduledTask>[2]);
+  assert.equal(edited.title, "Renamed");
+  assert.equal(edited.emailOnFinish, false, "an omitted field does not switch it back on");
+  assert.equal((await prisma.scheduledTask.findUniqueOrThrow({ where: { id: off.id } })).emailOnFinish, false);
+
+  // Naming it still changes it.
+  const turnedOn = await updateScheduledTask(
+    userId,
+    off.id,
+    scheduledTaskUpdateSchema.parse({ ...fields, emailOnFinish: true, expectedRevision: edited.revision }) as Parameters<
+      typeof updateScheduledTask
+    >[2]
+  );
+  assert.equal(turnedOn.emailOnFinish, true);
 });

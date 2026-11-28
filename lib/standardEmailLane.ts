@@ -57,6 +57,11 @@ import { streamForClassification } from "@/lib/emailSendingIdentityCore";
 import { sentDomainOf } from "@/lib/emailSentIdentityCore";
 import { consentGateVerdict, isEmailPurpose } from "@/lib/emailPreferenceCore";
 import {
+  SCHEDULED_TASK_NOTICE_PURPOSE,
+  SCHEDULED_TASK_NOTICE_REFERENCE,
+  scheduledTaskNoticeWanted,
+} from "@/lib/scheduledTaskNoticeGate";
+import {
   EMAIL_AUDIT_HASH_KEY_VERSION,
   renderedBodyHash,
 } from "@/lib/emailAuditHash";
@@ -1355,6 +1360,32 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
           claimedAt: null,
         },
       });
+      return { outcome: "suppressed" as const, classification: definition.classification };
+    }
+  }
+
+  // A scheduled task's result notice also has the task's own switch, asked
+  // again here for the reason the purpose above is: it may have been turned
+  // off -- or the task deleted -- after the message was queued
+  // (lib/scheduledTaskNoticeGate.ts). Recorded as `no_consent`, the closed
+  // vocabulary's word for "the account said no to this mail"; the log says
+  // which of the two it was.
+  if (definition.purpose === SCHEDULED_TASK_NOTICE_PURPOSE) {
+    const wanted = await scheduledTaskNoticeWanted(
+      delivery.event.referenceType === SCHEDULED_TASK_NOTICE_REFERENCE ? delivery.event.referenceId : null
+    );
+    if (wanted !== "wanted") {
+      await prisma.emailDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: "skipped",
+          skipReason: "no_consent",
+          attempts: delivery.attempts,
+          nextAttemptAt: null,
+          claimedAt: null,
+        },
+      });
+      console.info(JSON.stringify({ event: "scheduled_task_notice_not_sent", deliveryId: delivery.id, reason: wanted }));
       return { outcome: "suppressed" as const, classification: definition.classification };
     }
   }

@@ -16,6 +16,11 @@ import {
   scheduledTaskEmailEnabled,
   type ScheduledRunNoticeKind,
 } from "@/lib/scheduledTaskCore";
+import {
+  SCHEDULED_TASK_NOTICE_PURPOSE,
+  SCHEDULED_TASK_NOTICE_REFERENCE,
+  scheduledTaskNoticeWanted,
+} from "@/lib/scheduledTaskNoticeGate";
 import { enqueueRefused, enqueueStandardEmail, resolveEmailLanguage } from "@/lib/standardEmailLane";
 
 /**
@@ -26,13 +31,18 @@ import { enqueueRefused, enqueueStandardEmail, resolveEmailLanguage } from "@/li
  *
  *   1. `SCHEDULED_TASK_EMAIL_ENABLED` must be exactly "true" (default off).
  *      Off, nothing is read and nothing is written.
- *   2. The task's own "email me when it finishes" switch.
- *   3. The account's `scheduled_tasks` email purpose (/settings/notifications),
- *      through the same `consentGateVerdict` the drain applies again at send.
- *   4. Once per run: `ScheduledTaskRun.noticeQueuedAt` is claimed only while
+ *   2. Once per run: `ScheduledTaskRun.noticeQueuedAt` is claimed only while
  *      NULL, in the same transaction that writes the outbox rows. A retried,
- *      reconciled or doubled finish finds it set and queues nothing; a failed
- *      enqueue rolls the claim back with it.
+ *      reconciled or doubled finish finds it set and queues nothing; any
+ *      refusal below rolls the claim back with it.
+ *   3. Inside that transaction, the task's own "email me when it finishes"
+ *      switch, with the task row locked (lib/scheduledTaskNoticeGate.ts).
+ *   4. Inside it too, the account's `scheduled_tasks` email purpose
+ *      (/settings/notifications), through `consentGateVerdict`.
+ *
+ * Both 3 and 4 are asked again by the standard lane immediately before it
+ * sends, so a switch turned off -- or a task deleted -- after the message was
+ * queued still stops it.
  *
  * Only the standard lane sends (its provider, domains, idempotency key and
  * retries). This module never calls a provider, so there is no send outcome
@@ -50,9 +60,12 @@ export type ScheduledRunNoticeOutcome =
   | "preference_off"
   | "refused";
 
-const PURPOSE = "scheduled_tasks";
-
-class EnqueueRefusal extends Error {}
+/** A reason not to queue, found inside the transaction; thrown so the run's claim rolls back. */
+class NoticeRefusal extends Error {
+  constructor(public readonly outcome: "task_off" | "preference_off" | "refused") {
+    super(outcome);
+  }
+}
 
 export async function queueScheduledRunNotice(input: {
   runId: string;
@@ -62,6 +75,8 @@ export async function queueScheduledRunNotice(input: {
 }): Promise<ScheduledRunNoticeOutcome> {
   if (!scheduledTaskEmailEnabled(input.env ?? process.env)) return "switch_off";
 
+  // What the message says. Whether it may be queued at all is decided below,
+  // inside the transaction that queues it.
   const run = await prisma.scheduledTaskRun.findUnique({
     where: { id: input.runId },
     select: {
@@ -69,28 +84,14 @@ export async function queueScheduledRunNotice(input: {
       startedAt: true,
       conversationId: true,
       noticeQueuedAt: true,
-      task: { select: { title: true, timeZone: true, emailOnFinish: true, conversationId: true } },
+      task: { select: { title: true, timeZone: true, conversationId: true } },
       user: { select: { email: true, settings: { select: { language: true } } } },
     },
   });
   if (!run) return "not_found";
   if (run.noticeQueuedAt) return "already_queued";
-  if (!run.task.emailOnFinish) return "task_off";
   const emailAddress = run.user.email;
   if (!emailAddress) return "no_address";
-
-  const preference = await prisma.emailPreference.findUnique({
-    where: { userId_purpose: { userId: run.userId, purpose: PURPOSE } },
-    select: { enabled: true, confirmedAt: true },
-  });
-  const consent = consentGateVerdict({
-    classification: "service",
-    purpose: PURPOSE,
-    hasAccount: true,
-    storedEnabled: preference?.enabled ?? null,
-    storedConfirmedAt: preference?.confirmedAt ?? null,
-  });
-  if (!consent.allowed) return "preference_off";
 
   const language = resolveEmailLanguage(run.user.settings?.language);
   const templateKey = input.kind === "answered" ? SCHEDULED_TASK_RUN_ANSWERED_TEMPLATE : SCHEDULED_TASK_PAUSED_TEMPLATE;
@@ -117,6 +118,26 @@ export async function queueScheduledRunNotice(input: {
         data: { noticeQueuedAt: input.now ?? new Date() },
       });
       if (!claimed.count) return "already_queued" as const;
+      // The task's own switch, read with the task row locked: a settings save
+      // committed before this is seen, and one that comes after waits for the
+      // notice to be queued -- and is then checked again at send.
+      if ((await scheduledTaskNoticeWanted(input.runId, { tx, lock: true })) !== "wanted") {
+        throw new NoticeRefusal("task_off");
+      }
+      // The account's purpose, read inside the same transaction. The drain
+      // decides it again at send time with the same verdict.
+      const preference = await tx.emailPreference.findUnique({
+        where: { userId_purpose: { userId: run.userId, purpose: SCHEDULED_TASK_NOTICE_PURPOSE } },
+        select: { enabled: true, confirmedAt: true },
+      });
+      const consent = consentGateVerdict({
+        classification: "service",
+        purpose: SCHEDULED_TASK_NOTICE_PURPOSE,
+        hasAccount: true,
+        storedEnabled: preference?.enabled ?? null,
+        storedConfirmedAt: preference?.confirmedAt ?? null,
+      });
+      if (!consent.allowed) throw new NoticeRefusal("preference_off");
       const queued = await enqueueStandardEmail({
         tx,
         templateKey,
@@ -124,15 +145,15 @@ export async function queueScheduledRunNotice(input: {
         userId: run.userId,
         language,
         payload,
-        referenceType: "scheduled_task_run",
+        referenceType: SCHEDULED_TASK_NOTICE_REFERENCE,
         referenceId: input.runId,
       });
-      // A refusal must not leave the run marked as notified.
-      if (enqueueRefused(queued)) throw new EnqueueRefusal(queued.refused);
+      if (enqueueRefused(queued)) throw new NoticeRefusal("refused");
       return "queued" as const;
     });
   } catch (error) {
-    if (error instanceof EnqueueRefusal) return "refused";
+    // Every refusal rolls the run's claim back: the marker means "queued".
+    if (error instanceof NoticeRefusal) return error.outcome;
     throw error;
   }
 }
