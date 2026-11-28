@@ -469,7 +469,7 @@ test("A folder the search cannot list is read-only as a whole", { skip: process.
   }
 });
 
-test("Claude Code (Z.ai) runs the Claude Code adapter with the Z.ai endpoint, its key and a settings folder of its own", async () => {
+test("The Z.ai CLI route runs the Claude Code adapter with the Z.ai endpoint, its key and a settings folder of its own", async () => {
   const zai = { key: sampleZai, configDir: "/data/provider-cli/zai-claude" };
   const env = { HOME: "/h", PATH: "/usr/bin", CLAUDE_CONFIG_DIR: "/h/.claude", ANTHROPIC_API_KEY: "sk-ant-x", ANTHROPIC_AUTH_TOKEN: "other", ANTHROPIC_BASE_URL: "https://elsewhere" };
   const result = cliExecEnvironment(env, "zai", "linux", zai);
@@ -490,7 +490,7 @@ test("Claude Code (Z.ai) runs the Claude Code adapter with the Z.ai endpoint, it
   assert.equal(liveCliProviderForModel(liveCliModelId("zai")), "zai");
 });
 
-test("A Claude Code (Z.ai) run without its key does not start; with it, the key is in the environment and never on the command line", async () => {
+test("A Z.ai CLI run without its key does not start; with it, the key is in the environment and never on the command line", async () => {
   await withFake(async (directory) => {
     const missing = join(directory, "missing.json");
     const refused = await runProviderCli(baseRun(directory, { scenario: "claude-approve", record: missing }, { provider: "zai", mode: "ask" }));

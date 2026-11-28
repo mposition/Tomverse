@@ -100,7 +100,7 @@ export const kimiFixtureExecution = { executionMode: "provider_cli", provider: "
 export const vibeFixtureExecution = { executionMode: "provider_cli", provider: "mistral", cli: "Mistral Vibe", billingSource: "unknown" } as const;
 export const deepSeekFixtureExecution = { executionMode: "provider_cli", provider: "deepseek", cli: "DeepSeek Harness", billingSource: "unknown" } as const;
 /** Claude Code on the person's Z.ai Coding Plan (provider-cli-exec-contract.ts, the `zai` route). */
-export const zaiClaudeExecution = { executionMode: "provider_cli", provider: "anthropic", cli: "Claude Code (Z.ai)", billingSource: "provider_subscription" } as const;
+export const zaiClaudeExecution = { executionMode: "provider_cli", provider: "anthropic", cli: "Z.ai CLI (via Claude Code)", billingSource: "provider_subscription" } as const;
 export const zCodeFixtureExecution = { executionMode: "provider_cli", provider: "zhipu", cli: "ZCode Agent", billingSource: "unknown" } as const;
 export const miniMaxFixtureExecution = { executionMode: "provider_cli", provider: "minimax", cli: "MiniMax Code", billingSource: "unknown" } as const;
 export const grokFixtureExecution = { executionMode: "provider_cli", provider: "xai", cli: "Grok Build", billingSource: "unknown" } as const;

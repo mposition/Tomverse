@@ -17,7 +17,7 @@ const signInMessage: Record<CliLoginOpen, Message> = {
 
 export function ProviderCliSettings({ language, paths, supportedPaths, provider, goTo, authFixture, protocolCheckAvailable, zai }: {
   language: Language;
-  /** The Claude Code (Z.ai) route, when the server offers provider CLI tasks: where its key is kept, if one is saved. */
+  /** The Z.ai CLI route (Claude Code on the Coding Plan), when the server offers provider CLI tasks: where its key is kept, if one is saved. */
   zai?: { key?: "device" | "session" };
   paths: CliPaths;
   supportedPaths: readonly CliProvider[];
