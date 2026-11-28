@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -147,4 +148,32 @@ test("the embedder's nonce goes on the page's script, style and stylesheet eleme
   for (const nonce of [null, undefined, "", "short", "abc\" onload=\"x", "a b c d e f g h", "x".repeat(300)]) {
     assert.equal(withEmbedderNonce("<p>x</p>", nonce, () => { throw new Error("must not parse"); }), "<p>x</p>");
   }
+});
+
+test("the frame switches off DNS prefetching ahead of the page, after our policy", () => {
+  const { inner } = split(buildHtmlPreviewSrcdoc("<p>x</p>"));
+  const policy = inner.indexOf("Content-Security-Policy");
+  const prefetch = inner.indexOf('http-equiv="x-dns-prefetch-control" content="off"');
+  assert.ok(policy >= 0 && prefetch > policy, "ours is the second element");
+  assert.ok(prefetch < inner.indexOf("<p>x</p>"));
+});
+
+// Review r-20261128-054317-1a725b: the parent document does not parse or rewrite the
+// model's HTML to deal with resource hints. A CSP cannot stop them and a pattern over
+// HTML is bypassed; they are a known residual risk, covered by the frame's own policy
+// and x-dns-prefetch-control only.
+test("the parent document never parses or rewrites the model's HTML for resource hints", () => {
+  const panel = readFileSync(new URL("../components/chat/HtmlArtifactPreviewPanel.tsx", import.meta.url), "utf8");
+  const lib = readFileSync(new URL("../lib/htmlArtifactPreview.ts", import.meta.url), "utf8");
+  assert.ok(!panel.includes("stripPreviewResourceHints") && !lib.includes("stripPreviewResourceHints"));
+  assert.ok(!lib.includes("RESOURCE_HINT_SELECTOR"));
+  // The one parse that remains is the embedder-nonce rewrite, which existed before and runs only when
+  // the embedding document has a nonce; nothing else touches the page as markup.
+  assert.equal(panel.split("new DOMParser()").length - 1, 1);
+  assert.ok(panel.includes("withEmbedderNonce(html, nonce, (text) => new DOMParser()"));
+  for (const source of [panel, lib]) {
+    assert.doesNotMatch(source, /innerHTML|insertAdjacentHTML|document\.write|createContextualFragment/);
+  }
+  // No pattern over the page's markup in the build step either: the page is carried as written.
+  assert.doesNotMatch(lib, /\.replace\([^)]*<link/i);
 });

@@ -493,6 +493,8 @@ export const fr = {
         attachmentModelImageUnsupported: "Ce modèle ne peut pas traiter les images contenues dans ce fichier.",
         attachmentModelUnsupported: "Ce modèle ne peut pas lire l'image jointe. Choisissez un modèle compatible avec les images ou retirez la pièce jointe.",
         attachmentOcrUnavailable: "Le texte de ce PDF n'a pas pu être lu pour le moment. Réessayez dans un instant ou choisissez un modèle capable de lire directement les PDF.",
+        imageEditSourceTooLarge: "Cette photo est trop volumineuse pour être modifiée. Joignez une version plus petite, par exemple une copie réduite, puis réessayez. Aucun crédit n'a été utilisé.",
+        imageEditSourceUnsupported: "Cette photo ne peut pas être modifiée car son format n'est pas pris en charge. Joignez-la au format PNG, JPEG, WebP ou GIF, puis réessayez. Aucun crédit n'a été utilisé.",
         archiveCorrupt: "Le fichier ZIP est endommagé.",
         archiveEncrypted: "Les fichiers ZIP chiffrés ne sont pas pris en charge.",
         archiveZip64: "Les archives ZIP64 ne sont pas encore prises en charge.",
