@@ -5,26 +5,26 @@ import type { Language } from "../../../../lib/language";
 import { mcpConnectorCopy } from "../../../../lib/mcpConnectorCopy";
 import { mcpProviderCopy } from "../../../../lib/mcpProviderCopy";
 import { mcpProviderSummary } from "../../../../lib/mcpProviderSummary";
-import { mcpProvider, type McpProviderCategory } from "../../../../lib/mcpProviderCatalog";
-import { pluginLogo } from "../../../../lib/mcpConnectorClientContract";
+import type { McpProvider, McpProviderCategory } from "../../../../lib/mcpProviderCatalog";
+import { filterPluginCards, findMcpProvider, pluginCards } from "../../../../lib/mcpProviderBrowse";
 import { PluginScopePicker, initialPluginScopes } from "../../../../components/plugins/PluginScopePicker";
 import { desktopConnectorCopy } from "../../../../locales/desktopConnectors";
 import type { ConnectorConnection, ConnectorInput, ConnectorInventory, ConnectorServer } from "../connector-contract";
 import { serverSignInRefused } from "../connector-oauth-policy";
+import { pluginLogoUrl, type PluginCatalogView } from "../plugin-catalog-contract";
+import { linkViewUrl } from "../web-view-contract";
 import { describeConnectorResult, type ConnectorMessage } from "./connector-message";
 import { LocalExtensionsPanel } from "./LocalExtensionsPanel";
+import { openLink } from "./WebViewer";
 import "./connector-workspace.css";
 
-const logos = import.meta.glob<string>("../../../../public/plugins/providers/*.{png,svg}", {
-  eager: true, query: "?url", import: "default",
-});
+// The catalogue this app was built with, loaded only for a server that does not serve its own (see bundledCatalog.ts).
+type Bundled = typeof import("./bundledCatalog");
 
-function ServiceLogo({ id, custom }: { id: string; custom: boolean }) {
-  const path = custom ? undefined : pluginLogo(id);
-  const src = path && logos["../../../../public" + path];
-  const [failed, setFailed] = useState(false);
+function ServiceLogo({ src }: { src: string | undefined }) {
+  const [failed, setFailed] = useState<string>();
   return <span className="desktop-plugin-logo" aria-hidden="true">
-    {src && !failed ? <img src={src} alt="" width={24} height={24} onError={() => setFailed(true)} />
+    {src && failed !== src ? <img src={src} alt="" width={24} height={24} onError={() => setFailed(src)} />
       : <Puzzle size={24} />}
   </span>;
 }
@@ -33,6 +33,7 @@ type Tab = "all" | "connected" | "approvals";
 const TABS = ["all", "connected", "approvals"] as const;
 type Form = { kind: "server"; serverId: string } | { kind: "custom" };
 const NEW_CUSTOM = { url: "", name: "", auth: "none" as ConnectorServer["auth"] };
+const PAGE = 24;
 
 // `lane` is the second-lane slot owned by the shell; it is null while the lane is collapsed, and the menu then moves into the body.
 export function ConnectorWorkspace({ language, lane = null }: { language: Language; lane?: HTMLElement | null }) {
@@ -43,6 +44,12 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
   const [tab, setTab] = useState<Tab>("all");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<McpProviderCategory | "all">("all");
+  const [source, setSource] = useState("all");
+  const [limit, setLimit] = useState(PAGE);
+  // undefined: not asked yet; null: this server serves no catalogue, so only its own servers are listed.
+  const [catalog, setCatalog] = useState<PluginCatalogView | null>();
+  const [bundled, setBundled] = useState<Bundled>();
+  const [providerId, setProviderId] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<ConnectorMessage>();
   const [form, setForm] = useState<Form>();
@@ -65,12 +72,24 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
       return undefined;
     }
   }, [c.error]);
+  // The platform list is read when the screen opens (the main process reuses a copy that is still fresh) and again when the person refreshes.
+  // A list already shown stays when a read fails; a first read that fails leaves the server's own list.
+  const refreshCatalog = useCallback(() => {
+    void window.desktop.pluginCatalog(true).then((next) => { if (alive.current) setCatalog(next); },
+      () => { if (alive.current) { setCatalog((held) => held ?? null); setMessage({ tone: "error", text: c.error }); } });
+  }, [c.error]);
   useEffect(() => {
     alive.current = true;
     void window.desktop.connectorInventory().then((next) => { if (alive.current) setInventory(next); },
       () => { if (alive.current) setMessage({ tone: "error", text: c.error }); });
+    void window.desktop.pluginCatalog(false).then((next) => { if (alive.current) setCatalog(next); },
+      () => { if (alive.current) { setCatalog(null); setMessage({ tone: "error", text: c.error }); } });
     return () => { alive.current = false; };
   }, [c.error]);
+  useEffect(() => {
+    if (catalog !== null || bundled) return;
+    void import("./bundledCatalog").then((module) => { if (alive.current) setBundled(module); });
+  }, [catalog, bundled]);
 
   async function run(input: ConnectorInput) {
     if (busy) return undefined;
@@ -89,21 +108,32 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
   const connectionOf = (serverId: string) => connections.find((connection) => connection.serverId === serverId);
   const selected = connections.find(({ id }) => id === selectedId);
   const pending = inventory?.invocations.filter(({ state }) => state === "pending") ?? [];
-  const needle = query.trim().toLocaleLowerCase(language);
-  // A user-entered server is never presented as a catalogued provider, whatever its name.
-  const providerOf = (server: ConnectorServer) => server.custom ? undefined : mcpProvider(server.id) || mcpProvider(server.name);
-  const servers = inventory?.servers.filter((server) => server.name.toLocaleLowerCase(language).includes(needle) &&
-    (category === "all" || providerOf(server)?.category === category) && (tab !== "connected" || connectionOf(server.id))) ?? [];
-  const customVisible = Boolean(inventory?.customEnabled) && tab === "all" && category === "all" && c.custom.toLocaleLowerCase(language).includes(needle);
+  // The web's catalogue from the server; for a server that serves none, the one this app was built with labels that server's own list.
+  const providers: readonly McpProvider[] = catalog?.providers ?? bundled?.bundledProviders ?? [];
+  const ready = catalog !== undefined && (catalog !== null || bundled !== undefined);
+  const logoOf = (provider: McpProvider | undefined) => !provider?.logo ? undefined : catalog ? pluginLogoUrl(provider.id, catalog.revision) : bundled?.bundledLogo(provider);
+  // Cards, their order and the filters are the web page's own (lib/mcpProviderBrowse.ts).
+  const cards = ready ? pluginCards({ servers: inventory?.servers ?? [], providers, customEnabled: Boolean(inventory?.customEnabled), customName: c.custom, catalog: Boolean(catalog) }) : [];
+  const visibleCards = filterPluginCards(cards, { search: query.trim(), category, source,
+    connected: tab === "connected" ? new Set(connections.map(({ serverId }) => serverId)) : undefined });
+  const selectedProvider = providerId ? providers.find(({ id }) => id === providerId) : undefined;
+  const resetPage = () => setLimit(PAGE);
 
   const choose = (connection: ConnectorConnection) => {
     setForm(undefined);
+    setProviderId(undefined);
     setSelectedId(connection.id);
     setChecked(connection.grants.map(({ name }) => name));
   };
   const chooseFromLane = (connection: ConnectorConnection) => {
     if (tab === "approvals") setTab("all");
     choose(connection);
+    requestAnimationFrame(() => detailRef.current?.scrollIntoView?.({ block: "nearest" }));
+  };
+  const chooseProvider = (provider: McpProvider) => {
+    setForm(undefined);
+    setSelectedId(undefined);
+    setProviderId(provider.id);
     requestAnimationFrame(() => detailRef.current?.scrollIntoView?.({ block: "nearest" }));
   };
   const openServer = (server: ConnectorServer) => {
@@ -155,7 +185,7 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
 
   const tabButtons = (current: "page" | "pressed") => TABS.map((key) => <button key={key} type="button" data-testid={`desktop-connector-tab-${key}`}
     {...(current === "page" ? { "aria-current": tab === key ? "page" as const : undefined } : { "aria-pressed": tab === key })}
-    onClick={() => setTab(key)}>{c[key]}{key === "approvals" && pending.length > 0 ? <span className="desktop-plugins-count">{pending.length}</span> : null}</button>);
+    onClick={() => { setTab(key); resetPage(); }}>{c[key]}{key === "approvals" && pending.length > 0 ? <span className="desktop-plugins-count">{pending.length}</span> : null}</button>);
 
   const laneMenu = lane && createPortal(<div className="desktop-plugins-lane" data-testid="desktop-connectors-lane">
     <nav aria-label={c.title}><span aria-hidden="true">Tomverse</span>{tabButtons("page")}</nav>
@@ -165,7 +195,7 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
         const server = inventory?.servers.find(({ id }) => id === connection.serverId);
         return <button key={connection.id} type="button" data-testid="desktop-connector-mine" disabled={busy}
           aria-current={connection.id === selectedId ? "true" : undefined} title={connection.name} onClick={() => chooseFromLane(connection)}>
-          <ServiceLogo id={connection.serverId} custom={server ? Boolean(server.custom) : connection.serverId === "custom" || connection.serverId.startsWith("custom-")} />
+          <ServiceLogo src={logoOf(server?.custom || (!server && (connection.serverId === "custom" || connection.serverId.startsWith("custom-"))) ? undefined : findMcpProvider(providers, connection.serverId))} />
           <span>{connection.name}</span></button>;
       })}
       {inventory && !connections.length && <p>{c.setupNotice}</p>}
@@ -178,18 +208,22 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
       <div><h2>{c.title}</h2><p>{c.subtitle}</p></div>
       <div className="desktop-connector-actions">
         <button type="button" className="soft" aria-label={c.refresh} title={c.refresh} disabled={busy}
-          onClick={() => { setMessage(undefined); void refresh(); }}><RefreshCw size={15} /></button>
+          onClick={() => { setMessage(undefined); void refresh(); refreshCatalog(); }}><RefreshCw size={15} /></button>
         <button type="button" className="primary" data-testid="desktop-connector-add" disabled={busy || !inventory?.enabled || !inventory.customEnabled}
           onClick={openCustom}><Plus size={15} />{c.add}</button>
       </div>
     </div>
     <div className="desktop-plugins-controls">
       <label className="desktop-plugins-search"><Search size={16} aria-hidden="true" />
-        <input type="search" aria-label={c.search} placeholder={c.search} value={query} onChange={(event) => setQuery(event.currentTarget.value)} /></label>
+        <input type="search" aria-label={c.search} placeholder={c.search} value={query} onChange={(event) => { setQuery(event.currentTarget.value); resetPage(); }} /></label>
       {tab !== "approvals" && <select className="desktop-plugins-filter" data-testid="desktop-connector-category" aria-label={p.category} value={category}
-        onChange={(event) => setCategory(event.currentTarget.value as McpProviderCategory | "all")}>
+        onChange={(event) => { setCategory(event.currentTarget.value as McpProviderCategory | "all"); resetPage(); }}>
         <option value="all">{p.any}</option>
         {Object.entries(p.categories).map(([key, name]) => <option key={key} value={key}>{name}</option>)}
+      </select>}
+      {tab !== "approvals" && catalog && <select className="desktop-plugins-filter" data-testid="desktop-connector-source" aria-label={p.source} value={source}
+        onChange={(event) => { setSource(event.currentTarget.value); resetPage(); }}>
+        <option value="all">{p.anySource}</option><option value="openai">Codex</option><option value="claude">Claude Code</option>
       </select>}
       {!lane && <nav className="desktop-plugins-tabs" aria-label={c.title}>{tabButtons("pressed")}</nav>}
     </div>
@@ -261,31 +295,52 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
         </article>;
       })}
     </div> : <>
-      <div className="desktop-plugins-catalog-heading"><h3>{c[tab]}</h3><span aria-live="polite">{servers.length + (customVisible ? 1 : 0)}</span></div>
-      {inventory?.enabled && !servers.length && !customVisible && <p className="notice">{needle || category !== "all" ? c.missing : tab === "connected" ? c.empty : c.setupNotice}</p>}
+      <div className="desktop-plugins-catalog-heading"><h3>{c[tab]}</h3><span aria-live="polite">{visibleCards.length}</span></div>
+      {tab === "all" && catalog && <p className="desktop-connector-help">{p.catalogNotice}</p>}
+      {inventory?.enabled && ready && !visibleCards.length && <p className="notice">{query.trim() || category !== "all" || source !== "all" ? c.missing : tab === "connected" ? c.empty : c.setupNotice}</p>}
       <ul className="desktop-plugin-list">
-        {servers.map((server) => {
-          const connection = connectionOf(server.id);
-          const provider = providerOf(server);
-          const summary = provider ? mcpProviderSummary(provider, language) : c.customDescription;
-          return <li key={server.id} data-testid="desktop-connector-row">
-            <ServiceLogo id={server.id} custom={Boolean(server.custom)} />
+        {visibleCards.slice(0, limit).map((card) => {
+          const { server, provider } = card;
+          if (server) {
+            const connection = connectionOf(server.id);
+            // A sign-in the app cannot run says so before the person tries it; the server's own record of the connection is shown as it is.
+            const refusedHost = !connection && server.auth === "oauth" ? serverSignInRefused(server.origin) : null;
+            return <li key={card.id} data-testid="desktop-connector-row" data-provider={provider?.id ?? card.id}>
+              <ServiceLogo src={logoOf(provider)} />
+              <div className="desktop-connector-summary">
+                <strong>{server.name}</strong>
+                <p>{stateOf(server)}{connection && ` · ${d.toolsAllowed.replace("{granted}", String(connection.grants.length)).replace("{total}", String(connection.catalog.length))}`}</p>
+                <p className="desktop-connector-help">{provider ? mcpProviderSummary(provider, language) : c.customDescription}</p>
+                <p className="desktop-connector-help">{server.origin}</p>
+                {refusedHost && <p className="desktop-connector-help" data-testid="desktop-connector-unavailable">{d.oauthUnsupportedHost.replace("{host}", () => refusedHost)}</p>}
+              </div>
+              <button type="button" className="soft" disabled={busy} onClick={() => connection ? choose(connection) : openServer(server)}>
+                {connection ? c.manage : c.connect}</button>
+            </li>;
+          }
+          if (card.id === "custom") {
+            const enabled = Boolean(inventory?.customEnabled);
+            return <li key="custom" data-testid="desktop-connector-custom">
+              <ServiceLogo src={undefined} />
+              <div className="desktop-connector-summary"><strong>{c.custom}</strong><p>{enabled ? c.customReady : c.serverSetup}</p><p className="desktop-connector-help">{c.customDescription}</p></div>
+              <button type="button" className="soft" disabled={busy || !enabled} onClick={openCustom}>{c.connect}</button>
+            </li>;
+          }
+          // A platform the web lists that this deployment has no server for: what it is and where its documentation is, as on the web.
+          return <li key={card.id} data-testid="desktop-connector-provider" data-provider={card.id}>
+            <ServiceLogo src={logoOf(provider)} />
             <div className="desktop-connector-summary">
-              <strong>{server.name}</strong>
-              <p>{stateOf(server)}{connection && ` · ${d.toolsAllowed.replace("{granted}", String(connection.grants.length)).replace("{total}", String(connection.catalog.length))}`}</p>
-              <p className="desktop-connector-help">{summary}</p>
-              <p className="desktop-connector-help">{server.origin}</p>
+              <strong>{card.name}</strong>
+              <p>{c.serverSetup}</p>
+              <p className="desktop-connector-help">{provider ? mcpProviderSummary(provider, language) : ""}</p>
+              {provider && <p className="desktop-connector-help">{[p[provider.kind], ...provider.sources.map((name) => name === "openai" ? "Codex" : "Claude Code")].join(" · ")}</p>}
             </div>
-            <button type="button" className="soft" disabled={busy} onClick={() => connection ? choose(connection) : openServer(server)}>
-              {connection ? c.manage : c.connect}</button>
+            <button type="button" className="soft" disabled={busy || !provider} onClick={() => provider && chooseProvider(provider)}>{p.details}</button>
           </li>;
         })}
-        {customVisible && <li data-testid="desktop-connector-custom">
-          <ServiceLogo id="custom" custom />
-          <div className="desktop-connector-summary"><strong>{c.custom}</strong><p className="desktop-connector-help">{c.customDescription}</p></div>
-          <button type="button" className="soft" disabled={busy} onClick={openCustom}>{c.connect}</button>
-        </li>}
       </ul>
+      {visibleCards.length > limit && <button type="button" className="soft" data-testid="desktop-connector-more" onClick={() => setLimit((value) => value + PAGE)}>
+        {p.more} ({Math.min(limit, visibleCards.length)}/{visibleCards.length})</button>}
     </>}
 
     {selected && tab !== "approvals" && <section ref={detailRef} className="desktop-connector-detail" aria-label={c.manage} data-testid="desktop-connector-detail">
@@ -313,6 +368,17 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
           .then((next) => { if (next) setSelectedId(undefined); })}>{c.disconnect}</button>
       </div>
       <p className="desktop-connector-help">{c.disconnectNotice}</p>
+    </section>}
+    {selectedProvider && tab !== "approvals" && !selected && <section ref={detailRef} className="desktop-connector-detail" aria-label={p.details} data-testid="desktop-provider-detail">
+      <h3>{selectedProvider.name}</h3>
+      <p className="desktop-connector-help">{p[selectedProvider.kind]}</p>
+      <p>{p[`${selectedProvider.kind}Help`]}</p>
+      {selectedProvider.origins.map((origin) => <p className="desktop-connector-help" key={origin}>{origin}</p>)}
+      {!!selectedProvider.profiles.length && <p className="desktop-connector-help">{p.profiles}: {selectedProvider.profiles.join(", ")}</p>}
+      {linkViewUrl(selectedProvider.docs) && <p><a href={selectedProvider.docs} data-testid="desktop-provider-docs"
+        onClick={(event) => { event.preventDefault(); void openLink(selectedProvider.docs).catch(() => {}); }}>{p.docs} ↗</a></p>}
+      <p className="desktop-connector-help">{c.sharing}</p>
+      <p className="desktop-connector-help">{c.permissionNotice}</p>
     </section>}
     <LocalExtensionsPanel language={language} />
   </section>;

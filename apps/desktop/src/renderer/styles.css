@@ -247,6 +247,13 @@ pre, code { font-family: var(--font-code); }
 .provider-cli-list li { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, .9fr) minmax(max-content, .55fr); align-items: center; gap: 12px; min-height: 62px; border-bottom: 1px solid var(--line); }
 .provider-cli-list small { color: var(--muted); overflow-wrap: anywhere; }
 .provider-cli-list button { justify-self: start; }
+/* Spanning every column, it must not size them: a long path would widen the last column and squeeze the name to a letter a line. */
+.provider-cli-found { grid-column: 1 / -1; display: grid; gap: 10px; padding: 0 0 14px; contain: inline-size; }
+.provider-cli-candidate { display: grid; gap: 4px; padding: 10px 12px; border-radius: 8px; background: var(--surface); }
+.provider-cli-file { overflow-wrap: anywhere; }
+.provider-cli-offer { display: grid; gap: 6px; margin: 0 0 18px; padding: 14px 16px; border-radius: 8px; background: var(--surface); }
+.provider-cli-offer p { margin: 0; color: var(--muted); }
+.provider-cli-scan-status { align-self: center; color: var(--muted); }
 .provider-cli-connection { display: grid; gap: 14px; margin-top: 54px; }
 .provider-cli-connection input { width: 100%; min-height: 56px; padding-inline: 16px; border: 0; border-radius: 8px; background: var(--surface); }
 .provider-cli-actions { display: flex; flex-wrap: wrap; gap: 12px; }
@@ -366,6 +373,7 @@ pre, code { font-family: var(--font-code); }
 .composer-tool-state { margin-inline-start: auto; flex: 0 0 auto; font-size: 11px; color: var(--muted); }
 .chat-location-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
 .chat-location-status span { flex: 1; min-width: 0; }
+.chat-location-status .chat-location-settings { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); font-size: 12px; padding: 3px 8px; cursor: pointer; }
 .location-spin { animation: location-rotate 1s linear infinite; }
 @keyframes location-rotate { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .location-spin { animation: none; } }
@@ -704,3 +712,14 @@ button.review-chip[aria-pressed="false"]:hover:not(:disabled) { opacity: 1; }
 .review-chip--empty { padding-inline: 10px; color: var(--muted); }
 .review-chip-logo { flex: none; width: 22px; height: 22px; display: grid; place-items: center; overflow: hidden; border-radius: 999px; background: #fff; color: #3f3f46; font-size: 8px; font-weight: 700; }
 .review-chip-logo img { width: 15px; height: 15px; object-fit: contain; }
+.desktop-voice-menu-anchor { position: relative; display: inline-flex; }
+.desktop-voice-menu { position: absolute; bottom: calc(100% + 8px); right: 0; z-index: 10; min-width: 220px; display: grid; gap: 2px; padding: 6px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 12px 32px #0004; }
+.dark .desktop-voice-menu { background: #18181b; border-color: #3f3f46; }
+.desktop-voice-menu button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border-radius: 8px; text-align: start; color: var(--text); font-size: 13px; }
+.desktop-voice-menu button:hover:not(:disabled), .desktop-voice-menu button:focus-visible { background: var(--raised); }
+.desktop-voice-menu button:disabled { opacity: .5; }
+.desktop-voice-menu small { display: block; font-size: 11px; color: var(--muted); }
+.desktop-dictation .desktop-voice-menu span { font-size: 13px; color: inherit; }
+.desktop-dictation .desktop-voice-menu small { font-size: 11px; color: var(--muted); }
+.desktop-dictation [data-voice-busy] { color: var(--action); }

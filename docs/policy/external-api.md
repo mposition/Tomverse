@@ -71,6 +71,7 @@ All default off. Server-side; hiding UI is never the gate.
 | `EXTERNAL_API_ANTHROPIC_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on the Anthropic Messages routes for Claude Code: `POST /api/anthropic/v1/messages`, its `count_tokens` and `GET /api/anthropic/v1/models`. Off: 503 `feature_unavailable`, nothing dispatched. |
 | `EXTERNAL_API_RESPONSES_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on `POST /api/v1/responses` for Codex. Off: 503, nothing dispatched. |
 | `TOMVERSE_DESKTOP_WEB_SEARCH_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on `POST /api/code/v1/web-search`, the agent engine's paid web search (section 11.1), and Desktop's `desktopCodeWebSearch` capability. Off: 503 `feature_unavailable`, nothing searched or held. Needs a ready search backend (`BRAVE_SEARCH_API_KEY` and the `search-provider:brave` budget) as Chat's search does. |
+| `TOMVERSE_DESKTOP_CODE_SESSION_ENABLED` | Exactly `true` (with `TOMVERSE_DESKTOP_AUTH_ENABLED`) lets Desktop Code's agent engine use the signed-in Desktop session instead of an API key on its five coding API calls (section 11.2), and makes Desktop's capabilities say `desktopCodeSession`. Off: those calls take a key as before, and a Desktop session token is refused there. |
 | `TOMVERSE_CLI_GUIDE_ENABLED` | Exactly `true` shows the Tomverse CLI install and connect card in Settings > Developer and Settings > API keys (section 11). Off until the package is published, so the page never points at a package that is not on the registry. It turns nothing on in the API. |
 | `EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED` | Exactly `true` lets Smart Adaptive (section 5.1) ask Chat's router model which candidate answers. Off by default, because each routed request adds one router call, held against the provider operational budget rather than the user's credits. Off, `smart-adaptive` still works and every request goes to the default model (on a native protocol, that provider's default, section 10.6). |
 
@@ -492,7 +493,9 @@ improved by its own optimizer, as Chat's router is.
 ## 6. Data
 
 `ExternalApiKey`: name, prefix, digest, cap, expiry, revocation, last use.
-`ExternalApiRequest`: the link from a key to its reservation, model, whether
+`ExternalApiRequest`: the link from a key (or, for Desktop Code on the signed-in
+Desktop session, the account itself in `desktopUserId`, with no key; section 11.2)
+to its reservation, model, whether
 it streamed, the wire protocol (`chat_completions`, `anthropic_messages` or
 `responses`; migration `20261118160000_external_api_request_protocol`, rows
 from before it read as Chat Completions), which API it came through (`surface`:
@@ -507,8 +510,9 @@ The account data export includes both tables without the digests
 (`api_keys`, `api_requests`, the latter with `surface`). The key's receipts --
 `GET /usage`, `GET /requests/status` and Settings > API keys -- return `surface`
 too, null for a request recorded before it. Deleting the account deletes its keys and
-request links; the shared reservation rows stay, detached from the person, as
-every Chat reservation does.
+request links (a Desktop session request through its own `desktopUserId` relation);
+the shared reservation rows stay, detached from the person, as every Chat
+reservation does.
 
 ## 7. Client setup
 
@@ -1057,6 +1061,68 @@ the key is read. Code: `lib/codeWebSearch.ts`, `lib/codeWebSearchCore.ts`.
   once with its own Idempotency-Key, shows its sources to the person, and is
   never given to a read-only or plan session or to a subagent. The model
   evaluation harness (`tools/code-eval`) does not turn it on.
+
+### 11.2 Desktop Code on the signed-in Desktop session
+
+Owner decision 2026-11-27: Desktop Code works with the account the person signed
+in to, as Codex and Claude Code do after sign-in; there is no step that connects
+an API key. Every other tool (the CLI, Cursor, Claude Code, Codex, any coding
+tool) keeps using API keys. Default off: `TOMVERSE_DESKTOP_CODE_SESSION_ENABLED`
+must be exactly `true`, with `TOMVERSE_DESKTOP_AUTH_ENABLED`. Code:
+`lib/externalApiCaller.ts`, `lib/nativeBearerGate.ts` (`desktopCodeSessionRoute`).
+
+- **Exactly the calls the bundled agent engine makes** (`apps/tomverse-cli/src/gateway.ts`):
+  `GET /api/code/v1/models`, `GET /api/code/v1/usage`,
+  `GET /api/code/v1/requests/status`, `POST /api/code/v1/chat/completions` and
+  `POST /api/code/v1/web-search`. A request is read as a Desktop session only
+  with `Origin: tomverse://desktop` on one of those method and path pairs while
+  the switch is on; the proxy verifies its token first and refuses a cookie
+  beside it. The coding API's Responses and Anthropic Messages routes, the
+  general API and key management never take a session. Any other request is a
+  key request exactly as before, and a Desktop session request never falls back
+  to a key or a cookie: an invalid, expired, revoked or mobile token is 401
+  `invalid_desktop_session`.
+- **A Code token, not the session token.** Those calls take only a short token
+  of their own audience (`<audience>/desktop/code`, `AccessTokenClient`
+  `desktop-code` in `lib/mobileAccessToken.ts`), which Desktop's main process
+  asks for with its session token at `POST /api/auth/desktop/code-token`
+  (bearer only, no Origin or cookie; off with the switch). It is the same
+  account, device and token family, lives as long as an access token (600 s) and
+  is checked against the live family on every use, so signing out or revoking
+  the device ends it. The Code runtimes, which run the agent's commands, hold
+  only this token: it is refused on every other Desktop route, the Desktop
+  session token is refused on these calls, and a Code token cannot ask for
+  another. A Code key's reach is the coding API; a Code token's is narrower
+  still, five calls.
+- **The same caller as a key.** The session resolves to the account, and
+  everything after authentication is the key path's code: the account list and
+  paid plan (`externalApiAccountAccess`, so Code is Pro and above here too, 403
+  `plan_not_eligible`), the request-rate guards, the shared credit reservation
+  with the account's credits, concurrency and provider cost limits, settlement,
+  refunds and the receipt. **No price changes**: the same coding API rates and
+  settlement rules as a key request (section 4, `docs/policy/credit-and-cost-limits.md`).
+- **What a key adds and a session does not have**: its own credit cap and
+  revocation. The admission transaction re-reads the session's token family
+  under the credit lock instead of the key, so a sign-out between authentication
+  and the reservation refuses with nothing held, as a revoked key does.
+- **Receipts.** A session request's `ExternalApiRequest` row has no key
+  (`keyId` NULL) and names the account in `desktopUserId`, which scopes its
+  `Idempotency-Key` and its receipts as `keyId` scopes a key's: the session's
+  `GET /usage` answers `key: null` with its own requests, `GET /requests/status`
+  finds only its own, and receipts say `source: "desktop_session"` (a key's say
+  `"api_key"`). Migration `20261128110000_external_api_desktop_session`: `keyId`
+  nullable, the new column with its foreign key to the account (so account
+  deletion removes the row; a key request goes with its key), a unique index on
+  (`desktopUserId`, `idempotencyKeyDigest`), and CHECK constraints that a row has
+  exactly one credential and that `desktopUserId` is the row's own account.
+  Existing rows are key requests and need no backfill.
+- **Desktop** (`apps/desktop/README.md`) adopts the session when the server's
+  capabilities name `desktopCodeSession` (the switch, the API and the account
+  list): the Code key step and its buttons go, a stored Code key file is removed
+  (the key itself stays valid on the server for other tools), and each Code
+  runtime gets the Code token in memory only, minted again on every renewal and
+  cleared at sign-out, expiry or account change. A server that does not name it
+  keeps the Code key path.
 
 
 ### Coding API reasoning effort

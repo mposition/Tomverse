@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { execFile } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
@@ -95,7 +96,7 @@ test("Qwen Code pauses for its subscription quota and restores the reported evid
     app = await launchNativeFixture(descriptor);
     const page = await app.firstWindow();
     const snapshot = () => page.evaluate(() => window.desktop.state());
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await expect.poll(async () => (await snapshot()).models.some(({ id }) => id === "fake-coder"), { timeout: taskWait }).toBe(true);
     await page.evaluate(async () => {
       await window.desktop.setCodeExecutionPreference("provider_cli");
@@ -111,7 +112,7 @@ test("Qwen Code pauses for its subscription quota and restores the reported evid
     for (const scenario of faults) {
       fault = scenario;
       const before = nativeRequests;
-      await page.getByLabel("Code mode").selectOption("ask");
+      await selectCodeMode(page, "ask");
       await page.getByRole("checkbox", { name: "Save to local history" }).check();
       await page.getByRole("textbox", { name: "Code request" }).fill(scenario.title);
       await page.getByRole("button", { name: "Send Code request", exact: true }).click();
@@ -139,7 +140,7 @@ test("Qwen Code pauses for its subscription quota and restores the reported evid
     await app.close();
     app = await launchNativeFixture(descriptor);
     const restored = await app.firstWindow();
-    await restored.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(restored);
     await restored.getByRole("complementary", { name: "History" }).getByRole("button", { name: saved.title, exact: true }).click();
     await expect.poll(async () => (await restored.evaluate(() => window.desktop.state())).task?.id).toBe(saved.id);
     const task = (await restored.evaluate(() => window.desktop.state())).task;

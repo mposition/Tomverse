@@ -92,8 +92,10 @@ export async function openAmuxV22PriorConclusions(
     const conclusion = parseAmuxV22Conclusion(text);
     if (!conclusion || amuxV22ConclusionSha256(conclusion) !== row.conclusionSha256)
       continue;
+    // The report goes too: a conclusion sums the work up, and what the
+    // dependent must act on (a list, a table) may be only in the report.
     entries.push({ label, findings: conclusion.findings,
-      note: amuxV22HandoffNotesFor(conclusion, rows.self) });
+      note: amuxV22HandoffNotesFor(conclusion, rows.self), report: text });
   }
   return entries;
 }

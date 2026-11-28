@@ -101,7 +101,9 @@ export function fitChatRequestTranscript<
     T extends { role: string; content: unknown },
 >(
     messages: readonly T[],
-    limits: TranscriptLimits = CHAT_REQUEST_TRANSCRIPT_LIMITS
+    limits: TranscriptLimits = CHAT_REQUEST_TRANSCRIPT_LIMITS,
+    /** Told how many leading messages were left out (0 when the whole transcript fits). */
+    onOmitted?: (omitted: number) => void
 ): readonly T[] {
     const maxContentBytes = Math.max(
         0,
@@ -112,6 +114,7 @@ export function fitChatRequestTranscript<
         0
     );
     if (messages.length <= limits.maxMessages && total <= maxContentBytes) {
+        onOmitted?.(0);
         return messages;
     }
 
@@ -126,5 +129,17 @@ export function fitChatRequestTranscript<
         start = index;
     }
     while (start < last && messages[start].role !== "user") start += 1;
+    onOmitted?.(start);
     return messages.slice(start);
 }
+
+/**
+ * The count of earlier messages the client left out, as the request reports
+ * it (`omittedEarlierMessages`). A hint for one system line, never an
+ * authority: anything that is not a positive whole number reads as zero and
+ * the count is capped.
+ */
+export const parseOmittedEarlierMessages = (value: unknown): number =>
+    typeof value === "number" && Number.isSafeInteger(value) && value > 0
+        ? Math.min(value, 1_000_000)
+        : 0;

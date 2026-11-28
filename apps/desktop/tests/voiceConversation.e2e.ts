@@ -19,12 +19,13 @@ type VoiceFixture = {
   voice: Array<Record<string, unknown>>;
   saves: string[];
   turns: number;
+  clips: number;
   aborted: boolean;
   feed?: ReadableStreamDefaultController<Uint8Array>;
 };
 const fixtureState = (app: ElectronApplication) => app.evaluate(() => {
-  const { offer, voice, saves, turns, aborted } = (globalThis as typeof globalThis & { voiceFixture: VoiceFixture }).voiceFixture;
-  return { offer, voice, saves, turns, aborted };
+  const { offer, voice, saves, turns, clips, aborted } = (globalThis as typeof globalThis & { voiceFixture: VoiceFixture }).voiceFixture;
+  return { offer, voice, saves, turns, clips, aborted };
 });
 /** One event of the session's stream, as the server writes it. */
 const push = (app: ElectronApplication, event: Record<string, unknown>) => app.evaluate((_electron, value) => {
@@ -32,19 +33,22 @@ const push = (app: ElectronApplication, event: Record<string, unknown>) => app.e
   feed!.enqueue(new TextEncoder().encode("data: " + JSON.stringify(value) + "\n\n"));
 }, event);
 
-/** A signed-in Chat on a faked server that offers the voice conversation. Nothing leaves this computer. */
-async function launch() {
+/**
+ * A signed-in Chat on a faked server that offers the voice conversation. Nothing leaves this computer.
+ * With `dictation` the server also offers dictation, so the one microphone button opens a menu of the two.
+ */
+async function launch({ dictation = false }: { dictation?: boolean } = {}) {
   const profile = await mkdtemp(join(tmpdir(), "tomverse-voice-"));
   await writeFile(join(profile, "language.txt"), "en");
   const app = await electron.launch({ executablePath, timeout: 20_000,
     args: [desktopDir, "--user-data-dir=" + profile, "--use-fake-device-for-media-stream"] });
-  await app.evaluate(({ shell }, fixtureOrigin) => {
+  await app.evaluate(({ shell }, { fixtureOrigin, withDictation }) => {
     type VoiceFixture = {
-      offer?: string; voice: Array<Record<string, unknown>>; saves: string[]; turns: number; aborted: boolean;
+      offer?: string; voice: Array<Record<string, unknown>>; saves: string[]; turns: number; clips: number; aborted: boolean;
       feed?: ReadableStreamDefaultController<Uint8Array>;
     };
     const host = globalThis as typeof globalThis & { voiceFixture: VoiceFixture };
-    host.voiceFixture = { voice: [], saves: [], turns: 0, aborted: false };
+    host.voiceFixture = { voice: [], saves: [], turns: 0, clips: 0, aborted: false };
     const state = host.voiceFixture;
     const chat = { id: "voice-chat", title: "Voice fixture", kind: "chat", surface: "chat", productKey: "chat" };
     const messages: Array<Record<string, unknown>> = [];
@@ -65,7 +69,7 @@ async function launch() {
       if (url.pathname === "/api/auth/desktop/exchange") return Response.json({ ok: true, accessToken: "fixture-access", refreshToken: "fixture-refresh", expiresIn: 600 });
       if (url.pathname === "/api/auth/desktop/session") return Response.json({ ok: true, account: { id: "voice-fixture", name: "Voice Fixture", email: "voice@example.test" } });
       if (url.pathname === "/api/products/chat/capabilities") {
-        return Response.json({ autoSelection: { offered: false }, desktopWrite: true, desktopVoiceConversation: true,
+        return Response.json({ autoSelection: { offered: false }, desktopWrite: true, desktopVoiceConversation: true, ...(withDictation ? { desktopVoiceInput: true } : {}),
           voiceConversation: { enabled: true, maxSeconds: 300, continuous: true, reservationSeconds: 60 } });
       }
       if (url.pathname === "/api/models/catalog") {
@@ -94,6 +98,14 @@ async function launch() {
           createdAt: new Date(20_000 + messages.length).toISOString() });
         return new Response(reply);
       }
+      if (url.pathname === "/api/chat/voice-transcription") {
+        if (init?.method !== "POST" || headers.get("origin") !== "tomverse://desktop" || headers.get("authorization") !== "Bearer fixture-access" ||
+            !headers.get("content-type")?.startsWith("audio/") || !(init.body instanceof Uint8Array) || init.body.length < 2_048) {
+          return Response.json({ code: "VOICE_TRANSCRIPTION_FAILED" }, { status: 400 });
+        }
+        state.clips += 1;
+        return Response.json({ transcript: "fixture transcript" });
+      }
       if (url.pathname === "/api/chat/voice") {
         if (init?.method !== "POST" || headers.get("origin") !== "tomverse://desktop" || headers.get("authorization") !== "Bearer fixture-access" ||
             headers.has("cookie")) return Response.json({ code: "VOICE_AUTHENTICATION_REQUIRED" }, { status: 401 });
@@ -114,7 +126,7 @@ async function launch() {
       }
       return new Response(null, { status: 404 });
     };
-  }, origin);
+  }, { fixtureOrigin: origin, withDictation: dictation });
   const desktop = await app.firstWindow();
   await desktop.getByRole("button", { name: "Settings", exact: true }).click();
   await desktop.getByRole("button", { name: "Sign in with your browser", exact: true }).click();
@@ -128,14 +140,20 @@ test("Chat holds a two-way voice conversation: the microphone opens for one sess
   try {
     const open = desktop.getByTestId("voice-conversation-open");
     const panel = desktop.getByTestId("voice-conversation-panel");
-    // With an empty draft the voice button takes the Send button's place; typed words bring Send back.
+    // One microphone button, beside Send, which stays in its place and is off while the draft is empty. Without dictation the
+    // button opens the conversation directly; typed words turn Send on and the conversation off.
+    const send = desktop.getByRole("button", { name: "Send Chat message", exact: true });
     await expect(open).toBeVisible();
-    await expect(desktop.getByRole("button", { name: "Send Chat message", exact: true })).toHaveCount(0);
+    await expect(open).toBeEnabled();
+    await expect(send).toBeVisible();
+    await expect(send).toBeDisabled();
     const message = desktop.getByRole("textbox", { name: "Chat message", exact: true });
     await message.fill("typed");
-    await expect(open).toHaveCount(0);
-    await expect(desktop.getByRole("button", { name: "Send Chat message", exact: true })).toBeVisible();
+    await expect(open).toBeDisabled();
+    await expect(send).toBeEnabled();
     await message.fill("");
+    await expect(send).toBeDisabled();
+    await expect(open).toBeEnabled();
 
     // The window cannot open the microphone by itself.
     const microphone = () => desktop.evaluate(async () => {
@@ -230,6 +248,85 @@ test("signing out ends a voice session at once", { timeout: 120_000, skip: !orig
     await expect.poll(async () => (await desktop.evaluate(() => window.desktop.state())).account.stage).not.toBe("connected");
     await expect(panel).toHaveCount(0);
     await expect(desktop.getByTestId("voice-conversation-open")).toHaveCount(0);
+  } finally {
+    await app.close();
+    await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  }
+});
+
+test("With dictation on offer too, the one microphone button opens a menu: dictation fills the draft, the conversation opens its window", { timeout: 120_000, skip: !origin }, async () => {
+  const { app, desktop, profile } = await launch({ dictation: true });
+  try {
+    const trigger = desktop.getByTestId("voice-menu-trigger");
+    const menu = desktop.getByTestId("voice-menu");
+    const dictate = desktop.getByTestId("voice-menu-dictation");
+    const conversation = desktop.getByTestId("voice-menu-conversation");
+    const send = desktop.getByRole("button", { name: "Send Chat message", exact: true });
+    const message = desktop.getByRole("textbox", { name: "Chat message", exact: true });
+    const panel = desktop.getByTestId("voice-conversation-panel");
+    // Two buttons became one: no separate dictation button and no separate conversation button, and Send stays (off for an empty draft).
+    await expect(trigger).toBeVisible();
+    await expect(trigger).toHaveAccessibleName("Voice input");
+    await expect(desktop.getByRole("button", { name: "Record voice input", exact: true })).toHaveCount(0);
+    await expect(desktop.getByTestId("voice-conversation-open")).toHaveCount(0);
+    await expect(send).toBeDisabled();
+    await expect(menu).toHaveCount(0);
+
+    // Keyboard: Enter opens the menu on its first entry, the arrows move, Escape closes it and returns to the button.
+    await trigger.focus();
+    await desktop.keyboard.press("Enter");
+    await expect(menu).toBeVisible();
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await expect(dictate).toBeFocused();
+    await expect(dictate).toContainText("Dictation");
+    await expect(conversation).toContainText("Voice conversation");
+    await expect(conversation).toContainText("36 credits per minute");
+    await desktop.keyboard.press("ArrowDown");
+    await expect(conversation).toBeFocused();
+    await desktop.keyboard.press("ArrowDown");
+    await expect(dictate).toBeFocused();
+    await desktop.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+
+    // A typed draft keeps dictation and turns the conversation off: the conversation needs an empty composer.
+    await message.fill("typed");
+    await trigger.click();
+    await expect(dictate).toBeEnabled();
+    await expect(conversation).toBeDisabled();
+    await desktop.keyboard.press("Escape");
+    await message.fill("");
+
+    // Dictation: the same recording as the stand-alone button. Nothing is sent and no voice session is started.
+    await assert.rejects(desktop.evaluate(async () => {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((track) => track.stop());
+    }), /NotAllowedError|Permission denied/);
+    await trigger.click();
+    await dictate.click();
+    await expect(menu).toHaveCount(0);
+    await expect(desktop.getByRole("status").filter({ hasText: /^Recording [1-9][0-9]*s$/ })).toBeVisible();
+    await desktop.getByRole("button", { name: "Use recording as text", exact: true }).click();
+    await expect(message).toHaveValue("fixture transcript");
+    await expect(trigger).toBeVisible();
+    const dictated = await fixtureState(app);
+    assert.equal(dictated.clips, 1);
+    assert.deepEqual([dictated.voice.length, dictated.saves.length, dictated.turns], [0, 0, 0]);
+    await message.fill("");
+
+    // The conversation: its window opens, nothing is started or charged until Start, and the same button shows that it is in use.
+    await trigger.click();
+    await conversation.click();
+    await expect(panel).toHaveAttribute("data-voice-phase", "ready");
+    await expect(panel).toContainText("initially up to 36");
+    await expect(trigger).toHaveAttribute("data-voice-busy", "true");
+    await expect(trigger).toBeDisabled();
+    assert.equal((await fixtureState(app)).voice.length, 0);
+    await desktop.keyboard.press("Escape");
+    await expect(panel).toHaveCount(0);
+    await expect(trigger).toBeEnabled();
+    await expect(trigger).not.toHaveAttribute("data-voice-busy", "true");
+    assert.equal((await fixtureState(app)).voice.length, 0);
   } finally {
     await app.close();
     await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });

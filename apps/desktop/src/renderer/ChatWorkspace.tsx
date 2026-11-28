@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, CodeXml, Download, Ellipsis, FileSpreadsheet, FileText, Folder, FolderInput, ImagePlus, Link2Off, Lock, Paperclip, Pencil, Pin, Plus, Search, Share2, SlidersHorizontal, Sparkles, Square, Trash2, Unlock } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, CodeXml, Download, Ellipsis, FileSpreadsheet, FileText, Folder, FolderInput, ImagePlus, Link2Off, Lock, Mic, Paperclip, Pencil, Pin, Plus, Search, Share2, SlidersHorizontal, Sparkles, Square, Trash2, Unlock } from "lucide-react";
 import { autoRoutingCopy } from "../../../../lib/autoRoutingCopy";
 import { chatHelpCopy } from "../../../../components/chat/chatHelpCopy";
 import { continuationDisplayTitle } from "../../../../lib/continuationDisplayTitle";
@@ -33,8 +33,9 @@ import { zh } from "../../../../locales/zh";
 import { zhHant } from "../../../../locales/zhHant";
 import { reviewSeedFromChat } from "../../../../lib/chatReviewHandoff";
 import { ChatLocationStatus, ChatLocationTool, useChatLocation } from "./ChatDraftLocation";
+import { sendToolOptions, shownWebSearchMode } from "./new-conversation-search";
 import { useSendGuard } from "./send-guard";
-import { DesktopVoiceConversation } from "./DesktopVoiceConversation";
+import { CREDITS_PER_MINUTE, DesktopVoiceConversation } from "./DesktopVoiceConversation";
 import type { VoiceConversationCapability } from "../voice-contract";
 import { DraftDictation } from "./DraftDictation";
 import { ImportedSourceUnlock } from "./ImportedSourceUnlock";
@@ -919,6 +920,8 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
   const [toolDraft, setToolDraft] = useState<{ scope: string; changes: ComposerOptions }>();
   const toolChanges = toolDraft?.scope === toolsScope ? toolDraft.changes : undefined;
   const location = useChatLocation(deviceLocation && chat.account ? chat.account : null);
+  // A new Chat starts with search on, as on the web; what the switch shows is what the first request carries.
+  const sendTools = sendToolOptions(Boolean(activeId), toolChanges);
   const draftExcerpt = activeId ? undefined : handoff;
   const availableAuto = chat.conversation?.autoSelection.offered ?? (!activeId && autoOffered);
   const autoCopy = autoRoutingCopy[language];
@@ -978,19 +981,20 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
         effort: !depth && effortEnabled ? turnEffort : "default", attachmentUploadIds,
         ...(depth ? { deepResearchDepth: depth } : { handoffId: draftExcerpt?.id, currentLocation,
           ...(connectors && connector && !draftExcerpt ? { mcpConnectionId: connector } : {}) }),
-        tools: composerTools ? toolChanges : undefined });
+        tools: composerTools ? (depth ? toolChanges : sendTools) : undefined });
       if (saved) { attachments.clear(); setToolDraft(undefined); }
     });
   }
 
   // The voice conversation is for a plain, unlocked Chat: no words typed, no files, no excerpt waiting.
-  const voicePrimary = Boolean(voiceConversation && chatWrite && !chat.sending && !chat.draft.trim() && !attachments.files.length &&
-    !attachments.uploading && !draftExcerpt && !chat.selected?.isLocked);
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const voiceReady = Boolean(voiceConversation && chatWrite && !chat.sending && !chat.draft.trim() && !attachments.files.length &&
+    !attachments.uploading && !draftExcerpt && !chat.selected?.isLocked) && online && Boolean(selectedModel) && !chat.writing && !preparing;
   /** What the voice heard goes through the ordinary Send: the same model choice, tools, credits and saved messages. */
   async function requestVoiceAnswer(text: string) {
     if (!chatWrite || !online || !selectedModel || chat.draft.trim() || attachments.files.length || draftExcerpt) throw new Error("The composer is busy.");
     const result = await chat.dispatch({ modelId: selectedModel.id, selectionMode: mode, effort: effortEnabled ? turnEffort : "default",
-      attachmentUploadIds: [], currentLocation: await location.read(), tools: composerTools ? toolChanges : undefined }, text);
+      attachmentUploadIds: [], currentLocation: await location.read(), tools: composerTools ? sendTools : undefined }, text);
     if (result?.savedQuestion) setToolDraft(undefined);
     if (!result?.conversation || !result.sourceUserMessageId || result.status !== "saved") throw new Error("The voice answer did not finish.");
     return { conversationId: result.conversation.id, sourceUserMessageId: result.sourceUserMessageId };
@@ -1138,7 +1142,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
             onDrive={online && attachments.googleDrive ? () => void attachments.importDrive() : undefined} driveFull={attachments.driveFull}
             onResearch={online && researchModel && !draftExcerpt ? () => setResearchSetup(toolsScope) : undefined}
             researchTools={research.tools}
-            options={composerTools ? { webSearchMode: chat.conversation?.webSearchMode, memoryMode: chat.conversation?.memoryMode,
+            options={composerTools ? { webSearchMode: shownWebSearchMode(Boolean(activeId), chat.conversation?.webSearchMode, undefined), memoryMode: chat.conversation?.memoryMode,
               assistantProfileId: chat.conversation?.assistantProfile?.profileId, ...toolChanges } : undefined}
             setOptions={(change) => setToolDraft({ scope: toolsScope, changes: { ...toolChanges, ...change } })}>
             {deviceLocation && <ChatLocationTool location={location} disabled={chat.sending || chat.writing || attachments.uploading} />}
@@ -1161,18 +1165,23 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
             {mode === "auto" ? autoCopy.label : selectedModel?.name ?? shellCopy.model}
             {effortEnabled && turnEffort !== "default" && ` · ${effortLabels[turnEffort]}`}
           </DesktopModelPicker>
+          {/* One microphone button. With a voice conversation on offer it opens a menu of dictation and the conversation; without one it dictates directly. */}
           {dictation && <DraftDictation language={language} scope={"chat:" + (activeId ?? "new")}
-            disabled={chat.sending || attachments.uploading || preparing} draft={chat.draft} setDraft={chat.setDraft} />}
-          {/* With an empty draft the voice conversation takes the Send button's place, as on the web. It stays mounted while an answer is sent. */}
+            disabled={chat.sending || attachments.uploading || preparing} draft={chat.draft} setDraft={chat.setDraft}
+            conversation={voiceConversation && chatWrite ? { open: voiceOpen, disabled: !voiceReady, creditsPerMinute: CREDITS_PER_MINUTE,
+              onChoose: () => setVoiceOpen(true) } : undefined} />}
+          {!dictation && voiceConversation && chatWrite && <button type="button" className="icon" data-testid="voice-conversation-open"
+            aria-label={copy.voiceConversation} title={copy.voiceConversation} disabled={!voiceReady || voiceOpen}
+            onClick={() => setVoiceOpen(true)}><Mic size={16} /></button>}
+          {/* The window stays mounted while an answer is sent. */}
           {voiceConversation && chatWrite && <DesktopVoiceConversation language={language} capability={voiceConversation}
-            conversationId={activeId ?? null} scopeKey={chat.account ?? ""} primary={voicePrimary}
-            disabled={!online || !selectedModel || chat.writing || preparing}
+            conversationId={activeId ?? null} scopeKey={chat.account ?? ""} open={voiceOpen} onOpenChange={setVoiceOpen}
             selectionLabel={mode === "auto" ? autoCopy.label : selectedModel?.name ?? shellCopy.model}
-            searchEnabled={(toolChanges?.webSearchMode ?? chat.conversation?.webSearchMode) === "always"}
+            searchEnabled={(composerTools ? shownWebSearchMode(Boolean(activeId), chat.conversation?.webSearchMode, toolChanges) : toolChanges?.webSearchMode ?? chat.conversation?.webSearchMode) === "always"}
             onRequest={requestVoiceAnswer} />}
           {chat.sending
             ? <button className="send stop" type="button" aria-label={copy.stop} onClick={() => void window.desktop.stopChat()}><Square size={17} /></button>
-            : !voicePrimary && <button className="send" type="submit" aria-label={copy.send}
+            : <button className="send" type="submit" aria-label={copy.send}
               disabled={!chatWrite || !online || !selectedModel || (!chat.draft.trim() && !attachments.files.length && !draftExcerpt) || chat.writing || attachments.uploading || preparing}><ArrowUp size={18} /></button>}
         </div>
       </form>

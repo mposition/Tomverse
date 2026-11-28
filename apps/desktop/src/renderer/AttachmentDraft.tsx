@@ -7,6 +7,7 @@ import type { Language } from "../../../../lib/language";
 import { desktopFilesCopy } from "../../../../locales/desktopFiles";
 import { desktopShellCopy } from "../../../../locales/desktopShell";
 import type { AttachmentUpload } from "../attachment-contract";
+import { driveNotice, statusAfterPhase, type AttachmentTransferStatus } from "../attachment-status";
 import type { ChatConversation } from "../chat-contract";
 
 type DraftFile = { id: string; name: string; size: number; mediaType: string } &
@@ -14,12 +15,13 @@ type DraftFile = { id: string; name: string; size: number; mediaType: string } &
 type Transfer = { id?: string; cancelled: boolean };
 const noFiles: DraftFile[] = [];
 
-type AttachmentNotice = "unsupportedFiles" | "cleanupUnconfirmed" | "uploadUnconfirmed" | "cancelledUpload" | "googleDriveError";
+type AttachmentNotice = "unsupportedFiles" | "cleanupUnconfirmed" | "uploadUnconfirmed" | "cancelledUpload" | "googleDriveError" | "driveTimeout";
 
 export function useAttachmentDraft(scope: string, enabled: boolean, language: Language, googleDrive = false) {
   const [drafts, setDrafts] = useState<Record<string, DraftFile[]>>({});
   const [notice, setNotice] = useState<AttachmentNotice | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [status, setStatus] = useState<AttachmentTransferStatus>(null);
   const transfer = useRef<Transfer | null>(null);
   const hasDrafts = useRef(false);
   const files = drafts[scope] ?? noFiles;
@@ -28,7 +30,11 @@ export function useAttachmentDraft(scope: string, enabled: boolean, language: La
     if (!transfer.current) return;
     transfer.current.cancelled = true;
     if (transfer.current.id) void window.desktop.cancelAttachmentUpload(transfer.current.id).catch(() => {});
+    setStatus(null);
   }
+
+  useEffect(() => window.desktop.subscribeAttachmentPhase((event) =>
+    setStatus((current) => statusAfterPhase(current, transfer.current?.id, event))), []);
 
   useEffect(() => window.desktop.subscribe((snapshot) => {
     if (snapshot.account.stage === "connected") return;
@@ -70,6 +76,7 @@ export function useAttachmentDraft(scope: string, enabled: boolean, language: La
     const attempt = { id, cancelled: false };
     transfer.current = attempt;
     setUploading(true);
+    setStatus("driveSelecting");
     setNotice(null);
     try {
       const result = await window.desktop.importDriveAttachments({ requestId: id, slots: remainingSlots, remainingBytes });
@@ -84,12 +91,13 @@ export function useAttachmentDraft(scope: string, enabled: boolean, language: La
         }));
         setDrafts((previous) => ({ ...previous, [scope]: [...(previous[scope] ?? []), ...next] }));
       }
-      if (result.incomplete) setNotice("googleDriveError");
+      setNotice(driveNotice(result));
     } catch {
       if (!attempt.cancelled) setNotice("googleDriveError");
     } finally {
       if (transfer.current === attempt) transfer.current = null;
       setUploading(false);
+      setStatus(null);
     }
   }
 
@@ -109,6 +117,7 @@ export function useAttachmentDraft(scope: string, enabled: boolean, language: La
     const attempt: Transfer = { cancelled: false };
     transfer.current = attempt;
     setUploading(true);
+    setStatus("uploading");
     setNotice(null);
     const ids: string[] = [];
     try {
@@ -138,11 +147,12 @@ export function useAttachmentDraft(scope: string, enabled: boolean, language: La
       if (attempt.cancelled && hasDrafts.current) setNotice("cancelledUpload");
       if (transfer.current === attempt) transfer.current = null;
       setUploading(false);
+      setStatus(null);
     }
   }
 
   return {
-    enabled, files, language, notice, uploading, add, remove, prepare, cancel,
+    enabled, files, language, notice, uploading, status, add, remove, prepare, cancel,
     googleDrive: enabled && googleDrive, importDrive, driveFull: remainingSlots < 1 || remainingBytes < 1,
     clear: () => setDrafts((previous) => ({ ...previous, [scope]: [] })),
     onDrop(event: DragEvent) {
@@ -201,8 +211,9 @@ export function AttachmentDraftStatus({ draft, busy = false }: { draft: DesktopA
           onClick={() => void draft.remove(item)}><X size={14} /></button>
       </li>)}
     </ul>}
-    {draft.uploading && <div className="attachment-progress">
-      <p role="status">{copy.uploading}</p><button className="soft" type="button" onClick={draft.cancel}>{copy.cancelUpload}</button>
+    {draft.status && <div className="attachment-progress">
+      <p role="status">{draft.status === "driveSelecting" ? copy.drivePicking : copy.uploading}</p>
+      <button className="soft" type="button" onClick={draft.cancel}>{draft.status === "driveSelecting" ? copy.driveCancel : copy.cancelUpload}</button>
     </div>}
     {draft.notice && <p className="notice" role="status">{draft.notice === "googleDriveError" ?
       <LanguageProvider initialLang={draft.language} forceInitialLang><GoogleDriveError /></LanguageProvider> : copy[draft.notice]}</p>}

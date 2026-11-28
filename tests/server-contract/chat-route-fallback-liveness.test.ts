@@ -3096,7 +3096,11 @@ for (const decision of ["accepted", "kept_original", undefined] as const) {
         : Buffer.from(llmRouterRewrite).toString("base64url"));
       const text = (content: unknown) => typeof content === "string" ? content
         : (content as Array<{ type: string; text?: string }>).filter(part => part.type === "text").map(part => part.text).join("");
-      for (const attempt of attempts) assert.equal(text(attempt.messages.at(-1)!.content), decision ? expected : llmRouterRewrite);
+      // The rewrite is appended to the original, never in place of it.
+      for (const attempt of attempts) assert.equal(text(attempt.messages.at(-1)!.content), decision ? expected
+        : `${expected}
+
+Router interpretation: ${llmRouterRewrite}`);
       assert.equal(refinerConsumes, decision ? 1 : 0);
     } finally { refinerMode = null; llmRouterRewrite = null; }
   });
