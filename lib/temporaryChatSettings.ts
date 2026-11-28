@@ -22,3 +22,16 @@ export async function isTemporaryChatEnabled(): Promise<boolean> {
         return false;
     }
 }
+
+/**
+ * The Admin write path (Admin > Platform settings, audited by the route).
+ * Turning it off only stops new temporary Chats; the sweep still deletes the
+ * ones already started. "true"/"false" only.
+ */
+export async function setTemporaryChatEnabled(enabled: boolean) {
+    await prisma.appSetting.upsert({
+        where: { key: TEMPORARY_CHAT_FLAG_KEY },
+        update: { value: enabled ? "true" : "false" },
+        create: { key: TEMPORARY_CHAT_FLAG_KEY, value: enabled ? "true" : "false" },
+    });
+}

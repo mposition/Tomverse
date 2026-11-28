@@ -1,7 +1,7 @@
 // Reads which models each worker CLI offers on the AMUX host and records them
 // in Tomverse (owner decision 2026-10-27). No model is called: Cursor and
-// Copilot and Antigravity print their lists, Codex keeps its own cache. Run as the user that
-// owns the CLIs' sign-ins:
+// Copilot and Antigravity print their lists, Codex keeps its own cache and Kimi
+// its config. Run as the user that owns the CLIs' sign-ins:
 //
 //   node scripts/amux-cli-models-refresh.mjs --dry-run   # print, send nothing
 //   node scripts/amux-cli-models-refresh.mjs             # send each list
@@ -16,8 +16,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { readAntigravityModelList, readCodexModelsCache, readCopilotHelpConfig, readCursorModelList } from
-  "../lib/amux/cliModelListReader.mjs";
+import { readAntigravityModelList, readCodexModelsCache, readCopilotHelpConfig, readCursorModelList,
+  readKimiConfigModels } from "../lib/amux/cliModelListReader.mjs";
 
 const run = promisify(execFile);
 // The CLI monitor's switch as agentOfficeCliMonitorSwitchOn reads it; kept
@@ -38,6 +38,16 @@ const sources = {
   antigravity: async () => readAntigravityModelList((await run(bin("agy"), ["models"], {
     timeout: 60_000, maxBuffer: 4 * 1024 * 1024,
     env: { ...process.env, NO_COLOR: "1", AGY_CLI_DISABLE_AUTO_UPDATE: "true" } })).stdout),
+  // Kimi Code CLI lists no models; its login writes them to its config. A
+  // host without a Kimi login is skipped, not a failure.
+  kimi: async () => {
+    const path = join(process.env.KIMI_SHARE_DIR || join(homedir(), ".kimi"), "config.toml");
+    const text = await readFile(path, "utf8").catch((error) => {
+      if (error?.code === "ENOENT") return null;
+      throw error;
+    });
+    return text === null ? null : readKimiConfigModels(text);
+  },
 };
 
 function destination() {
@@ -59,6 +69,10 @@ for (const [cli, read] of Object.entries(sources)) {
   } catch {
     process.stderr.write(`amux_cli_models_unreadable cli=${cli}\n`);
     process.exitCode = 1;
+    continue;
+  }
+  if (models === null) {
+    process.stdout.write(`amux_cli_models_skipped cli=${cli}\n`);
     continue;
   }
   if (models.length === 0) {

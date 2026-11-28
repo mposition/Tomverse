@@ -51,18 +51,34 @@ const cdn = HTML_PREVIEW_CDN_HOSTS.join(" ");
 /** Where this application serves the files a preview may load from its own origin (public/vendor/artifact-preview). */
 export const HTML_PREVIEW_VENDOR_PATH = "/vendor/artifact-preview/";
 
+/**
+ * The only files under that path a frame may load, named one by one (the
+ * React preview's three libraries, lib/chatArtifactPreview.ts). The policy
+ * lists each file rather than the directory, so a file added there later is
+ * not reachable from a model's page until it is added here. The integrity
+ * hash stays on the `<script>` element: a hash in the policy itself would make
+ * the browser ignore `'unsafe-inline'`, and a model's page runs inline script.
+ */
+export const HTML_PREVIEW_VENDOR_FILES = [
+    "react-18.3.1.production.min.js",
+    "react-dom-18.3.1.production.min.js",
+    "babel-standalone-7.26.2.min.js",
+] as const;
+
 /** This application's origin as a CSP source, or null when it is not a plain http(s) origin. */
 export const previewAssetOrigin = (origin: string | null | undefined) =>
     typeof origin === "string" && /^https?:\/\/[A-Za-z0-9.-]+(?::\d{1,5})?$/.test(origin) ? origin : null;
 
 /**
- * The frame policy. With this application's origin it also admits the vendored
- * preview files under `HTML_PREVIEW_VENDOR_PATH` on that origin, and nothing
- * else of it (a `srcdoc` frame's own origin is opaque, so `'self'` would not).
+ * The frame policy. With this application's origin it also admits the three
+ * vendored preview files, by exact URL, and nothing else of that origin (a
+ * `srcdoc` frame's own origin is opaque, so `'self'` would not).
  */
 export const htmlPreviewCsp = (assetOrigin?: string | null) => {
     const origin = previewAssetOrigin(assetOrigin);
-    const vendor = origin ? ` ${origin}${HTML_PREVIEW_VENDOR_PATH}` : "";
+    const vendor = origin
+        ? HTML_PREVIEW_VENDOR_FILES.map((file) => ` ${origin}${HTML_PREVIEW_VENDOR_PATH}${file}`).join("")
+        : "";
     return [
         "default-src 'none'",
         `script-src 'unsafe-inline' ${cdn}${vendor}`,
@@ -116,7 +132,14 @@ const attributeEscape = (value: string) => value.replace(/&/g, "&amp;").replace(
  */
 export function buildHtmlPreviewSrcdoc(html: string, assetOrigin?: string | null): string {
     const page = html.replace(LEADING_DOCTYPE, "");
-    const inner = `<!doctype html><meta http-equiv="Content-Security-Policy" content="${htmlPreviewCsp(assetOrigin)}">${page}`;
+    // The second meta switches off the browser's own DNS prefetching for the
+    // frame. A CSP does not cover resource hints (`<link rel="preconnect">`
+    // and the like); they are a known residual risk. The page is NOT parsed
+    // here to strip them: this parent document never parses or rewrites the
+    // model's HTML (see withEmbedderNonce for the one existing exception).
+    const inner =
+        `<!doctype html><meta http-equiv="Content-Security-Policy" content="${htmlPreviewCsp(assetOrigin)}">` +
+        `<meta http-equiv="x-dns-prefetch-control" content="off">${page}`;
     return (
         `<!doctype html><meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_OUTER_CSP}">` +
         `<body style="margin:0;height:100vh;overflow:hidden">` +

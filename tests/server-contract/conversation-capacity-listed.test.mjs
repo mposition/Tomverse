@@ -38,7 +38,9 @@ test("the quota's 'listed' condition is the list route's, so the two cannot drif
   // apiSecurity.ts cannot import lib/conversationProduct.ts (Prompt Refiner runtime source closure),
   // so it spells the condition out; this pins it to the list route's own filter.
   const list = readFileSync("app/api/conversations/route.ts", "utf8");
-  assert.match(list, /where: \{ userId, NOT: STUDIO_RUN_CONVERSATION, temporaryExpiresAt: null \}/);
+  // The list may add the archive filter (?archived=only|include); the quota deliberately does not,
+  // so an archived conversation still counts and archiving cannot be used to pass the cap.
+  assert.match(list, /where: \{ userId, NOT: STUDIO_RUN_CONVERSATION, temporaryExpiresAt: null(, \.\.\.archivedListWhere\(req\))? \}/);
   assert.match(readFileSync("lib/apiSecurity.ts", "utf8"), /where: \{ userId, \.\.\.LISTED_CONVERSATION_WHERE \}/);
 });
 

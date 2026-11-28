@@ -8,6 +8,9 @@ const CHANNEL: Record<AmuxWorkerChannel, { glyph: string; name: string; tone: st
   copilot: { glyph: "Co", name: "Copilot", tone: "bg-blue-600" },
   cursor: { glyph: "Cu", name: "Cursor", tone: "bg-indigo-600" },
   antigravity: { glyph: "Ag", name: "Antigravity", tone: "bg-teal-600" },
+  kimi: { glyph: "Ki", name: "Kimi", tone: "bg-slate-600" },
+  qwen: { glyph: "Qw", name: "Qwen", tone: "bg-violet-600" },
+  zai: { glyph: "Z", name: "Z.ai", tone: "bg-cyan-700" },
 };
 
 /** The product name of an AMUX channel, as the operator says it. */

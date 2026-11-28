@@ -1,5 +1,28 @@
 const isDevelopment = process.env.NODE_ENV === "development";
 
+// Python code run (lib/chatCodeRun.ts re-exports these). Kept here so lib/csp.ts and proxy.ts import nothing new.
+/** Exactly `true` turns it on. Read on the server (a Client Component's `process.env` is fixed at build time). */
+export const chatCodeRunEnabled = (env: Record<string, string | undefined> = process.env) =>
+    env.TOMVERSE_CHAT_CODE_RUN_ENABLED === "true";
+
+/**
+ * The pages that show an answer and so may offer Run: Chat, Review, a continued
+ * conversation and an imported one. Only these get `'wasm-unsafe-eval'` in
+ * their policy (lib/csp.ts); nothing else on the site can run WebAssembly.
+ */
+export const chatCodeRunPagePath = (pathname: string | null | undefined): boolean =>
+    typeof pathname === "string" &&
+    /^\/(?:chat(?:\/workspace)?|review|continuations\/[^/]+|settings\/imports\/conversations\/[^/]+)\/?$/.test(pathname);
+
+/**
+ * A request the server refuses for the runtime directory: one with a query string, or any method but GET and HEAD.
+ * The runner's policy admits that directory for `connect-src` and a policy cannot see a query or a body, so this is the
+ * server's half of keeping text out of requests to it. The runner's code has no way to make one (the worker removes its
+ * network first, see `CODE_RUN_BLOCKED_GLOBALS`); this is the second lock. The runtime loads with plain GETs.
+ */
+export const codeRunVendorRequestRefused = (pathname: string, method: string, search: string): boolean =>
+    pathname.startsWith("/vendor/pyodide/") && (search !== "" || (method !== "GET" && method !== "HEAD"));
+
 /** The public offline document contains no account state or inline script. */
 export const createOfflineChatCsp = () => [
   "default-src 'none'", "script-src 'self'", "style-src 'self'", "img-src 'self'",
@@ -81,10 +104,19 @@ const directives = (
  */
 export const DESKTOP_DRIVE_PICKER_PATH = "/auth/desktop/drive-picker";
 
+/**
+ * A frame made by `srcdoc` inherits this page's policy, and the Python runner's frame (lib/chatCodeRunFrame.ts)
+ * cannot compile WebAssembly unless the page's `script-src` allows it. `'wasm-unsafe-eval'` allows that and
+ * nothing else (`eval` and `Function` stay blocked). It is on only for the pages that show an answer, and only
+ * while the runner's switch is on, so with the switch off this policy is byte for byte what it was.
+ */
+const wasmSource = (pathname?: string) =>
+  chatCodeRunEnabled() && chatCodeRunPagePath(pathname) ? " 'wasm-unsafe-eval'" : "";
+
 export const createStrictCsp = (nonce: string, pathname?: string) =>
   [
     ...directives(
-      `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${
+      `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${wasmSource(pathname)}${
         isDevelopment ? " 'unsafe-eval'" : ""
       } https://accounts.google.com https://apis.google.com https://www.googletagmanager.com https://challenges.cloudflare.com`,
       `style-src 'self' 'nonce-${nonce}'${

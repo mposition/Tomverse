@@ -613,6 +613,11 @@ export const EXCLUDED_PREFIXES = [
       "React and Babel exactly as published, served to the sandboxed chat preview frame and pinned by sha384 (lib/chatArtifactPreview.ts). They run only in the browser, with no database to reach, and nothing of ours can be added without breaking the pin.",
   },
   {
+    prefix: "public/vendor/pyodide/",
+    reason:
+      "Pyodide's loader, its wasm build and the numpy, pandas and matplotlib wheels exactly as published, served to the sandboxed Python runner frame and pinned by sha256 (lib/chatCodeRunFrame.ts). They run only in the user's browser, with no database to reach, and nothing of ours can be added without breaking the pin.",
+  },
+  {
     path: "scripts/check-protected-table-writers-core.mjs",
     reason:
       "This check. It names the tables, delegates, verbs and raw methods it forbids, and opens no database connection. An exact path, not a prefix, so a similarly named file is still scanned.",
@@ -1466,6 +1471,15 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       `The one mention is the ALTER TABLE that replaces ${table}'s CHECKs to admit the antigravity worker class (owner decision 2026-11-10).` +
       " The migration only replaces five CHECK constraints (registry class, the two CLI model tables' CLI, and the usage ledger's source and shape); its write verbs are the DROP/ADD CONSTRAINT clauses and words of comments. It writes no row.",
+  })),
+  ...["AmuxWorkerRegistryEvent", "AmuxCliUsageEvent"].map((table) => ({
+    path: "prisma/migrations/20261128120000_amux_kimi_qwen_zai_worker_classes/migration.sql",
+    table,
+    tableMentions: 1,
+    writeVerbs: 9,
+    reason:
+      `The one mention is the ALTER TABLE that replaces ${table}'s CHECKs to admit the kimi, qwen and zai worker classes (owner request and decision 2026-11-28).` +
+      " The migration only replaces the same five CHECK constraints as the antigravity one (registry class, the two CLI model tables' CLI, and the usage ledger's source and shape); its write verbs are the DROP/ADD CONSTRAINT clauses and words of comments. It writes no row.",
   })),
   {
     path: "prisma/migrations/20261106200000_amux_cli_usage_failure_kind/migration.sql",

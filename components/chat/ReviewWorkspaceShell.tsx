@@ -75,6 +75,7 @@ import { ChatAudioAttachmentProvider } from "@/components/chat/ChatAudioAttachme
 import { chatAudioAttachmentEnabled } from "@/lib/chatAudioAttachment";
 import { ChatServerReadoutProvider } from "@/components/chat/ChatServerReadoutContext";
 import { chatServerReadoutOffered } from "@/lib/chatReadoutServer";
+import { chatCodeRunEnabled } from "@/lib/chatCodeRun";
 
 // The chat UI itself is a Client Component (state, storage, streaming), so
 // this Server Component exists for one reason: to hand it the guest default
@@ -407,6 +408,7 @@ export async function ReviewWorkspaceShell({
         chatImageIntentEnabled={chatImageIntentEnabled || imageTriageFixtureOffered}
         chatLocationIntentEnabled={process.env.TOMVERSE_CHAT_LOCATION_INTENT_ENABLED === "true"}
         chatArtifactWorkspaceEnabled={process.env.TOMVERSE_CHAT_ARTIFACT_WORKSPACE_ENABLED === "true"}
+        chatCodeRunEnabled={chatCodeRunEnabled()}
         chatParallelPreparationEnabled={process.env.CHAT_PARALLEL_PREPARATION_ENABLED === "true"}
         chatRouterLocationFusion={chatRouterLocationFusionEnabled()}
         existingChatRouterLocationFusion={existingChatRouterLocationFusionEnabled()}
