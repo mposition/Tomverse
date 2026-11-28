@@ -27,15 +27,20 @@ import { prisma } from "@/lib/prisma";
  */
 
 const OPEN = { sharingAvailable: true, planAllowsSharing: true };
+/** The switch as the public route passes it when sharing is on. */
+const LIVE = { sharingAvailable: true };
 const PAGE = "<!doctype html>\n<h1>Quarterly chart</h1>\n<script>document.title = 'x'</script>";
 const ANSWER = `Here is the page:\n\n\`\`\`html\n${PAGE}\n\`\`\`\n\nOpen the preview to see it.`;
 
 const reset = async () => {
   await prisma.$executeRawUnsafe(`
-    TRUNCATE TABLE "ArtifactShare", "MessageArtifact", "Message", "Conversation", "User"
+    TRUNCATE TABLE "ArtifactShare", "MessageArtifact", "ResearchReportRevision", "ResearchPreviewRun",
+      "ConversationContinuationBridge", "Message", "Conversation", "User"
     RESTART IDENTITY CASCADE
   `);
   await prisma.appSetting.deleteMany({ where: { key: { in: [ARTIFACT_SHARING_FLAG_KEY, "feature.publicSharingEnabled"] } } });
+  // The plan catalogue's defaults (every plan shares) come back when the row is gone.
+  await prisma.billingPlan.deleteMany({ where: { id: "free" } });
 };
 
 beforeEach(reset);
@@ -81,7 +86,7 @@ test("a code block from the owner's answer is published as a snapshot and opened
   assert.equal(first.created, true);
   assert.match(first.share.token, /^[A-Za-z0-9_-]{32}$/);
 
-  const page = await readPublicArtifactShare(first.share.token);
+  const page = await readPublicArtifactShare(first.share.token, LIVE);
   assert.equal(page?.content, PAGE);
   assert.equal(page?.previewKind, "html");
 
@@ -96,7 +101,7 @@ test("a code block from the owner's answer is published as a snapshot and opened
 
   // A later edit of the answer does not change the shared page: it is the snapshot.
   await prisma.message.update({ where: { id: answer.id }, data: { content: "edited away" } });
-  assert.equal((await readPublicArtifactShare(first.share.token))?.content, PAGE);
+  assert.equal((await readPublicArtifactShare(first.share.token, LIVE))?.content, PAGE);
 });
 
 test("text the answer does not contain, another account's answer, and a user message are not sources", async () => {
@@ -144,9 +149,9 @@ test("a lock set between the check and the write publishes nothing; a lock set l
 
   await prisma.conversation.update({ where: { id: chat.id }, data: { password: null } });
   const published = await share(user.id, answer.id);
-  assert.ok(await readPublicArtifactShare(published.share.token));
+  assert.ok(await readPublicArtifactShare(published.share.token, LIVE));
   await prisma.conversation.update({ where: { id: chat.id }, data: { password: "hashed-password" } });
-  assert.equal(await readPublicArtifactShare(published.share.token), null);
+  assert.equal(await readPublicArtifactShare(published.share.token, LIVE), null);
 });
 
 test("an expired link is not served or offered, and sharing again issues a new token", async () => {
@@ -156,14 +161,14 @@ test("an expired link is not served or offered, and sharing again issues a new t
     where: { id: first.share.id },
     data: { createdAt: new Date(Date.now() - 3 * 60 * 60 * 1000), expiresAt: new Date(Date.now() - 60 * 1000) },
   });
-  assert.equal(await readPublicArtifactShare(first.share.token), null);
+  assert.equal(await readPublicArtifactShare(first.share.token, LIVE), null);
   assert.equal(await findArtifactShare(user.id, first.prepared.sourceKey), null);
 
   const renewed = await share(user.id, answer.id);
   assert.equal(renewed.created, true);
   assert.notEqual(renewed.share.token, first.share.token);
-  assert.equal(await readPublicArtifactShare(first.share.token), null);
-  assert.ok(await readPublicArtifactShare(renewed.share.token));
+  assert.equal(await readPublicArtifactShare(first.share.token, LIVE), null);
+  assert.ok(await readPublicArtifactShare(renewed.share.token, LIVE));
   assert.equal(await prisma.artifactShare.count(), 1);
 });
 
@@ -172,9 +177,9 @@ test("only the owner can stop a link, and a stopped link is gone", async () => {
   const stranger = await seed();
   const published = await share(user.id, answer.id);
   assert.equal(await revokeArtifactShare(stranger.user.id, published.share.id), false);
-  assert.ok(await readPublicArtifactShare(published.share.token));
+  assert.ok(await readPublicArtifactShare(published.share.token, LIVE));
   assert.equal(await revokeArtifactShare(user.id, published.share.id), true);
-  assert.equal(await readPublicArtifactShare(published.share.token), null);
+  assert.equal(await readPublicArtifactShare(published.share.token, LIVE), null);
   assert.equal(await prisma.artifactShare.count(), 0);
   assert.equal(await revokeArtifactShare(user.id, published.share.id), false);
 });
@@ -216,7 +221,7 @@ test("deleting the answer, the conversation, the generated file or the account t
     content: PAGE,
   });
   assert.equal(fromFile?.created, true);
-  assert.equal((await readPublicArtifactShare(fromFile!.share.token))?.title, "chart.html");
+  assert.equal((await readPublicArtifactShare(fromFile!.share.token, LIVE))?.title, "chart.html");
   await prisma.messageArtifact.delete({ where: { id: artifact.id } });
   assert.equal(await prisma.artifactShare.count(), 0);
 
@@ -274,4 +279,124 @@ test("a block whose line endings differ is the same source, keyed on the hash th
   assert.equal(crlf.prepared.sourceKey, lf.prepared.sourceKey);
   assert.equal(lf.prepared.sourceKey, `code:${answer.id}:${sha256Hex(PAGE)}`);
   assert.equal(crlf.prepared.content, PAGE);
+});
+
+/* ---------- a link closes when its source stops qualifying ---------- */
+
+const continueImport = (userId: string, conversationId: string) =>
+  prisma.conversationContinuationBridge.create({
+    data: {
+      userId,
+      conversationId,
+      provider: "chatgpt",
+      sourceImportedAt: new Date(),
+      sourceConversationDigest: "artifact-share-source",
+      sourceDigestVersion: 1,
+      sourceMessageCount: 1,
+      seedFromOrdinal: 0,
+      seedToOrdinal: 0,
+      seedMessageCount: 1,
+      seedTruncatedMessageCount: 0,
+      seedOmittedMessageCount: 0,
+      contextSeedVersion: "ext-seed-v1",
+      idempotencyKey: randomUUID(),
+    },
+  });
+
+/** A finished engine-2 Research run behind the answer, with only public URL sources until a test says otherwise. */
+const attachResearchRun = async (seeded: Awaited<ReturnType<typeof seed>>) => {
+  const prompt = await prisma.message.findFirstOrThrow({ where: { conversationId: seeded.chat.id, role: "user" } });
+  const run = await prisma.researchPreviewRun.create({
+    data: {
+      userId: seeded.user.id,
+      conversationId: seeded.chat.id,
+      sourceUserMessageId: prompt.id,
+      assistantMessageId: seeded.answer.id,
+      modelId: "gemini-3-1-pro",
+      provider: "google",
+      apiModel: "gemini-3.1-pro-preview",
+      locale: "en",
+      currentDate: "2026-11-28",
+      questionDigest: `sha256:${"a".repeat(64)}`,
+      totalOutputTokens: 4096,
+      inputTokenCeiling: 10,
+      searchSurchargeCredits: 0,
+      engineVersion: 2,
+      status: "completed",
+      approvedCredits: 0,
+      inputManifest: { version: 1, entries: [{ type: "url", url: "https://example.test/report" }] },
+    },
+  });
+  await prisma.message.update({ where: { id: seeded.answer.id }, data: { researchRunId: run.id } });
+  return run;
+};
+
+test("a conversation that becomes a continuation closes its link, and the same rule refuses a new one", async () => {
+  const seeded = await seed();
+  const published = await share(seeded.user.id, seeded.answer.id);
+  assert.ok(await readPublicArtifactShare(published.share.token, LIVE));
+
+  const bridge = await continueImport(seeded.user.id, seeded.chat.id);
+  assert.equal(await readPublicArtifactShare(published.share.token, LIVE), null);
+  const refused = await prepareArtifactShare(seeded.user.id, codeSource(seeded.answer.id), OPEN);
+  assert.equal(refused.ok === false && refused.code, "CONTINUATION_SHARE_NOT_SUPPORTED");
+  // Closed, not deleted -- as a lock closes a link.
+  assert.equal(await prisma.artifactShare.count(), 1);
+
+  await prisma.conversationContinuationBridge.delete({ where: { id: bridge.id } });
+  assert.ok(await readPublicArtifactShare(published.share.token, LIVE));
+});
+
+test("a Research answer that comes to use private sources closes its link, by manifest or by report revision", async () => {
+  const seeded = await seed();
+  const run = await attachResearchRun(seeded);
+  // Public sources only: the link may be made and opens.
+  const published = await share(seeded.user.id, seeded.answer.id);
+  assert.ok(await readPublicArtifactShare(published.share.token, LIVE));
+
+  // A private source (an attached file) joins the run's manifest.
+  await prisma.researchPreviewRun.update({
+    where: { id: run.id },
+    data: { inputManifest: { version: 1, entries: [{ type: "url", url: "https://example.test/report" }, { type: "file", attachmentId: "att_1" }] } },
+  });
+  assert.equal(await readPublicArtifactShare(published.share.token, LIVE), null);
+  const refused = await prepareArtifactShare(seeded.user.id, codeSource(seeded.answer.id), OPEN);
+  assert.equal(refused.ok === false && refused.code, "RESEARCH_SHARE_PRIVATE");
+
+  // Back to public sources, but the current report revision is marked as containing private material.
+  await prisma.researchPreviewRun.update({
+    where: { id: run.id },
+    data: { inputManifest: { version: 1, entries: [{ type: "url", url: "https://example.test/report" }] }, currentReportRevision: 1 },
+  });
+  await prisma.researchReportRevision.create({
+    data: { runId: run.id, revision: 1, planRevision: 0, inputRevision: 0, author: "model", qualityStatus: "complete", document: {}, containsPrivate: true },
+  });
+  assert.equal(await readPublicArtifactShare(published.share.token, LIVE), null);
+
+  await prisma.researchReportRevision.update({ where: { runId_revision: { runId: run.id, revision: 1 } }, data: { containsPrivate: false } });
+  assert.ok(await readPublicArtifactShare(published.share.token, LIVE));
+});
+
+test("an owner whose plan stops including sharing has their links closed", async () => {
+  const seeded = await seed();
+  const published = await share(seeded.user.id, seeded.answer.id);
+  assert.ok(await readPublicArtifactShare(published.share.token, LIVE));
+
+  // The owner's plan (Free, the default) is changed in the plan catalogue to exclude sharing.
+  await prisma.billingPlan.upsert({
+    where: { id: "free" },
+    update: { allowSharing: false },
+    create: { id: "free", name: "Free", tier: "Free", monthlyPriceCents: 0, allowSharing: false },
+  });
+  assert.equal(await readPublicArtifactShare(published.share.token, LIVE), null);
+
+  await prisma.billingPlan.update({ where: { id: "free" }, data: { allowSharing: true } });
+  assert.ok(await readPublicArtifactShare(published.share.token, LIVE));
+});
+
+test("with the switch off the read refuses before it reads the link", async () => {
+  const seeded = await seed();
+  const published = await share(seeded.user.id, seeded.answer.id);
+  assert.equal(await readPublicArtifactShare(published.share.token, { sharingAvailable: false }), null);
+  assert.ok(await readPublicArtifactShare(published.share.token, LIVE));
 });

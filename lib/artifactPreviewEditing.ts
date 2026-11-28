@@ -77,13 +77,31 @@ export const editedDownload = (
  */
 const editedVersions = new Map<string, string>();
 
-export const editedVersionKey = (source: { artifactId?: string | null; kind: CodePreviewKind; original: string }) =>
-    source.artifactId ? `artifact:${source.artifactId}` : `code:${source.kind}:${source.original}`;
+/**
+ * Which edit belongs to which source. A file is its id. A code block is where
+ * it is -- its answer's `data-message-id` and its position among that
+ * answer's blocks, the same source the share link reads -- plus its text, so
+ * two answers that hold the same code keep their edits apart, and an answer
+ * whose block changed does not inherit an edit of the old one. A block with no
+ * answer id (an answer not saved yet) has no key and keeps no edit.
+ */
+export const editedVersionKey = (source: {
+    artifactId?: string | null;
+    messageId?: string | null;
+    blockIndex?: number | null;
+    kind: CodePreviewKind;
+    original: string;
+}): string | null => {
+    if (source.artifactId) return `artifact:${source.artifactId}`;
+    if (!source.messageId || source.blockIndex == null || !Number.isInteger(source.blockIndex) || source.blockIndex < 0) return null;
+    return `code:${source.messageId}:${source.blockIndex}:${source.kind}:${source.original}`;
+};
 
-export const readEditedVersion = (key: string) => editedVersions.get(key) ?? null;
+export const readEditedVersion = (key: string | null) => (key ? editedVersions.get(key) ?? null : null);
 
-/** Keeps `draft` for `key`, or forgets it when it is the original again. */
-export const keepEditedVersion = (key: string, draft: string, original: string) => {
+/** Keeps `draft` for `key`, or forgets it when it is the original again. Nothing is kept without a key. */
+export const keepEditedVersion = (key: string | null, draft: string, original: string) => {
+    if (!key) return;
     if (draft === original) editedVersions.delete(key);
     else editedVersions.set(key, draft);
 };

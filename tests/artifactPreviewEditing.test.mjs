@@ -52,7 +52,7 @@ test("a download keeps a file's own name and types each kind", () => {
 
 test("an edit is kept for its source until it is the original again", () => {
     const fileKey = editedVersionKey({ artifactId: "art_1", kind: "html", original: "<p>a</p>" });
-    const blockKey = editedVersionKey({ kind: "html", original: "<p>a</p>" });
+    const blockKey = editedVersionKey({ messageId: "msg_1", blockIndex: 0, kind: "html", original: "<p>a</p>" });
     assert.notEqual(fileKey, blockKey);
     assert.equal(readEditedVersion(fileKey), null);
     keepEditedVersion(fileKey, "<p>b</p>", "<p>a</p>");
@@ -60,6 +60,30 @@ test("an edit is kept for its source until it is the original again", () => {
     assert.equal(readEditedVersion(blockKey), null);
     keepEditedVersion(fileKey, "<p>a</p>", "<p>a</p>");
     assert.equal(readEditedVersion(fileKey), null);
+});
+
+test("the same code in two answers, or twice in one answer, keeps its edits apart", () => {
+    const original = "<p>same</p>";
+    const first = editedVersionKey({ messageId: "msg_1", blockIndex: 0, kind: "html", original });
+    const otherAnswer = editedVersionKey({ messageId: "msg_2", blockIndex: 0, kind: "html", original });
+    const laterBlock = editedVersionKey({ messageId: "msg_1", blockIndex: 1, kind: "html", original });
+    assert.equal(new Set([first, otherAnswer, laterBlock]).size, 3);
+    keepEditedVersion(first, "<p>edited in the first answer</p>", original);
+    assert.equal(readEditedVersion(first), "<p>edited in the first answer</p>");
+    assert.equal(readEditedVersion(otherAnswer), null);
+    assert.equal(readEditedVersion(laterBlock), null);
+    // A block whose text changed is a different source.
+    assert.notEqual(editedVersionKey({ messageId: "msg_1", blockIndex: 0, kind: "html", original: "<p>new</p>" }), first);
+    keepEditedVersion(first, original, original);
+});
+
+test("a block with no saved answer around it keeps no edit at all", () => {
+    for (const where of [{}, { messageId: null, blockIndex: 0 }, { messageId: "msg_1", blockIndex: -1 }, { messageId: "msg_1" }]) {
+        const key = editedVersionKey({ ...where, kind: "html", original: "<p>x</p>" });
+        assert.equal(key, null, JSON.stringify(where));
+        keepEditedVersion(key, "<p>y</p>", "<p>x</p>");
+        assert.equal(readEditedVersion(key), null);
+    }
 });
 
 const shape = (value) =>

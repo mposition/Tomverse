@@ -38,6 +38,8 @@ const world = {
   share: null as null | { previewKind: "html" | "svg" | "react"; language: string; title: string | null; content: string; expiresAt: Date },
   rateLimitKeys: [] as string[],
   sessionReads: [] as string[],
+  readGates: [] as Array<{ sharingAvailable: boolean }>,
+  rateLimited: false,
 };
 
 const reset = () => {
@@ -45,6 +47,8 @@ const reset = () => {
   world.share = { previewKind: "html", language: "html", title: "chart.html", content: PAGE, expiresAt: new Date("2026-12-28T00:00:00.000Z") };
   world.rateLimitKeys = [];
   world.sessionReads = [];
+  world.readGates = [];
+  world.rateLimited = false;
 };
 
 const forbidden = (name: string) => () => {
@@ -56,12 +60,15 @@ let installed = false;
 const load = async () => {
   if (!installed) {
     installed = true;
-    const realApiSecurity = require(resolve(ROOT, "lib/apiSecurity.ts")) as Record<string, unknown>;
+    const realApiSecurity = require(resolve(ROOT, "lib/apiSecurity.ts")) as Record<string, unknown> & {
+      ApiSecurityError: new (status: number, code: string, message: string) => Error;
+    };
     mock.module(mod("lib/apiSecurity.ts"), {
       namedExports: {
         ...realApiSecurity,
         consumeApiRateLimit: async (_req: Request, key: string) => {
           world.rateLimitKeys.push(key);
+          if (world.rateLimited) throw new realApiSecurity.ApiSecurityError(429, "RATE_LIMITED", "Too many requests");
         },
       },
     });
@@ -69,7 +76,13 @@ const load = async () => {
       namedExports: { isArtifactSharingEnabled: async () => world.enabled, isArtifactSharingSwitchOn: async () => world.enabled, setArtifactSharingEnabled: async () => {} },
     });
     mock.module(mod("lib/artifactShareService.ts"), {
-      namedExports: { readPublicArtifactShare: async () => world.share },
+      // The real read refuses a closed switch first (tests/integration/artifact-share.db.test.ts); this records what the route passed.
+      namedExports: {
+        readPublicArtifactShare: async (_token: string, gates: { sharingAvailable: boolean }) => {
+          world.readGates.push(gates);
+          return gates.sharingAvailable ? world.share : null;
+        },
+      },
     });
     mock.module(mod("lib/chatRouteSession.ts"), { namedExports: { resolveChatRouteSession: forbidden("resolveChatRouteSession") } });
     mock.module("next-auth/next", { namedExports: { getServerSession: forbidden("getServerSession") } });
@@ -151,8 +164,22 @@ test("a wrong token, the switch off and a link that is not live are the same 404
     const body = await response.text();
     assert.doesNotMatch(body, /<iframe|<script/, label);
     bodies.push(body);
+    // The switch reaches the read's own decision; a weak token never gets that far.
+    if (label === "switch off") assert.deepEqual(world.readGates, [{ sharingAvailable: false }], label);
+    if (label === "weak token") assert.deepEqual(world.readGates, [], label);
   }
   assert.equal(new Set(bodies).size, 1);
+});
+
+test("the public read is rate limited before anything about the link is read", async () => {
+  reset();
+  world.rateLimited = true;
+  const { GET } = await load();
+  const response = await GET(request(), context());
+  assert.equal(response.status, 429);
+  assert.deepEqual(world.rateLimitKeys, [`artifact-share:${TOKEN}`]);
+  assert.deepEqual(world.readGates, [], "the link is never read past a refused rate limit");
+  assert.doesNotMatch(await response.text(), /<iframe|<script/);
 });
 
 test("the proxy leaves the share page's policy to the route and still sets the strict one elsewhere", async () => {

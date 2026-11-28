@@ -40,6 +40,9 @@ export type EditablePreviewSource = {
   artifactId?: string | null;
   /** A generated file's name, for the download. */
   filename?: string | null;
+  /** A code block's answer (`data-message-id`) and its position among that answer's blocks: where its edit is kept. */
+  messageId?: string | null;
+  blockIndex?: number | null;
 };
 
 type Mode = "preview" | "code";

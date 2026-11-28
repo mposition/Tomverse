@@ -542,7 +542,8 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
       원문과 **같은 경로**(`buildCodePreviewDocument` → `HtmlArtifactPreviewFrame` → `buildHtmlPreviewSrcdoc`)로만 frame에
       들어가므로 sandbox·CSP·중첩 frame·1,000,000바이트 한도가 그대로입니다. 고친 내용은 이 페이지의 메모리에만 있고
       (`lib/artifactPreviewEditing.ts`, 저장소·서버·대화에 쓰지 않음, 새로고침하면 원래대로), 패널을 닫았다 열면 남아
-      있습니다. "원래대로", "복사", "내려받기"(파일은 원래 이름, React는 text/plain), 고쳤을 때만 "이 버전으로 계속"이
+      있습니다. 파일은 artifact id로, 코드 블록은 답변의 `data-message-id`와 그 답변 안 블록 위치와 원문으로 구분하므로 다른
+      답변에 같은 코드가 있어도 편집이 섞이지 않습니다. 답변 id가 없는(저장 전) 블록은 편집을 남기지 않습니다. "원래대로", "복사", "내려받기"(파일은 원래 이름, React는 text/plain), 고쳤을 때만 "이 버전으로 계속"이
       있고, 마지막은 고친 코드를 fenced block으로 감싼 요청문을 입력창에 채울 뿐 보내지 않습니다(50,000자 넘으면 내려받기
       안내, `ARTIFACT_CONTINUE_MAX_CHARS`). 스위치가 꺼져 있으면 HTML 파일 패널은 예전처럼 frame만 보입니다.
     - 서버 저장, 여러 모델 나란히 미리보기는 하지 않습니다(§12).
@@ -1280,9 +1281,16 @@ React(`jsx`·`tsx`) 코드 블록이고, 문서 파일은 대상이 아니다(§
 `artifactShareRefusal`이 한 곳에서 정한다: 스위치 꺼짐(503), 요금제 `allowSharing` false(403), 원본 없음·남의 것·답변에 없는
 코드·공유 대상이 아닌 형식(404), 채팅이 아닌 대화, 임시 대화, 잠긴 대화(비밀번호가 있으면 지금 풀려 있어도 거절),
 가져온 대화를 이어 간 대화, 비공개 자료를 쓴 Research 답변(manifest에 URL이 아닌 항목이 있거나 현재 revision이
-`containsPrivate`), 크기(413). 게스트는 로그인이 없어 401이다. 잠금과 임시 여부는 쓰는 SQL 문 안에서 한 번 더 보고
-(`INSERT … SELECT … WHERE "password" IS NULL AND "temporaryExpiresAt" IS NULL`), 공개 읽기도 매번 본다. 그래서 나중에
-대화를 잠그면 링크가 바로 열리지 않는다.
+`containsPrivate`), 크기(413). 게스트는 로그인이 없어 401이다. 잠금과 임시 여부는 쓰는 SQL 문 안에서 한 번 더 본다
+(`INSERT … SELECT … WHERE "password" IS NULL AND "temporaryExpiresAt" IS NULL`).
+
+**공개 읽기는 만들 때의 규칙 전부를 같은 함수로 다시 본다**(2026-11-28 검토 반영). 만들 때와 읽을 때 모두
+`shareRefusal`(`lib/artifactShareService.ts`) → `artifactShareRefusal`을 거치고, 사실은 링크 행에서 대화(종류·잠금·임시·
+continuation bridge)·답변의 Research run·소유자 요금제를 DB로 따라가 모은다(세션·쿠키는 읽지 않음). 그래서 링크를 만든 뒤에
+대화를 잠그거나, 가져온 대화의 이어가기가 되거나, Research run이 비공개 자료를 갖게 되거나(manifest 또는 현재 revision),
+소유자 요금제가 공유를 빼거나, 스위치가 꺼지면 다음 요청부터 "열 수 없음" 404다. 행은 지우지 않고 닫기만 하므로(잠금과 같음)
+조건이 돌아오면 만료 전까지 다시 열린다. 순서는 스위치(읽기 전) → 링크 행과 대화 사실 → 그것들이 통과할 때만 요금제(user·
+plan 두 번)와 Research(run·revision 최대 두 번) 조회이고, 이 모두가 공개 읽기 rate limit 뒤에 있다.
 
 rate limit: 만들기 분당 10·하루 100, 상태 조회 60·2,000, 중지 20·200, 공개 읽기 토큰당 120·5,000(IP 버킷 포함, 대화
 공유와 같음). 만들기·중지는 `logSecurityAuditEvent("artifact.share.create" | "artifact.share.revoke")`로 남긴다.

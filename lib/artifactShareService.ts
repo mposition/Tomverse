@@ -14,6 +14,7 @@ import {
   type ArtifactShareLanguage,
   type ArtifactShareRefusalCode,
 } from "@/lib/artifactShareAccess";
+import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import type { CodePreviewKind } from "@/lib/chatArtifactPreview";
 import { isChatConversationKind } from "@/lib/conversationKindGuard";
 import { HTML_PREVIEW_MAX_BYTES } from "@/lib/htmlArtifactPreview";
@@ -107,6 +108,64 @@ export type PrepareOutcome =
   | { ok: true; prepared: Prepared }
   | { ok: false; code: ArtifactShareRefusalCode; status: number };
 
+type Refusal = { code: ArtifactShareRefusalCode; status: number };
+
+const OPEN_CONVERSATION = { isChatKind: true, temporary: false, locked: false, continuesImport: false };
+
+/** The switches and the plan alone, decided before anything about a source is read. */
+const gateRefusal = (gates: { sharingAvailable: boolean; planAllowsSharing: boolean }) =>
+  artifactShareRefusal({ ...gates, sourceFound: true, conversation: OPEN_CONVERSATION, researchPrivate: false, contentBytes: 1 });
+
+/** The size rule alone, for a file whose bytes are known only after every other rule passed. */
+const sizeRefusal = (contentBytes: number) =>
+  artifactShareRefusal({
+    sharingAvailable: true,
+    planAllowsSharing: true,
+    sourceFound: true,
+    conversation: OPEN_CONVERSATION,
+    researchPrivate: false,
+    contentBytes,
+  });
+
+/**
+ * Every rule a link has to satisfy, for making it and for every read of it:
+ * the same facts, gathered from the database the same way, decided by the one
+ * function `artifactShareRefusal`. A rule added there applies to both at once.
+ *
+ * The facts read from the source's own rows (the conversation's kind, lock,
+ * temporary state and continuation bridge, the size) are decided first; the
+ * owner's plan and the answer's Research run cost reads of their own and are
+ * fetched only when nothing cheaper has refused.
+ */
+async function shareRefusal(input: {
+  sharingAvailable: boolean;
+  /** Already read by the caller when making a link; read here from the owner when opening one. */
+  planAllowsSharing?: boolean;
+  ownerId: string;
+  found: boolean;
+  conversation: ConversationRow | null;
+  researchRunId: string | null;
+  contentBytes: number;
+}): Promise<Refusal | null> {
+  const conversation = input.found && input.conversation?.userId === input.ownerId ? input.conversation : null;
+  const facts = {
+    sharingAvailable: input.sharingAvailable,
+    planAllowsSharing: input.planAllowsSharing ?? true,
+    sourceFound: conversation !== null,
+    conversation: conversation ? factsOf(conversation) : null,
+    researchPrivate: false,
+    contentBytes: input.contentBytes,
+  };
+  const early = artifactShareRefusal(facts);
+  if (early) return early;
+  const planAllowsSharing = input.planAllowsSharing ?? (await getUserBillingPlan(input.ownerId)).allowSharing;
+  return artifactShareRefusal({
+    ...facts,
+    planAllowsSharing,
+    researchPrivate: await researchRunUsesPrivateSources(input.researchRunId),
+  });
+}
+
 /**
  * Reads the source the caller owns and decides whether it may be published.
  * `sharingAvailable` and `planAllowsSharing` are the caller's to read; every
@@ -118,19 +177,9 @@ export async function prepareArtifactShare(
   input: ArtifactShareSourceInput,
   gates: { sharingAvailable: boolean; planAllowsSharing: boolean }
 ): Promise<PrepareOutcome> {
-  const refuse = (facts: Parameters<typeof artifactShareRefusal>[0]): PrepareOutcome | null => {
-    const refusal = artifactShareRefusal(facts);
-    return refusal ? { ok: false, ...refusal } : null;
-  };
   // The switches and the plan first, so a closed feature reads nothing else.
-  const gated = refuse({
-    ...gates,
-    sourceFound: true,
-    conversation: { isChatKind: true, temporary: false, locked: false, continuesImport: false },
-    researchPrivate: false,
-    contentBytes: 1,
-  });
-  if (gated) return gated;
+  const gated = gateRefusal(gates);
+  if (gated) return { ok: false, ...gated };
 
   if (input.kind === "artifact") {
     const artifact = await prisma.messageArtifact.findFirst({
@@ -148,25 +197,24 @@ export async function prepareArtifactShare(
         message: { select: { researchRunId: true } },
       },
     });
-    const usable =
-      artifact?.objectKey &&
-      ARTIFACT_SHARE_FILE_FORMATS.has(artifact.format.toLowerCase()) &&
-      artifact.conversation.userId === userId;
-    const base = {
+    const usable = Boolean(artifact?.objectKey && ARTIFACT_SHARE_FILE_FORMATS.has(artifact.format.toLowerCase()));
+    const before = await shareRefusal({
       ...gates,
-      sourceFound: Boolean(usable),
-      conversation: usable && artifact ? factsOf(artifact.conversation) : null,
-      researchPrivate: usable && artifact ? await researchRunUsesPrivateSources(artifact.message.researchRunId) : false,
-    };
-    const before = refuse({ ...base, contentBytes: artifact?.byteSize ?? 0 });
-    if (before || !artifact?.objectKey) return before ?? { ok: false, code: "ARTIFACT_SHARE_SOURCE_NOT_FOUND", status: 404 };
+      ownerId: userId,
+      found: usable,
+      conversation: artifact?.conversation ?? null,
+      researchRunId: artifact?.message.researchRunId ?? null,
+      contentBytes: artifact?.byteSize ?? 0,
+    });
+    if (before) return { ok: false, ...before };
+    if (!artifact?.objectKey) return { ok: false, code: "ARTIFACT_SHARE_SOURCE_NOT_FOUND", status: 404 };
     // The same non-destructive read as the download route, bounded by the preview's own limit.
     const bytes = await readOwnR2ObjectBytes(artifact.objectKey, {
       maxBytes: Math.max(1, Math.min(artifact.byteSize, HTML_PREVIEW_MAX_BYTES)),
     });
     const content = new TextDecoder("utf-8").decode(bytes);
-    const after = refuse({ ...base, contentBytes: Buffer.byteLength(content, "utf8") });
-    if (after) return after;
+    const after = sizeRefusal(Buffer.byteLength(content, "utf8"));
+    if (after) return { ok: false, ...after };
     const format = artifact.format.toLowerCase() as ArtifactShareLanguage;
     return {
       ok: true,
@@ -191,15 +239,16 @@ export async function prepareArtifactShare(
         select: { id: true, content: true, conversationId: true, researchRunId: true, conversation: { select: conversationFacts } },
       })
     : null;
-  const found = Boolean(shareable && message && answerContainsCode(message.content, content));
-  const outcome = refuse({
+  const outcome = await shareRefusal({
     ...gates,
-    sourceFound: found,
-    conversation: found && message ? factsOf(message.conversation) : null,
-    researchPrivate: found && message ? await researchRunUsesPrivateSources(message.researchRunId) : false,
+    ownerId: userId,
+    found: Boolean(shareable && message && answerContainsCode(message.content, content)),
+    conversation: message?.conversation ?? null,
+    researchRunId: message?.researchRunId ?? null,
     contentBytes: Buffer.byteLength(content, "utf8"),
   });
-  if (outcome || !message || !shareable) return outcome ?? { ok: false, code: "ARTIFACT_SHARE_SOURCE_NOT_FOUND", status: 404 };
+  if (outcome) return { ok: false, ...outcome };
+  if (!message || !shareable) return { ok: false, code: "ARTIFACT_SHARE_SOURCE_NOT_FOUND", status: 404 };
   return {
     ok: true,
     prepared: {
@@ -293,17 +342,48 @@ export async function revokeArtifactShare(userId: string, shareId: string) {
 }
 
 /**
- * What the public page shows for a token: a link that has not expired, whose
- * conversation is still not locked and not temporary. Reads no session and no
- * cookie -- it takes nothing but the token.
+ * What the public page shows for a token: a link that has not expired and
+ * that would still be allowed to be made now. Every rule of making a link is
+ * decided again, by the same `shareRefusal`, from the rows the link points
+ * at -- its conversation (kind, lock, temporary, continuation bridge), its
+ * answer's Research run and its owner's plan -- plus the switches the caller
+ * passes in. A link whose source stopped qualifying is closed, not deleted,
+ * as a lock closes one: it opens again if the source qualifies again before
+ * it expires.
+ *
+ * Reads no session and no cookie: it takes the token and follows the
+ * database from the link's own row.
  */
-export async function readPublicArtifactShare(token: string, now: Date = new Date()): Promise<PublicArtifactShare | null> {
-  if (!isStrongShareToken(token)) return null;
+export async function readPublicArtifactShare(
+  token: string,
+  gates: { sharingAvailable: boolean },
+  now: Date = new Date()
+): Promise<PublicArtifactShare | null> {
+  // The switch first, so a closed feature reads no link at all.
+  if (!isStrongShareToken(token) || gateRefusal({ sharingAvailable: gates.sharingAvailable, planAllowsSharing: true })) return null;
   const row = await prisma.artifactShare.findFirst({
-    where: { token, expiresAt: { gt: now }, conversation: { password: null, temporaryExpiresAt: null } },
-    select: { previewKind: true, language: true, title: true, content: true, expiresAt: true },
+    where: { token, expiresAt: { gt: now } },
+    select: {
+      userId: true,
+      previewKind: true,
+      language: true,
+      title: true,
+      content: true,
+      expiresAt: true,
+      conversation: { select: conversationFacts },
+      message: { select: { researchRunId: true } },
+    },
   });
   if (!row) return null;
+  const refusal = await shareRefusal({
+    sharingAvailable: gates.sharingAvailable,
+    ownerId: row.userId,
+    found: true,
+    conversation: row.conversation,
+    researchRunId: row.message.researchRunId,
+    contentBytes: Buffer.byteLength(row.content, "utf8"),
+  });
+  if (refusal) return null;
   const shareable = shareableCodeLanguage(row.language);
   if (!shareable || shareable.previewKind !== row.previewKind || Buffer.byteLength(row.content, "utf8") > HTML_PREVIEW_MAX_BYTES) {
     return null;

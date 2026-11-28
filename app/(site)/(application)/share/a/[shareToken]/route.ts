@@ -66,8 +66,9 @@ export async function GET(req: Request, context: { params: Promise<{ shareToken:
     if (!isStrongShareToken(shareToken)) return notAvailable();
     // Keyed on the link (plus the caller's address), like the conversation share's public read.
     await consumeApiRateLimit(req, `artifact-share:${shareToken}`, "artifact-share-read", { minute: 120, day: 5_000 });
-    if (!(await isArtifactSharingEnabled())) return notAvailable();
-    const share = await readPublicArtifactShare(shareToken);
+    // After the rate limit. The switch is one of the rules the read decides with all the others
+    // (shareRefusal in lib/artifactShareService.ts, the same decision that made the link).
+    const share = await readPublicArtifactShare(shareToken, { sharingAvailable: await isArtifactSharingEnabled() });
     if (!share) return notAvailable();
 
     const origin = getPublicAppOrigin(req);

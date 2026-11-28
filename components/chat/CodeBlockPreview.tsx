@@ -44,6 +44,8 @@ type Opened = {
   code: string;
   /** The answer the block is in, from the message element around it (`data-message-id`); null for an unsaved one. */
   messageId: string | null;
+  /** The block's position among that answer's blocks, -1 when there is no answer element. */
+  blockIndex: number;
 };
 
 export function CodeBlockPreview({ children, preRef }: { children: ReactNode; preRef: RefObject<HTMLPreElement | null> }) {
@@ -73,8 +75,10 @@ export function CodeBlockPreview({ children, preRef }: { children: ReactNode; pr
   const open = () => {
     // The rendered text, as the copy button reads it. mdast ends every block with the one newline that closes it.
     const code = (preRef.current?.textContent ?? "").replace(/\r?\n$/, "");
-    const messageId = preRef.current?.closest("[data-message-id]")?.getAttribute("data-message-id") || null;
-    setOpened({ kind, language, code, messageId });
+    const answer = preRef.current?.closest("[data-message-id]") ?? null;
+    const messageId = answer?.getAttribute("data-message-id") || null;
+    const blockIndex = answer && preRef.current ? Array.from(answer.querySelectorAll("pre")).indexOf(preRef.current) : -1;
+    setOpened({ kind, language, code, messageId, blockIndex });
   };
 
   const title = t("chat.artifactWorkspaceCodeTitle").replaceAll("{language}", language.toUpperCase());
@@ -95,7 +99,13 @@ export function CodeBlockPreview({ children, preRef }: { children: ReactNode; pr
       {opened && (
         <ArtifactPreviewPanelShell title={title} heading={title} onClose={close} onRevise={revise}>
           <ArtifactPreviewWorkspace
-            source={{ kind: opened.kind, language: opened.language, original: opened.code }}
+            source={{
+              kind: opened.kind,
+              language: opened.language,
+              original: opened.code,
+              messageId: opened.messageId,
+              blockIndex: opened.blockIndex,
+            }}
             title={title}
             editable
             fillComposer={fillComposer}
