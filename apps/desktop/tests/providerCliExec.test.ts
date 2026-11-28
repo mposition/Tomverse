@@ -45,6 +45,10 @@ test("The permission table, as the CLI's own options", () => {
     for (const required of ["exec", "--json", "--ignore-user-config", "--ignore-rules", "--ephemeral"]) assert.ok(args.includes(required), `${mode} ${required}`);
     assert.equal(args.at(-1), "-");
     assert.equal(pair(args, "-C"), "/work");
+    // Without the user's config Codex has no Windows sandbox and refuses every command, so the unelevated one is named there.
+    const windows = codexArguments({ cwd: "C:\\work", plan: cliPermissionPlan("openai", mode), platform: "win32" });
+    assert.equal(pair(windows, "-c"), 'windows.sandbox="unelevated"', mode);
+    assert.ok(!codexArguments({ cwd: "/work", plan: cliPermissionPlan("openai", mode), platform: "linux" }).includes("-c"), mode);
   }
 
   // Claude Code: the tool list is the hard limit; approvals come back over the stream except in Read only.
@@ -57,6 +61,8 @@ test("The permission table, as the CLI's own options", () => {
     // No tool that returns file contents without the Read deny rules (credential files) applying to it.
     assert.ok(!claudeTools(mode, "linux").includes("Grep"), mode);
     assert.equal(pair(claude(mode), "--permission-prompts"), "host", mode);
+    // Without the stdio prompt tool Claude Code denies every approval without sending can_use_tool (seen with 2.1.278).
+    assert.equal(pair(claude(mode), "--permission-prompt-tool"), "stdio", mode);
     assert.equal(pair(claude(mode), "--permission-mode"), "default", mode);
   }
   // Claude Code's own auto mode could approve a shell command that publishes; Auto review asks the person instead and says so.
@@ -72,7 +78,7 @@ test("The permission table, as the CLI's own options", () => {
   assert.ok(claudeTools("ask", "win32").includes("PowerShell"));
   for (const mode of permissionModes) {
     const args = claude(mode);
-    for (const required of ["--restricted", "--strict-mcp-config", "--no-session-persistence", "--print"]) assert.ok(args.includes(required), `${mode} ${required}`);
+    for (const required of ["--restricted", "--disable-slash-commands", "--strict-mcp-config", "--no-session-persistence", "--print"]) assert.ok(args.includes(required), `${mode} ${required}`);
     // Credential files are denied for every tool and every mode, whatever an allow rule or a mode says.
     const denied = pair(args, "--disallowedTools").split(",");
     for (const rule of ["Read(**/.env*)", "Edit(**/.env*)", "Write(**/id_rsa*)", "Read(**/.ssh/**)", "Edit(**/.git/**)", "Read(**/*.pem)"]) assert.ok(denied.includes(rule), `${mode} ${rule}`);

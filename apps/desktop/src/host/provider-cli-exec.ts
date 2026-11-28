@@ -54,28 +54,33 @@ export function claudeTools(grants: PermissionModeId, platform: NodeJS.Platform 
 /**
  * `codex exec` never asks for approval. The user's config file and exec-policy rules are not loaded (they could widen the
  * sandbox or add tools that run outside it); the flags below are the whole permission. The prompt comes on stdin.
+ * On Windows the sandbox is named here: without the config file Codex has none there and refuses every command, reads
+ * included. The unelevated sandbox needs no administrator setup.
  */
-export function codexArguments(input: { cwd: string; plan: CliPermissionPlan }): string[] {
+export function codexArguments(input: { cwd: string; plan: CliPermissionPlan; platform?: NodeJS.Platform }): string[] {
   const { grants } = input.plan;
   const permission = grants === "read_only" ? ["--sandbox", "read-only"]
     : grants === "auto_review" || grants === "allow_all" ? ["--sandbox", "workspace-write"] : null;
   if (!permission) throw new Error("Codex has no approval route for this permission.");
-  return ["exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", "-C", input.cwd, ...permission, "-"];
+  const windows = (input.platform ?? process.platform) === "win32" ? ["-c", 'windows.sandbox="unelevated"'] : [];
+  return ["exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", ...windows, "-C", input.cwd, ...permission, "-"];
 }
 
 /**
  * Claude Code in `--restricted` mode ignores the user, project and local settings files (a repository cannot bring its own
  * allow rules or hooks), and the tool list is the hard limit of what the run can reach. The approvals it asks for come back
- * over the stream protocol (`--permission-prompts host`). Allow all pre-approves the file tools only: a command is never approved
- * without the person, because the shell cannot be confined the way Codex's sandbox is.
+ * over the stream protocol (`--permission-prompt-tool stdio`; without it Claude Code denies them without asking). Skills are off.
+ * Allow all pre-approves the file tools only: a command is never approved without the person, because the shell cannot be
+ * confined the way Codex's sandbox is. Claude Code itself still runs a few commands it classes as read-only (such as `echo`)
+ * without asking; the credential deny rules apply to those too.
  */
 export function claudeArguments(input: { plan: CliPermissionPlan; sessionId: string; platform?: NodeJS.Platform }): string[] {
   const { grants } = input.plan;
   const tools = claudeTools(grants, input.platform);
   const mode = grants === "read_only" ? ["--permission-mode", "dontAsk", "--permission-prompts", "none"]
-    : ["--permission-mode", "default", "--permission-prompts", "host"];
+    : ["--permission-mode", "default", "--permission-prompts", "host", "--permission-prompt-tool", "stdio"];
   return ["--print", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-    "--restricted", "--no-session-persistence", "--session-id", input.sessionId, "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+    "--restricted", "--disable-slash-commands", "--no-session-persistence", "--session-id", input.sessionId, "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
     "--tools", tools.join(","), "--disallowedTools", claudeSecretRules.join(","),
     ...(grants === "allow_all" ? ["--allowedTools", tools.filter((tool) => !claudeShell.includes(tool)).join(",")] : []), ...mode];
 }
@@ -302,7 +307,7 @@ export async function runProviderCli(run: ExecRun): Promise<ExecResult> {
   const plan = cliPermissionPlan(run.provider, run.mode);
   const sessionId = randomUUID();
   const args = [...(run.argsPrefix ?? []),
-    ...(run.provider === "openai" ? codexArguments({ cwd: run.cwd, plan }) : claudeArguments({ plan, sessionId, platform: run.platform }))];
+    ...(run.provider === "openai" ? codexArguments({ cwd: run.cwd, plan, platform: run.platform }) : claudeArguments({ plan, sessionId, platform: run.platform }))];
   const result = (status: ExecResult["status"], exitCode: number | null, extra: Partial<ExecResult> = {}): ExecResult =>
     ({ status, exitCode, plan, skipped, stderr: stderrTail, ...extra });
   let skipped = 0;
