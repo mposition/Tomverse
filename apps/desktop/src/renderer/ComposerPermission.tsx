@@ -23,8 +23,10 @@ const modeText = (copy: Copy, mode: PermissionModeId) => ({
  * Auto review and Allow all work only where the Tomverse API runs the task; on a provider CLI route they stay in the list,
  * switched off, with the reason. Allow all asks for its confirmation here, as it does in Settings.
  */
-export function ComposerPermission({ view, language, apiRoute, readOnlyOnly, running, disabled }: {
+export function ComposerPermission({ view, language, apiRoute, cliRoute, readOnlyOnly, running, disabled }: {
   view: PermissionsView | undefined; language: Language; apiRoute: boolean;
+  /** The person's own Codex or Claude Code runs the task: Auto review is that CLI's own reviewer, so the Tomverse request charge does not apply. */
+  cliRoute?: boolean;
   /** The route can only read (a provider CLI whose file edits are not offered): Read only is the one mode that holds. */
   readOnlyOnly: boolean; running: boolean; disabled: boolean;
 }) {
@@ -93,7 +95,7 @@ export function ComposerPermission({ view, language, apiRoute, readOnlyOnly, run
           </button>;
         })}
       </div>
-      {mode === "auto_review" && <p className="project-note" role="note">{copy.autoReviewCost}</p>}
+      {mode === "auto_review" && !cliRoute && <p className="project-note" role="note">{copy.autoReviewCost}</p>}
       {confirming && <div className="permission-confirm project-confirm" role="alertdialog" aria-labelledby="composer-allow-all-title" aria-describedby="composer-allow-all-body" data-testid="permission-allow-all-confirm">
         <strong id="composer-allow-all-title">{copy.allowAllConfirmTitle}</strong>
         <p id="composer-allow-all-body">{copy.allowAllConfirmBody}</p>

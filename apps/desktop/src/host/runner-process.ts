@@ -31,6 +31,9 @@ import type { BrowserAgentRequest } from "../../../tomverse-cli/src/browser-tool
 import type { ComputerAgentRequest } from "../../../tomverse-cli/src/computer-tools";
 import { createReviewWorker } from "./review-worker";
 import { createGitDraftWorker } from "./git-draft-worker";
+import { runProviderCli } from "./provider-cli-exec";
+import { approvalRequestFor, createTranscript } from "./provider-cli-transcript";
+import { cliPermissionPlan } from "../provider-cli-exec-contract";
 import { startCodeSandbox } from "./code-sandbox";
 import { composeLaunch, type SandboxRuntime } from "../../../tomverse-cli/src/sandbox.js";
 import type { RemoteWorkspace } from "../../../tomverse-cli/src/remote-workspace.js";
@@ -543,6 +546,119 @@ async function executeStructuredFixture(command: Extract<WorkerCommand, { type: 
     task.canResume = task.savedLocally && task.status === "stopped" && !!task.nativeSession;
     task.canResumeAfterQuota = canResumeNativeQuota(task);
     task.canCheckRecovery = !cliTask && task.savedLocally && task.status === "unknown" && !!task.nativeSession;
+    if (task.status === "unknown") task.entries.push(desktopCodeNotice("runUnknown"));
+    if (task.status === "failed" && !task.entries.some((entry) => entry.role === "event" && entry.notice === "workspaceBusy")) {
+      task.entries.push(desktopCodeNotice("runtimeFailed"));
+    }
+    active = undefined;
+    send({ type: "finished", runId: command.runId, task });
+  }
+}
+
+/** A reference check needs a key to look for; a provider CLI run has no Tomverse connection, so this value never occurs in text. */
+const noConnectionKey = " no-tomverse-connection";
+const liveCliPublishMs = 120;
+
+/**
+ * One task run by the person's own provider CLI. The CLI does the work inside the permission it was started with; this only
+ * reads what it reports, shows it as the task, asks the person where the CLI asks (Claude Code), and stops the whole process
+ * tree on request. It sends nothing to a Tomverse API and uses no Tomverse credit.
+ */
+async function executeProviderCli(command: Extract<WorkerCommand, { type: "start-provider-cli" }>) {
+  if (active) return;
+  const clean = (text: string) => cleanText(text, noConnectionKey);
+  const prompt = clean(command.prompt);
+  const plan = cliPermissionPlan(command.provider, command.permission);
+  const task: Task = {
+    id: command.history?.id ?? null, root: command.project.path, title: prompt.slice(0, 80), status: "starting",
+    entries: [{ role: "user", text: prompt }], effort: "default",
+    execution: command.provider === "openai" ? codexFixtureExecution : claudeFixtureExecution,
+    readOnly: plan.grants === "read_only", savedLocally: !!command.history, references: command.references, liveCli: true,
+    changes: [], checks: [], transmission: [],
+  };
+  if (recovery) {
+    task.status = "failed";
+    task.entries.push(desktopCodeNotice("recoveryRunning"));
+    send({ type: "finished", runId: command.runId, task });
+    return;
+  }
+  const control: ActiveRun = { runId: command.runId, cancelled: false, abort: new AbortController() };
+  active = control;
+  transient = undefined;
+  let unlockProject: (() => void) | undefined;
+  let lock: string | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const transcript = createTranscript(clean);
+  const leading: Task["entries"] = [...task.entries];
+  const refresh = () => {
+    timer = undefined;
+    task.entries = [...leading, ...transcript.entries];
+    task.changes = transcript.changes;
+    task.streamingAnswer = transcript.streaming || undefined;
+    task.status = control.cancelled ? "stopping" : control.approval ? "approval" : "running";
+    send({ type: "task", runId: command.runId, task });
+  };
+  // The CLI can print faster than the window can draw: updates are sent at most this often.
+  const refreshSoon = () => { timer ??= setTimeout(refresh, liveCliPublishMs); };
+  try {
+    unlockProject = lockProject(command.project);
+    lock = claimNativeHistory(command.history);
+    assertProjectRoot(command.project);
+    let text = command.prompt;
+    if (task.references?.length) {
+      const workspace = new Workspace(command.project.path, protectedRoots(command.protectedRoot));
+      task.references = validateReferences(workspace, task.references, noConnectionKey);
+      text = withWorkspaceReferences(text, task.references);
+    }
+    if (plan.notice) leading.push(desktopCodeNotice(plan.notice));
+    task.status = "running";
+    refresh();
+    const result = await runProviderCli({
+      provider: command.provider, file: command.file, argsPrefix: command.argsPrefix, cwd: command.project.path, prompt: text,
+      mode: command.permission, env: process.env, signal: control.abort.signal,
+      onEvent: (event) => { transcript.apply(event); refreshSoon(); },
+      approve: async (approval, signal) => {
+        signal.throwIfAborted();
+        const request = approvalRequestFor(approval, command.project.path, clean);
+        // A request the card cannot show in full, or that names a credential file, is refused without asking.
+        if (!request) {
+          if (!leading.some((entry) => entry.role === "event" && entry.notice === "cliApprovalRefused")) leading.push(desktopCodeNotice("cliApprovalRefused"));
+          refresh();
+          return false;
+        }
+        refresh();
+        const action = await new Promise<Decision["action"]>((resolve) => {
+          const cancel = () => settle("deny");
+          const settle = (choice: Decision["action"]) => { signal.removeEventListener("abort", cancel); resolve(choice); };
+          control.approval = { id: request.id, canRemember: false, settle };
+          signal.addEventListener("abort", cancel, { once: true });
+          send({ type: "approval", runId: control.runId, request });
+        });
+        control.approval = undefined;
+        refresh();
+        return action === "once" && !signal.aborted;
+      },
+    });
+    clearTimeout(timer);
+    task.status = result.status;
+    transcript.clearStreaming();
+    task.entries = [...leading, ...transcript.entries];
+    task.changes = transcript.changes;
+    if (result.status === "failed" || result.status === "unknown") {
+      const detail = clean([result.error, result.stderr.trim()].filter(Boolean).join("\n")).slice(0, 1_500);
+      if (detail) task.entries.push({ role: "event", text: detail });
+    }
+  } catch (error) {
+    clearTimeout(timer);
+    task.status = "failed";
+    task.entries = [...leading, ...transcript.entries];
+    task.changes = transcript.changes;
+    if (error instanceof SessionLockedError) task.entries.push(desktopCodeNotice("workspaceBusy"));
+  } finally {
+    clearTimeout(timer);
+    task.streamingAnswer = undefined;
+    try { if (lock) unlinkSync(lock); } catch { /* An unavailable lock cannot authorize another run. */ }
+    unlockProject?.();
     if (task.status === "unknown") task.entries.push(desktopCodeNotice("runUnknown"));
     if (task.status === "failed" && !task.entries.some((entry) => entry.role === "event" && entry.notice === "workspaceBusy")) {
       task.entries.push(desktopCodeNotice("runtimeFailed"));
@@ -1777,6 +1893,8 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
       ...(error instanceof GatewayError && error.extra.status === 403 && error.extra.code === "plan_not_eligible" ? { reason: "plan" as const } : {}) }));
   } else if (data.type === "start" || data.type === "resume") {
     void execute(data);
+  } else if (data.type === "start-provider-cli") {
+    void executeProviderCli(data);
   } else if (DESKTOP_FIXTURE_ALLOWED && data.type === "start-codex-fixture") {
     void executeCodexFixture(data);
   } else if (DESKTOP_FIXTURE_ALLOWED && (data.type === "start-claude-fixture" || data.type === "start-structured-cli-fixture")) {

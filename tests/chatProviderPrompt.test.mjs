@@ -3,7 +3,12 @@ import test from "node:test";
 
 import { streamText } from "ai";
 
-import { splitProviderInstructions } from "../lib/chatProviderPrompt.ts";
+import {
+  collapseConsecutiveSameRole,
+  prepareProviderMessages,
+  requiresRoleAlternation,
+  splitProviderInstructions,
+} from "../lib/chatProviderPrompt.ts";
 
 // The split that keeps `ai@7` from refusing the turn.
 //
@@ -162,4 +167,68 @@ test("and refuses the array this split exists to prevent", async () => {
     `expected a prompt rejection, got: ${JSON.stringify(errors)}`
   );
   assert.ok(errors.some((error) => /NoOutputGenerated/.test(error)));
+});
+
+/* -------------------------------------------------------------------------- */
+/* Providers that reject adjacent same-role turns                               */
+/* -------------------------------------------------------------------------- */
+
+const memoryPrelude = { role: "user", content: "memory block" };
+const dataBlock = { role: "user", content: "continuation data" };
+
+test("only Perplexity is treated as requiring role alternation", () => {
+  assert.equal(requiresRoleAlternation("perplexity"), true);
+  for (const provider of ["openai", "anthropic", "google", "xai", null, undefined]) {
+    assert.equal(requiresRoleAlternation(provider), false);
+  }
+});
+
+test("Perplexity gets the memory prelude, data block and question as one user turn", () => {
+  const sent = prepareProviderMessages([memoryPrelude, dataBlock, user, assistant], "perplexity");
+  assert.deepEqual(sent, [
+    { role: "user", content: ["memory block", "continuation data", "hi"].join("\n\n") },
+    assistant,
+  ]);
+});
+
+test("other providers keep the messages exactly as assembled", () => {
+  const messages = [memoryPrelude, dataBlock, user];
+  assert.equal(prepareProviderMessages(messages, "openai"), messages);
+});
+
+test("merging never mutates its input", () => {
+  const first = { role: "user", content: "a" };
+  const input = [first, { role: "user", content: "b" }];
+  collapseConsecutiveSameRole(input);
+  assert.equal(first.content, "a");
+  assert.equal(input.length, 2);
+});
+
+test("image and file parts survive a merge", () => {
+  const image = { type: "image", image: "data:image/png;base64,AA" };
+  const file = { type: "file", data: "BB", mediaType: "application/pdf" };
+  const merged = collapseConsecutiveSameRole([
+    { role: "user", content: "memory block" },
+    { role: "user", content: [{ type: "text", text: "look" }, image, file] },
+  ]);
+  assert.equal(merged.length, 1);
+  assert.ok(Array.isArray(merged[0].content));
+  assert.ok(merged[0].content.includes(image));
+  assert.ok(merged[0].content.includes(file));
+  assert.equal(merged[0].content[0].text, "memory block");
+});
+
+test("tool-call turns are never merged into their neighbours", () => {
+  const toolCall = {
+    role: "assistant",
+    content: [{ type: "tool-call", toolCallId: "1", toolName: "t", input: {} }],
+  };
+  const result = collapseConsecutiveSameRole([assistant, toolCall]);
+  assert.equal(result.length, 2);
+});
+
+test("the real streamText accepts the merged Perplexity prompt", async () => {
+  const messages = prepareProviderMessages([memoryPrelude, dataBlock, user], "perplexity");
+  assert.equal(messages.length, 1);
+  assert.deepEqual(await drive({ messages }), []);
 });

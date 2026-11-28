@@ -1,10 +1,19 @@
 import "server-only";
 
+import type { Prisma } from "@prisma/client";
+
 import { CHAT_RESPONSE_ATTEMPT_ACTIVE_STATUSES } from "@/lib/chatResponseAttemptCore";
 import { lockChatRecoveryConversation } from "@/lib/chatResponseAttemptPersistence";
 import { deleteOwnedConversations } from "@/lib/conversationDeletion";
+import { STALE_IMAGE_GENERATION_AFTER_MS, STALE_IMAGE_SETTLING_AFTER_MS } from "@/lib/imageGenerationStateCore";
 import { prisma } from "@/lib/prisma";
-import { temporaryConversationSweepWhere, temporarySweepCutoff } from "@/lib/temporaryChatAccess";
+import {
+    TEMPORARY_SWEEP_LIVE_IMAGE_CALL_STATUSES,
+    TEMPORARY_SWEEP_LIVE_RESEARCH_STATUSES,
+    temporaryConversationSweepWhere,
+    temporarySweepCutoff,
+    temporarySweepMayDefer,
+} from "@/lib/temporaryChatAccess";
 
 /**
  * Conversations one batch examines, and how many batches one run may take.
@@ -18,7 +27,10 @@ export const TEMPORARY_CHAT_SWEEP_MAX_BATCHES = 20;
 export type TemporaryConversationSweepResult = {
     examined: number;
     deleted: number;
-    /** Still answering: a live durable attempt holds the conversation. */
+    /**
+     * Still working: a live durable attempt, an executing Research run or an
+     * image generation in flight holds the conversation.
+     */
     deferred: number;
     failed: number;
 };
@@ -38,6 +50,14 @@ export type TemporaryConversationSweepResult = {
  * deleted once it ends or its lease lapses. A claim that comes after the
  * delete finds no conversation and is refused.
  *
+ * The same wait covers an executing Research run and an image generation in
+ * flight: their rows cascade with the conversation, so a delete would throw
+ * the paid work away mid-call. The wait is bounded
+ * (TEMPORARY_CHAT_SWEEP_MAX_DEFER_MS after the expiry) so a stuck run cannot
+ * keep a temporary Chat alive past the deletion promise, and an image row the
+ * reconciliation sweep would already call abandoned
+ * (STALE_IMAGE_GENERATION_AFTER_MS) does not count as in flight.
+ *
  * Runs whether or not `feature.temporaryChatEnabled` is on: turning the
  * switch off stops new temporary Chats, never the deletion promised to the
  * ones that exist.
@@ -54,7 +74,7 @@ export async function sweepExpiredTemporaryConversations(
     for (let batch = 0; batch < maxBatches; batch += 1) {
         const candidates = await prisma.conversation.findMany({
             where: { ...temporaryConversationSweepWhere(cutoff), ...(seen.length ? { id: { notIn: seen } } : {}) },
-            select: { id: true, userId: true },
+            select: { id: true, userId: true, temporaryExpiresAt: true },
             orderBy: [{ temporaryExpiresAt: "asc" }, { id: "asc" }],
             take: limit,
         });
@@ -72,7 +92,7 @@ export async function sweepExpiredTemporaryConversations(
 }
 
 async function sweepOne(
-    candidate: { id: string; userId: string },
+    candidate: { id: string; userId: string; temporaryExpiresAt: Date | null },
     { now, cutoff, result }: { now: Date; cutoff: Date; result: TemporaryConversationSweepResult }
 ) {
     try {
@@ -88,6 +108,13 @@ async function sweepOne(
                 select: { assistantMessageId: true },
             });
             if (live) return "deferred" as const;
+            if (
+                candidate.temporaryExpiresAt &&
+                temporarySweepMayDefer(candidate.temporaryExpiresAt, now) &&
+                (await hasWorkInFlight(tx, candidate.id, now))
+            ) {
+                return "deferred" as const;
+            }
             const deleted = await deleteOwnedConversations(tx, {
                 userId: candidate.userId,
                 conversationIds: [candidate.id],
@@ -105,6 +132,41 @@ async function sweepOne(
             error: error instanceof Error ? error.name : "unknown",
         }));
     }
+}
+
+/** An executing Research run, or an image generation still inside its worst-case run time. */
+async function hasWorkInFlight(
+    tx: Prisma.TransactionClient,
+    conversationId: string,
+    now: Date
+): Promise<boolean> {
+    const research = await tx.researchPreviewRun.findFirst({
+        where: { conversationId, status: { in: [...TEMPORARY_SWEEP_LIVE_RESEARCH_STATUSES] } },
+        select: { id: true },
+    });
+    if (research) return true;
+    // Each status counts as in flight for as long as its own recovery waits before it calls the row
+    // abandoned (lib/imageGenerationService.ts reconcileStaleImageGenerations): a provider call that
+    // has not started or finished (pending, processing) after the 12-minute window, a settlement
+    // (settling) after its own 15-minute one. A single window would let the sweep delete a
+    // settlement the recovery still treats as running, and lose the paid work's result.
+    const image = await tx.imageGeneration.findFirst({
+        where: {
+            conversationId,
+            OR: [
+                {
+                    status: { in: [...TEMPORARY_SWEEP_LIVE_IMAGE_CALL_STATUSES] },
+                    updatedAt: { gt: new Date(now.getTime() - STALE_IMAGE_GENERATION_AFTER_MS) },
+                },
+                {
+                    status: "settling",
+                    updatedAt: { gt: new Date(now.getTime() - STALE_IMAGE_SETTLING_AFTER_MS) },
+                },
+            ],
+        },
+        select: { id: true },
+    });
+    return image !== null;
 }
 
 /** For the fifteen-minute maintenance run: never throws. */

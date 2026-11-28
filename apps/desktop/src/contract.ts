@@ -29,6 +29,7 @@ import type { BillingAction, BillingResult, BillingState, DesktopBillingInput } 
 import type { DesktopManagedCodeInput, ManagedCodeView } from "./managed-code-contract";
 import type { CloudExecutionView, DesktopCloudExecutionInput } from "./cloud-execution-contract";
 import type { CodeProjectInput, CodeProjectReply, CodeProjectsView } from "./code-project-contract";
+import type { LiveCliProvider } from "./provider-cli-exec-contract";
 import type { DesktopProjectAction, DesktopProjectInput, DesktopProjectOutcome } from "./project-contract";
 import type { DesktopResearchAction, DesktopResearchInput, DesktopResearchOutcome } from "./research-contract";
 import type { ReviewAction, ReviewInput, ReviewOutcome } from "./review-contract";
@@ -314,6 +315,8 @@ export type Task = {
   execution?: typeof tomverseApiExecution | typeof codexFixtureExecution | typeof claudeFixtureExecution | typeof qwenFixtureExecution | typeof kimiFixtureExecution | typeof vibeFixtureExecution | typeof deepSeekFixtureExecution | typeof zCodeFixtureExecution | typeof miniMaxFixtureExecution | typeof grokFixtureExecution | typeof antigravityFixtureExecution;
   nativeSession?: CodeNativeAssignment;
   nativeRuns?: CodeNativeRunEvidence[];
+  /** Run by the person's own provider CLI on this computer (no Tomverse API, no credits). */
+  liveCli?: true;
   pendingNativeApproval?: { callId: string; turnId: string };
   continuation?: CodeContinuation & { source: CodeNativeAssignment; stage: "checking" | "unavailable" | "started" };
   cliContinuation?: CodeCliContinuation & { sourceModel?: string; stage: "checking" | "unavailable" | "started" };
@@ -400,6 +403,8 @@ export type Snapshot = {
   codeFallbackCliModels: CodeFallbackCliModels;
   cliPaths: CliPaths;
   supportedCliPaths: CliProvider[];
+  /** Provider CLIs a Code task can run with now: the server names the route, and the person saved and trusted the file. Empty or absent otherwise. */
+  providerCliExec?: LiveCliProvider[];
   cliAuthFixture: boolean;
   cliProtocolCheckAvailable: boolean;
   codexFixtureModel?: string;
@@ -443,6 +448,8 @@ export type Snapshot = {
     socialLink?: ("google" | "azure-ad")[];
     /** Remote control reports a file change's line counts and, if the person chose, a few redacted changed lines. */
     remotePreview?: boolean;
+    /** The server lets this build run a Code task with the person's own Codex or Claude Code (no Tomverse API, no credits). */
+    providerCliExec?: boolean;
   } | null;
   codeKey: CodeKeyState;
   /** Tasks that run next to the open one: the activity list and the full view of the tasks the window observes. */
