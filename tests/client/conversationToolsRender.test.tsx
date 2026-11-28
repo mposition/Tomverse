@@ -5,7 +5,8 @@ import { SessionProvider } from "next-auth/react";
 
 import { LanguageProvider } from "@/components/LanguageProvider";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
-import { SavedPromptsTool } from "@/components/chat/SavedPromptsTool";
+import { SavedPromptEditor, SavedPromptsTool } from "@/components/chat/SavedPromptsTool";
+import { SAVED_PROMPT_LIMITS } from "@/lib/savedPromptsCore";
 import { SidebarSelectionBar } from "@/components/chat/SidebarSelectionBar";
 import type { Conversation } from "@/components/chat/types";
 import { conversationToolsCopy } from "@/locales/conversationTools";
@@ -67,6 +68,40 @@ test("the saved prompts row says what it does, and asks a guest to sign in", () 
   assert.match(render(false), /data-testid="tools-saved-prompts-row"[^>]*aria-haspopup="dialog"/);
   assert.match(render(false), /저장한 프롬프트/);
   assert.match(render(true), /로그인하면/);
+});
+
+const editor = (body: string) =>
+  renderToStaticMarkup(
+    <SavedPromptEditor
+      language="ko"
+      editing={{ id: null, title: "긴 프롬프트", body }}
+      busy={false}
+      onChange={noop}
+      onCancel={noop}
+      onSave={noop}
+    />
+  );
+
+test("a prompt over the length limit is held whole, says how long it is, and cannot be saved", () => {
+  const body = `${"가".repeat(SAVED_PROMPT_LIMITS.bodyMax)}끝부분`;
+  const html = editor(body);
+  // Not cut to fit: the whole text, its last characters included, is in the editor.
+  assert.ok(html.includes("끝부분"));
+  assert.ok(!/data-testid="saved-prompt-body"[^>]*maxLength/i.test(html));
+  assert.match(html, /data-testid="saved-prompt-body"[^>]*aria-invalid="true"/);
+  assert.match(
+    html,
+    new RegExp(`role="alert"[^>]*>저장할 수 있는 길이를 넘었습니다\\(현재 ${body.length}자, 최대 ${SAVED_PROMPT_LIMITS.bodyMax}자\\)`)
+  );
+  assert.match(html, /data-testid="saved-prompt-save"[^>]*disabled=""/);
+});
+
+test("a prompt within the limit shows its count and can be saved", () => {
+  const body = "회의록을 요약해 줘";
+  const html = editor(body);
+  assert.match(html, new RegExp(`>${body.length}/${SAVED_PROMPT_LIMITS.bodyMax}<`));
+  assert.ok(!html.includes('role="alert"'));
+  assert.ok(!/data-testid="saved-prompt-save"[^>]*disabled=""/.test(html));
 });
 
 const row = (id: string, extra: Partial<Conversation> = {}): Conversation => ({

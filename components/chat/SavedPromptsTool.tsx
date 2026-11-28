@@ -201,8 +201,6 @@ function SavedPromptsDialog({
         }
     };
 
-    const field =
-        "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100";
     const smallButton =
         "inline-flex min-h-9 items-center rounded-lg px-2.5 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50";
 
@@ -253,60 +251,14 @@ function SavedPromptsDialog({
                         </button>
                     </div>
                 ) : editing ? (
-                    <form
-                        className="mt-2 flex min-h-0 flex-col gap-2"
-                        data-testid="saved-prompts-editor"
-                        onSubmit={(event) => {
-                            event.preventDefault();
-                            void save();
-                        }}
-                    >
-                        <label className="text-xs font-semibold text-zinc-600 dark:text-zinc-300" htmlFor="saved-prompt-name">
-                            {copy.nameLabel}
-                        </label>
-                        <input
-                            id="saved-prompt-name"
-                            data-testid="saved-prompt-name"
-                            className={field}
-                            value={editing.title}
-                            maxLength={SAVED_PROMPT_LIMITS.titleMax}
-                            onChange={(event) => setEditing({ ...editing, title: event.target.value })}
-                            required
-                        />
-                        <label className="text-xs font-semibold text-zinc-600 dark:text-zinc-300" htmlFor="saved-prompt-body">
-                            {copy.promptLabel}
-                        </label>
-                        <textarea
-                            id="saved-prompt-body"
-                            data-testid="saved-prompt-body"
-                            className={`${field} min-h-40 flex-1 resize-y`}
-                            value={editing.body}
-                            maxLength={SAVED_PROMPT_LIMITS.bodyMax}
-                            onChange={(event) => setEditing({ ...editing, body: event.target.value })}
-                            required
-                        />
-                        <p className="text-right text-[11px] text-zinc-500">
-                            {editing.body.length}/{SAVED_PROMPT_LIMITS.bodyMax}
-                        </p>
-                        <div className="flex justify-end gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setEditing(null)}
-                                disabled={busy}
-                                className="min-h-11 rounded-xl px-4 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                            >
-                                {copy.cancel}
-                            </button>
-                            <button
-                                type="submit"
-                                data-testid="saved-prompt-save"
-                                disabled={busy || !editing.title.trim() || !editing.body.trim()}
-                                className="min-h-11 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-50"
-                            >
-                                {copy.save}
-                            </button>
-                        </div>
-                    </form>
+                    <SavedPromptEditor
+                        language={language}
+                        editing={editing}
+                        busy={busy}
+                        onChange={setEditing}
+                        onCancel={() => setEditing(null)}
+                        onSave={() => void save()}
+                    />
                 ) : (
                     <div className="mt-2 flex min-h-0 flex-col gap-2">
                         <button
@@ -317,7 +269,9 @@ function SavedPromptsDialog({
                                 setEditing({
                                     id: null,
                                     title: suggestedSavedPromptTitle(value),
-                                    body: value.slice(0, SAVED_PROMPT_LIMITS.bodyMax),
+                                    // All of it: a prompt over the limit is shown as
+                                    // over and cannot be saved, never cut to fit.
+                                    body: value,
                                 })
                             }
                             className="min-h-11 rounded-xl border border-dashed border-zinc-300 px-3 text-left text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
@@ -393,5 +347,96 @@ function SavedPromptsDialog({
             </div>
         </div>,
         document.body
+    );
+}
+
+const FIELD =
+    "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100";
+
+/**
+ * Naming and editing one prompt. The text is held whole: a prompt longer than
+ * the limit is not cut to fit, it is shown as over the limit with its length,
+ * and Save waits until it is short enough. (The server refuses it too.)
+ */
+export function SavedPromptEditor({
+    language,
+    editing,
+    busy,
+    onChange,
+    onCancel,
+    onSave,
+}: {
+    language: Language;
+    editing: Editing;
+    busy: boolean;
+    onChange: (editing: Editing) => void;
+    onCancel: () => void;
+    onSave: () => void;
+}) {
+    const copy = savedPromptsCopy[language];
+    const tooLong = editing.body.length > SAVED_PROMPT_LIMITS.bodyMax;
+    return (
+        <form
+            className="mt-2 flex min-h-0 flex-col gap-2"
+            data-testid="saved-prompts-editor"
+            onSubmit={(event) => {
+                event.preventDefault();
+                if (!tooLong) onSave();
+            }}
+        >
+            <label className="text-xs font-semibold text-zinc-600 dark:text-zinc-300" htmlFor="saved-prompt-name">
+                {copy.nameLabel}
+            </label>
+            <input
+                id="saved-prompt-name"
+                data-testid="saved-prompt-name"
+                className={FIELD}
+                value={editing.title}
+                maxLength={SAVED_PROMPT_LIMITS.titleMax}
+                onChange={(event) => onChange({ ...editing, title: event.target.value })}
+                required
+            />
+            <label className="text-xs font-semibold text-zinc-600 dark:text-zinc-300" htmlFor="saved-prompt-body">
+                {copy.promptLabel}
+            </label>
+            <textarea
+                id="saved-prompt-body"
+                data-testid="saved-prompt-body"
+                className={`${FIELD} min-h-40 flex-1 resize-y`}
+                value={editing.body}
+                onChange={(event) => onChange({ ...editing, body: event.target.value })}
+                aria-invalid={tooLong || undefined}
+                aria-describedby="saved-prompt-body-length"
+                required
+            />
+            <p
+                id="saved-prompt-body-length"
+                data-testid="saved-prompt-body-length"
+                role={tooLong ? "alert" : undefined}
+                className={`text-right text-[11px] ${tooLong ? "font-semibold text-red-600 dark:text-red-400" : "text-zinc-500"}`}
+            >
+                {tooLong
+                    ? fill(copy.bodyTooLong, { count: editing.body.length, limit: SAVED_PROMPT_LIMITS.bodyMax })
+                    : `${editing.body.length}/${SAVED_PROMPT_LIMITS.bodyMax}`}
+            </p>
+            <div className="flex justify-end gap-2">
+                <button
+                    type="button"
+                    onClick={onCancel}
+                    disabled={busy}
+                    className="min-h-11 rounded-xl px-4 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                >
+                    {copy.cancel}
+                </button>
+                <button
+                    type="submit"
+                    data-testid="saved-prompt-save"
+                    disabled={busy || tooLong || !editing.title.trim() || !editing.body.trim()}
+                    className="min-h-11 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-50"
+                >
+                    {copy.save}
+                </button>
+            </div>
+        </form>
     );
 }

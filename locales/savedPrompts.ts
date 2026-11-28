@@ -23,6 +23,7 @@ export type SavedPromptsCopy = {
   delete: string;
   deleteConfirm: string;
   count: string;
+  bodyTooLong: string;
   limitReached: string;
   saved: string;
   failed: string;
@@ -50,6 +51,7 @@ export const savedPromptsCopy: Record<Language, SavedPromptsCopy> = {
     delete: "Delete",
     deleteConfirm: "Delete for good",
     count: "{count} of {limit}",
+    bodyTooLong: "Too long to save ({count} characters, at most {limit}). Shorten it to save.",
     limitReached: "You can keep {limit} prompts. Delete one you no longer use to save another.",
     saved: "Prompt saved.",
     failed: "Couldn't save that. Try again.",
@@ -75,6 +77,7 @@ export const savedPromptsCopy: Record<Language, SavedPromptsCopy> = {
     delete: "삭제",
     deleteConfirm: "정말 삭제",
     count: "{count}/{limit}",
+    bodyTooLong: "저장할 수 있는 길이를 넘었습니다(현재 {count}자, 최대 {limit}자). 줄인 뒤 저장해 주세요.",
     limitReached: "프롬프트는 {limit}개까지 저장할 수 있습니다. 쓰지 않는 것을 지우면 새로 저장할 수 있어요.",
     saved: "프롬프트를 저장했습니다.",
     failed: "저장하지 못했습니다. 다시 시도해 주세요.",
@@ -100,6 +103,7 @@ export const savedPromptsCopy: Record<Language, SavedPromptsCopy> = {
     delete: "删除",
     deleteConfirm: "确认删除",
     count: "{count}/{limit}",
+    bodyTooLong: "超出可保存的长度（当前 {count} 字，最多 {limit} 字）。请缩短后再保存。",
     limitReached: "最多可保存 {limit} 个提示词。删除不再使用的即可保存新的。",
     saved: "提示词已保存。",
     failed: "无法保存，请重试。",
@@ -125,6 +129,7 @@ export const savedPromptsCopy: Record<Language, SavedPromptsCopy> = {
     delete: "刪除",
     deleteConfirm: "確認刪除",
     count: "{count}/{limit}",
+    bodyTooLong: "超出可儲存的長度（目前 {count} 字，最多 {limit} 字）。請縮短後再儲存。",
     limitReached: "最多可儲存 {limit} 個提示詞。刪除不再使用的即可儲存新的。",
     saved: "提示詞已儲存。",
     failed: "無法儲存，請再試一次。",
@@ -150,6 +155,7 @@ export const savedPromptsCopy: Record<Language, SavedPromptsCopy> = {
     delete: "Supprimer",
     deleteConfirm: "Supprimer définitivement",
     count: "{count} sur {limit}",
+    bodyTooLong: "Trop long pour être enregistré ({count} caractères, {limit} au maximum). Raccourcissez-le pour l'enregistrer.",
     limitReached: "Vous pouvez garder {limit} prompts. Supprimez-en un que vous n'utilisez plus pour en enregistrer un autre.",
     saved: "Prompt enregistré.",
     failed: "Impossible d'enregistrer. Réessayez.",
@@ -175,6 +181,7 @@ export const savedPromptsCopy: Record<Language, SavedPromptsCopy> = {
     delete: "Löschen",
     deleteConfirm: "Endgültig löschen",
     count: "{count} von {limit}",
+    bodyTooLong: "Zu lang zum Speichern ({count} Zeichen, höchstens {limit}). Kürze ihn, um ihn zu speichern.",
     limitReached: "Du kannst {limit} Prompts behalten. Lösche einen, den du nicht mehr brauchst, um einen neuen zu speichern.",
     saved: "Prompt gespeichert.",
     failed: "Konnte nicht gespeichert werden. Bitte erneut versuchen.",
@@ -200,6 +207,7 @@ export const savedPromptsCopy: Record<Language, SavedPromptsCopy> = {
     delete: "Eliminar",
     deleteConfirm: "Eliminar definitivamente",
     count: "{count} de {limit}",
+    bodyTooLong: "Demasiado largo para guardar ({count} caracteres, máximo {limit}). Acórtalo para guardarlo.",
     limitReached: "Puedes guardar {limit} prompts. Elimina uno que ya no uses para guardar otro.",
     saved: "Prompt guardado.",
     failed: "No se pudo guardar. Inténtalo de nuevo.",
@@ -225,6 +233,7 @@ export const savedPromptsCopy: Record<Language, SavedPromptsCopy> = {
     delete: "Excluir",
     deleteConfirm: "Excluir de vez",
     count: "{count} de {limit}",
+    bodyTooLong: "Longo demais para salvar ({count} caracteres, no máximo {limit}). Encurte para salvar.",
     limitReached: "Você pode manter {limit} prompts. Exclua um que não usa mais para salvar outro.",
     saved: "Prompt salvo.",
     failed: "Não foi possível salvar. Tente novamente.",
