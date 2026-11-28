@@ -300,6 +300,8 @@ type ChatAppProps = {
   /** `reattachFile`: the answer's own turn sent one readable document (lib/chatReviewHandoff.ts). */
   onCompareInReview?: (seed: string, options?: { reattachFile: boolean }) => void;
   onCompareContinuationInReview?: (assistantMessageId: string) => void;
+  /** Chat: new conversation from an answer; the page leaves on success. */
+  onBranchFromAnswer?: (messageId: string) => Promise<void>;
   initialConversationId?: string | null;
   /**
    * The question a composer send is still preparing, drawn at the bottom of
@@ -549,6 +551,7 @@ function ChatAppComponent({
   onRetryPrompt,
   onCompareInReview,
   onCompareContinuationInReview,
+  onBranchFromAnswer,
   initialConversationId = null,
   sendEcho = null,
   promptPayload,
@@ -4093,6 +4096,7 @@ function ChatAppComponent({
             }
           : undefined}
         compareRequiresCompleted={Boolean(onCompareContinuationInReview)}
+        onBranchFromAnswer={transcriptScope === "conversation" && currentProduct === "chat" ? onBranchFromAnswer : undefined}
         // Both scopes: a concurrency refusal is the one failure Chat may
         // resend, since nothing of the refused turn ever ran (see the handler).
         // Without a held retry prompt (after a reload) Chat falls back to

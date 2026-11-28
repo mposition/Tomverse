@@ -28,15 +28,27 @@ const classNames = (node: HastNode): string[] => {
   return typeof value === "string" ? value.split(/\s+/) : [];
 };
 
-/** The diagram source of a `<pre><code class="language-mermaid">`, else null. */
-export function mermaidSourceFromPre(node: HastNode | undefined): string | null {
+/**
+ * The source of a `<pre><code class="language-{language}">` block, else null
+ * (also null when empty or longer than `maxCharacters`).
+ */
+export function fencedBlockSourceFromPre(
+  node: HastNode | undefined,
+  language: string,
+  maxCharacters: number
+): string | null {
   const code = node?.children?.find(
     (child) => child.type === "element" && child.tagName === "code"
   );
-  if (!code || !classNames(code).includes("language-mermaid")) return null;
+  if (!code || !classNames(code).includes(`language-${language}`)) return null;
   const source = textOf(code).replace(/\r?\n$/, "");
-  if (!source.trim() || source.length > MERMAID_MAX_SOURCE_CHARACTERS) return null;
+  if (!source.trim() || source.length > maxCharacters) return null;
   return source;
+}
+
+/** The diagram source of a `<pre><code class="language-mermaid">`, else null. */
+export function mermaidSourceFromPre(node: HastNode | undefined): string | null {
+  return fencedBlockSourceFromPre(node, "mermaid", MERMAID_MAX_SOURCE_CHARACTERS);
 }
 
 /** `<pre><code class="language-math">` is a display formula, not code. */

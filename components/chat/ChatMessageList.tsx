@@ -38,6 +38,8 @@ import { useSupersededIds } from "@/components/chat/useSupersededIds";
 import { canEditQuestion, lastReplaceableTurn } from "@/lib/chatSupersededTurns";
 import { prepareMathMarkdown } from "@/lib/chatMathDelimiters";
 import { isMathPre, mermaidSourceFromPre } from "@/lib/chatMermaidBlock";
+import { chartSpecFromPre } from "@/lib/chatChart";
+import { ChatChart } from "@/components/chat/ChatChart";
 import {
   ArrowDown,
   Bot,
@@ -131,6 +133,12 @@ type ChatMessageListProps = {
    */
   onCompareInReview?: (messageId: string) => void;
   compareRequiresCompleted?: boolean;
+  /**
+   * Chat: start a new conversation holding the turns up to this answer
+   * (lib/chatConversationBranch.ts). Resolves when the attempt is over; on
+   * success the page has already moved to the new conversation.
+   */
+  onBranchFromAnswer?: (messageId: string) => Promise<void>;
   onRetryWithoutAttachments?: () => void;
   /**
    * Re-sends the last prompt with a set of already-missing stored files
@@ -513,6 +521,9 @@ function MarkdownCodeBlock({ children, node }: MarkdownPreProps) {
       <MermaidDiagram source={mermaidSource} fallback={codeBlock} label={chatTurnToolsCopy[lang].mermaidDiagram} />
     );
   }
+  // A `chart` block whose JSON spec validates; anything else stays code.
+  const chartSpec = answerRender ? chartSpecFromPre(node) : null;
+  if (chartSpec) return <ChatChart spec={chartSpec} fallback={codeBlock} />;
   return codeBlock;
 }
 
@@ -788,6 +799,7 @@ export function ChatMessageList({
   enableQuote = false,
   onCompareInReview,
   compareRequiresCompleted = false,
+  onBranchFromAnswer,
   onRetryWithoutAttachments,
   onContinueWithoutUnavailableAttachments,
   onRetryConcurrency,
@@ -829,6 +841,7 @@ export function ChatMessageList({
   // regenerated or edited (lib/chatSupersededTurns.ts).
   const lastTurn = useMemo(() => lastReplaceableTurn(messages), [messages]);
   const supersededIds = useSupersededIds(currentChatId);
+  const [branchingId, setBranchingId] = useState<string | null>(null);
   useAnswerReadyNotice(isSending, messages[messages.length - 1]);
 
   const recoveryEnabled = Boolean(onRestoreQuestion);
@@ -1722,6 +1735,18 @@ export function ChatMessageList({
                       <AnswerTurnActions
                         messageId={msg.id}
                         content={msg.content}
+                        branch={
+                          onBranchFromAnswer && !importedTranscript && (msg.status === undefined || msg.status === "normal")
+                            ? {
+                                onBranch: () => {
+                                  setBranchingId(msg.id);
+                                  void onBranchFromAnswer(msg.id).finally(() => setBranchingId(null));
+                                },
+                                pending: branchingId === msg.id,
+                                disabled: isSending || isSendPreparing || branchingId !== null,
+                              }
+                            : undefined
+                        }
                         regenerate={
                           onRegenerateAnswer && lastTurn?.answer.id === msg.id && canEditQuestion(lastTurn)
                             ? {
