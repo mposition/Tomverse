@@ -23,6 +23,9 @@ let refusal: { status: number; code: string } | null = null;
 const turns: Array<Record<string, unknown>> = [];
 let mocksInstalled = false;
 let cookieReads = 0;
+const rateBuckets: string[] = [];
+let savedAnswer: unknown = null;
+const answerReads: Array<Record<string, unknown>> = [];
 
 async function loadRoute() {
   if (!mocksInstalled) {
@@ -45,7 +48,10 @@ async function loadRoute() {
         { ok: false, response: Response.json({ code: "MOBILE_TOKEN_INVALID" }, { status: 401 }) },
     } });
     mock.module(mod("lib/apiSecurity.ts"), {
-      namedExports: { ...realApiSecurity, consumeApiRateLimit: async () => undefined },
+      namedExports: {
+        ...realApiSecurity,
+        consumeApiRateLimit: async (_req: Request, _user: string, bucket: string) => { rateBuckets.push(bucket); },
+      },
     });
     mock.module(mod("lib/chatImageTurn.ts"), {
       namedExports: {
@@ -58,6 +64,14 @@ async function loadRoute() {
             content: "[Image generated] cat",
             pendingGenerationIds: [],
           };
+        },
+      },
+    });
+    mock.module(mod("lib/chatImageTurnRead.ts"), {
+      namedExports: {
+        readChatImageTurnAnswer: async (input: Record<string, unknown>) => {
+          answerReads.push(input);
+          return savedAnswer;
         },
       },
     });
@@ -95,6 +109,18 @@ const reset = () => {
   sessionOverride = { user: { id: "user-1" } };
   refusal = null;
   turns.length = 0;
+  rateBuckets.length = 0;
+  savedAnswer = null;
+  answerReads.length = 0;
+};
+
+const get = async (query: string) => {
+  const { GET } = await loadRoute();
+  const response = await GET(
+    new Request(`http://127.0.0.1:3100/api/conversations/conv-1/image-turn${query}`),
+    { params: Promise.resolve({ conversationId: "conv-1" }) }
+  );
+  return { status: response.status, payload: await response.json(), cacheControl: response.headers.get("cache-control") };
 };
 
 test("no session is rejected before anything else", async () => {
@@ -170,4 +196,46 @@ test("invalid native credentials and foreign origins never borrow a web session 
   assert.equal((await post(body, { authorization: "Bearer valid-native", origin: "https://foreign.invalid" })).status, 401);
   assert.equal(turns.length, 0);
   assert.equal(cookieReads, before);
+});
+
+test("each Review panel's chat model passes through, at most one per image model slot", async () => {
+  reset();
+  const panels = { ...body, imageGroupModelIds: ["fal-ai/nano-banana-2", "gpt-image-2"],
+    imageGroupPanelModelIds: ["google-chat", "openai-chat"] };
+  assert.equal((await post(panels)).status, 202);
+  assert.deepEqual(turns[0].imageGroupPanelModelIds, ["google-chat", "openai-chat"]);
+  // Every panel request takes the image allowance: there is no exemption.
+  assert.deepEqual(rateBuckets, ["image-generation"]);
+  reset();
+  assert.equal((await post({ ...panels, imageGroupPanelModelIds: Array(9).fill("m") })).status, 400);
+  assert.equal((await post({ ...panels, imageGroupPanelModelIds: [] })).status, 400);
+  assert.equal(turns.length, 0);
+});
+
+test("a refused panel reads its saved answer without starting or reserving anything", async () => {
+  reset();
+  savedAnswer = { content: "[Image generated] cat", imageTurn: { groupId: "group-1", modelIds: ["gpt-image-2"] } };
+  const found = await get(`?assistantMessageId=${body.assistantMessageId}_1`);
+  assert.deepEqual({ status: found.status, payload: found.payload }, { status: 200, payload: savedAnswer });
+  assert.equal(found.cacheControl, "private, no-store");
+  assert.deepEqual({ ...answerReads[0], request: undefined }, {
+    userId: "user-1", conversationId: "conv-1", assistantMessageId: `${body.assistantMessageId}_1`, request: undefined,
+  });
+  // The transcript read's allowance, never the image allowance; no turn starts.
+  assert.deepEqual(rateBuckets, ["conversation-detail"]);
+  assert.equal(turns.length, 0);
+
+  reset();
+  assert.equal((await get(`?assistantMessageId=${body.assistantMessageId}`)).status, 404);
+  savedAnswer = "locked";
+  assert.equal((await get(`?assistantMessageId=${body.assistantMessageId}`)).payload.code, "CONVERSATION_LOCKED");
+  reset();
+  for (const query of ["", "?assistantMessageId=bad id!", "?assistantMessageId=short"]) {
+    assert.equal((await get(query)).status, 400);
+  }
+  assert.equal(answerReads.length, 0);
+  reset();
+  sessionOverride = null;
+  assert.equal((await get(`?assistantMessageId=${body.assistantMessageId}`)).status, 401);
+  assert.equal(answerReads.length, 0);
 });

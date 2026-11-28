@@ -105,7 +105,12 @@ import {
   watchInterruptedChatAttempts,
   type ChatStreamInterruption,
 } from "@/lib/chatStreamReattach";
-import { imageEditSourceRefusalCode, readChatImageTurnRef, readChatImageTurnRequest } from "@/lib/chatImageTurnCore";
+import {
+  imageEditSourceRefusalCode,
+  readChatImageTurnRef,
+  readChatImageTurnRequest,
+  readRefusedReviewPanelAnswer,
+} from "@/lib/chatImageTurnCore";
 import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
 import type { ReviewImageTurns } from "@/lib/reviewImageTurn";
 import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
@@ -2360,6 +2365,11 @@ function ChatAppComponent({
                 modelId,
                 imageModelIds: request.modelIds,
                 ...(request.comparison ? { imageGroupModelIds: request.comparison.modelIds } : {}),
+                // Every panel's chat model, so the first request to reserve
+                // the group also writes every panel's answer.
+                ...(request.comparison?.panelModelIds
+                  ? { imageGroupPanelModelIds: request.comparison.panelModelIds }
+                  : {}),
                 preset: request.preset,
                 ...(request.prompt ? { prompt: request.prompt } : {}),
                 // The photo is the one saved with the question; this only
@@ -2391,7 +2401,21 @@ function ChatAppComponent({
         if (!outcome) throw new Error("Chat image turn outcome unknown.");
         const { res, data } = outcome;
         const body = (data ?? {}) as { content?: unknown; imageTurn?: unknown; error?: unknown; code?: unknown };
-        const imageTurnRef = res.ok ? readChatImageTurnRef(body.imageTurn) : null;
+        let imageTurnRef = res.ok ? readChatImageTurnRef(body.imageTurn) : null;
+        // A Review panel the image allowance refused may still have its paid
+        // image: the panel that reserved the group wrote this panel's answer
+        // too. Read it rather than show a refusal for an image that exists.
+        if (!imageTurnRef && res.status === 429 && request.comparison) {
+          const saved = await readRefusedReviewPanelAnswer({
+            conversationId: targetChatId,
+            assistantMessageId,
+            signal: controller.signal,
+          });
+          if (saved) {
+            imageTurnRef = saved.imageTurn;
+            body.content = saved.content;
+          }
+        }
         if (!imageTurnRef) {
           const errorCode =
             typeof body.code === "string" ? body.code : "CHAT_IMAGE_TURN_FAILED";
