@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createStaticMarketingCsp, createStrictCsp, createOfflineChatCsp } from "@/lib/csp";
+import { isArtifactSharePagePath } from "@/lib/artifactSharePageHeaders";
 import {
   EXPERIMENT_COOKIE_NAME,
   EXPERIMENT_HOLD_COOKIE_NAME,
@@ -573,6 +574,12 @@ export function proxy(request: NextRequest) {
     // handful of routes that choose their own caching are listed rather than
     // detected: a header set in middleware overrides the route's own.
     response.headers.set("Cache-Control", DEFAULT_API_CACHE_CONTROL);
+  }
+  // A public share page carries its own policy, always enforced (CSP `sandbox`
+  // plus the preview frame's policy; lib/artifactSharePage.ts). A header set
+  // here would replace the route's, so this path gets none from the proxy.
+  if (isArtifactSharePagePath(request.nextUrl.pathname)) {
+    return withNativeCors(response, request);
   }
   const reportUrl = new URL(
     "/api/security/csp-report",

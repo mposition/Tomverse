@@ -317,7 +317,7 @@ modelId. 서명 URL은 DB에 저장하지 않는다(애초에 만들지 않는�
   참조가 있으면 거절한다. HTML은 여기에 걸지 않는다: script가 있는 page가
   "웹 페이지를 만들어 달라"의 의미이고, 그것을 막는 것은 안전하게 만드는 것이
   아니라 형식을 거절하는 것이다. 둘 다 `nosniff`가 붙은 attachment로만 나가므로
-  이 애플리케이션의 origin에서는 어느 쪽도 실행되지 않는다. HTML이 실행되는 곳은 §9의 격리된 미리보기 frame 하나뿐이다(앱 origin 없음).
+  이 애플리케이션의 origin에서는 어느 쪽도 실행되지 않는다. HTML이 실행되는 곳은 §9의 격리된 미리보기 frame과, 같은 frame을 한 겹 더 감싼 §19의 공유 페이지뿐이다(둘 다 앱 origin 없음).
 - **아카이브 경로는 정규화하지 않고 거절한다.** 파일명은 label이라 다듬어도
   여전히 그 파일을 가리키지만, 경로는 **위치**다. `../../etc/passwd`를 조용히
   `etc/passwd`로 옮기면 모델이 말한 곳에 없는 내용을 담은 아카이브가 배달된다.
@@ -675,8 +675,10 @@ tool 호출 후의 두 번째 step은 출력 토큰이며, 둘 다 기존 reserv
 - 게스트 artifact(§7).
 - 사용자가 만든 파일을 대화 밖에서 다시 찾는 목록 화면.
 - 수식, 차트, 조건부 서식, 피벗.
-- artifact 공유 링크. 공유 대화 스냅샷은 artifact를 포함하지 않는다.
-- 미리보기 페이지의 공개 URL 게시(외부 게시라 별도 승인·도메인·moderation이 먼저다), 서버 저장, 여러 모델의 결과 나란히 미리보기.
+- 공유 대화 스냅샷은 artifact를 포함하지 않는다. 미리보기 화면 하나의 공유 링크는 §19(기본 꺼짐)다.
+- 문서 파일(docx·pptx 등)의 공유 링크, 공유 페이지에서 방문자가 이어서 고치기(remix), 별도 sandbox 도메인,
+  공유 페이지 방문 통계, 사이드바의 공유 목록, 공유 내용 moderation.
+- 패널에서 고친 내용의 서버 저장, 여러 모델의 결과 나란히 미리보기.
 - React 미리보기에서 React 밖의 패키지(차트·아이콘 라이브러리 등)와 Tailwind. 허용 CDN 목록을 넓히지 않고는 불가능하다.
 
 ## 13. 첨부된 템플릿에서 여러 문서 만들기
@@ -1243,3 +1245,103 @@ revision 기본값 변경은 기존 Native gate를 켜지 않는다. 새 device 
 소유자 계정 JSON export에는 새로 보관한 canonical/source 명세의 내용을 포함한다.
 파일 bytes는 여전히 포함하지 않으며, 일반 앱/공유 DTO에 이 내용을 노출하지 않는다.
 schema migration과 로컬 검증은 운영 migration·활성화·merge·deploy 승인과 별개다.
+
+## 19. 미리보기 화면 공유 링크 (2026-11-28, 기본 꺼짐)
+
+운영자 지시(2026-11-28)로 만든 기능이다. 미리보기 패널의 "공유"가 그 화면 하나만 보여 주는 공개 읽기 전용 페이지
+`/share/a/<token>`을 만든다. 대화 내용은 포함하지 않는다. 대상은 생성된 HTML 파일(`html`·`htm`)과 답변의 HTML·SVG·
+React(`jsx`·`tsx`) 코드 블록이고, 문서 파일은 대상이 아니다(§12).
+
+### 19.1 스위치
+
+- `AppSetting` `feature.artifactSharingEnabled`, 값이 정확히 `"true"`일 때만 켜짐, 행이 없으면 꺼짐. Admin › Platform
+  settings의 "미리보기 화면 공유" 토글이 쓴다(`lib/artifactShareSettings.ts`). `feature.publicSharingEnabled`가 꺼져 있으면
+  이것도 꺼진 것이다(`artifactSharingAvailable`, `lib/artifactShareAccess.ts`).
+- 공개 페이지는 요청마다 스위치를 읽는다. 끄면 이미 만든 링크도 모두 "열 수 없음" 404가 된다. 켜는 것은 외부 공개에 대한
+  운영자 승인이다(아래 19.5의 잔여 위험을 보고 결정한다).
+- 스위치가 꺼져 있어도 소유자는 이미 있는 링크를 보고 중지할 수 있다(공개를 줄이는 쪽이므로).
+
+### 19.2 무엇이 공개되는가
+
+- **브라우저가 보낸 글은 공개되지 않는다.** 서버가 소유자의 원본에서 읽는다(`lib/artifactShareService.ts`): 파일은
+  `findFirst({ id, userId, status: "ready" })` 뒤 다운로드와 같은 `readOwnR2ObjectBytes`로, 코드 블록은 소유자의 assistant
+  메시지 본문이 그 코드를 포함할 때만(`answerContainsCode`, 줄바꿈은 LF로 맞춤). 그래서 패널에서 고친 내용(§9)은 구조상
+  공유되지 않고, 패널이 공유 카드에 그렇게 적는다.
+- 공유 시점의 내용을 `ArtifactShare` 행에 스냅샷으로 저장한다(migration `20261128150000_artifact_share`). 원본 답변을 고쳐도
+  공유 페이지는 스냅샷을 보인다. 크기는 미리보기와 같은 1,000,000바이트(CHECK `ArtifactShare_content_size_check`).
+- 출처 하나에 링크 하나(`sourceKey` unique: `artifact:<id>` 또는 `code:<messageId>:<sha256>`). 다시 누르면 같은 링크를,
+  만료된 링크는 같은 트랜잭션에서 새 토큰으로 바꾼다. 토큰은 `lib/shareTokens.ts`(24바이트 난수), 수명은 대화 공유와 같은
+  `SHARE_LINK_TTL_DAYS`(1~365, 기본 30일).
+- 중지하면 행을 지운다. 계정·대화·답변 메시지·생성 파일이 지워지면 FK cascade로 함께 지워진다. 계정 내보내기에는
+  `shared_pages`로 들어가고 토큰은 뺀다(공개 페이지의 열쇠다). 데이터 도메인 등록부 `artifactShare`.
+
+### 19.3 공유할 수 없는 경우
+
+`artifactShareRefusal`이 한 곳에서 정한다: 스위치 꺼짐(503), 요금제 `allowSharing` false(403), 원본 없음·남의 것·답변에 없는
+코드·공유 대상이 아닌 형식(404), 채팅이 아닌 대화, 임시 대화, 잠긴 대화(비밀번호가 있으면 지금 풀려 있어도 거절),
+가져온 대화를 이어 간 대화, 비공개 자료를 쓴 Research 답변(manifest에 URL이 아닌 항목이 있거나 현재 revision이
+`containsPrivate`), 크기(413). 게스트는 로그인이 없어 401이다. 잠금과 임시 여부는 쓰는 SQL 문 안에서 한 번 더 보고
+(`INSERT … SELECT … WHERE "password" IS NULL AND "temporaryExpiresAt" IS NULL`), 공개 읽기도 매번 본다. 그래서 나중에
+대화를 잠그면 링크가 바로 열리지 않는다.
+
+rate limit: 만들기 분당 10·하루 100, 상태 조회 60·2,000, 중지 20·200, 공개 읽기 토큰당 120·5,000(IP 버킷 포함, 대화
+공유와 같음). 만들기·중지는 `logSecurityAuditEvent("artifact.share.create" | "artifact.share.revoke")`로 남긴다.
+소유자는 패널의 공유 버튼에서 링크·만료일·복사·중지를 본다(사이드바 목록은 없다, §12).
+
+### 19.4 공개 페이지의 격리
+
+route `app/(site)/(application)/share/a/[shareToken]/route.ts`, 문서와 헤더 `lib/artifactSharePage.ts`.
+
+- **정적 응답이다.** 경로의 토큰과 `Accept-Language`(또는 `?lang=`)만 읽고 세션·쿠키·인증 헤더를 읽지 않는다. 같은
+  페이지가 로그인한 방문자에게도 바이트 그대로 간다(server-contract 테스트가 세션 resolver·next-auth·`next/headers`를
+  호출되면 실패하게 바꿔 확인).
+- 구조: 우리 문서(공지 막대, 신고 링크, frame 하나, script 없음) → `iframe sandbox="allow-scripts" srcdoc=`
+  (`buildHtmlPreviewSrcdoc`의 바깥 문서, `frame-src 'none'`) → `iframe sandbox="allow-scripts" srcdoc=`(공유된 화면,
+  앞에 `htmlPreviewCsp`, React는 `reactPreviewCsp`도). 공유된 코드는 우리 문서에 들어가지 않고 escape된 `srcdoc` 안에만
+  있다. 문서는 `buildCodePreviewDocument`가 만들므로 채팅 미리보기와 같은 것이다.
+- 우리 문서의 CSP(HTTP header, 항상 enforce): `sandbox allow-scripts; ` + `htmlPreviewCsp(origin)` + `; frame-ancestors 'none'`.
+  `sandbox` 덕분에 **최상위 문서도 opaque origin**이라(측정: `self.origin === "null"`, `document.cookie`는 SecurityError) 이
+  템플릿에 escape 실수가 있어도 앱 origin으로 script가 돌지 않는다. `srcdoc` 아래 문서는 이 정책을 상속하므로, 화면이 쓸 수
+  있는 것은 미리보기 정책과의 교집합이고 그보다 넓지 않다. proxy는 이 경로에 CSP·Report-To를 붙이지 않는다
+  (`isArtifactSharePagePath`; 붙이면 route의 정책을 덮는다).
+- 헤더: `Cache-Control: private, no-store, max-age=0`, `CDN-Cache-Control`·`Cloudflare-CDN-Cache-Control: no-store`,
+  `X-Robots-Tag: noindex, nofollow, noarchive`(대화 공유와 같음), `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`,
+  `X-Content-Type-Options: nosniff`, 강력한 기능을 모두 끈 `Permissions-Policy`, `Cross-Origin-Opener-Policy: unsafe-none`.
+  마지막은 HTML이 sandbox flag와 `unsafe-none`이 아닌 COOP를 함께 받은 navigation을 network error로 정하기 때문이다(사이트
+  전체의 `same-origin-allow-popups`를 이 경로만 바꿈; Chromium 159는 둘을 함께 받아도 열었다). next.config.ts의 경로 규칙과
+  route가 같은 값을 둘 다 쓴다(`lib/artifactSharePageHeaders.ts`).
+- 공지 막대("사용자가 만든 콘텐츠이며 Tomverse가 만든 것이 아닙니다. 비밀번호나 결제 정보를 입력하지 마세요")와 신고
+  링크(`/support`)는 frame 밖 위에 있다. frame 안의 화면은 자기 상자 밖을 그릴 수 없으므로 가리지 못한다(흉내는 frame 안에서만).
+- 거절은 모두 같은 "열 수 없음" 404 페이지다(script·frame 없음, CSP `sandbox; default-src 'none'; …`).
+
+### 19.5 브라우저 측정과 잔여 위험
+
+2026-11-28, Playwright Chromium 159, 실제 `buildArtifactSharePage`와 헤더를 띄운 로컬 서버에 악의적 HTML을 넣고 다른
+포트의 "공격자" HTTP 서버와 UDP 소켓으로 관찰했다. 막힌 것(공격자 HTTP 요청 0건): `top.location` 대입(SecurityError),
+`target=_top`·`_blank` 링크 클릭, `window.open`(null), 폼 전송, `fetch`·XHR·`sendBeacon`·WebSocket·EventSource, 외부 `<script>`·
+`<img>`·stylesheet·CSS `url()`·`prefetch`, Worker, 자기 frame의 `location` 이동과 `<meta refresh>`(frame이 오류 페이지가 되고
+요청은 나가지 않음 — 바깥 문서의 `frame-src 'none'`), `alert`(대화상자 없음), 다운로드, clipboard·fullscreen, 쿠키·
+localStorage·부모와 최상위 DOM 접근(SecurityError). 공지 막대는 frame 위에 있고, 신고 링크는 최상위 문서를 `/support`로
+옮기며 Referer를 보내지 않았다. React 공유는 앱 origin의 고정 파일을 받아 실제로 그려졌다.
+
+남는 것:
+
+- **WebRTC는 막히지 않는다.** `RTCPeerConnection`의 STUN/TURN 요청이 sandbox frame에서 임의의 host·port로 나갔다(UDP
+  소켓이 binding 요청을 받음). CSP `connect-src`는 WebRTC를 다루지 않고, CSP3의 `webrtc 'block'`은 Chromium 159가 적용하지
+  않았다(넣어도 UDP가 나감, 측정). 그래서 공유된 화면이 방문자가 입력한 글을 STUN 서버 이름(DNS)이나 TURN 사용자 이름에 실어
+  보낼 수 있다. 공지 막대가 비밀번호·결제 정보를 넣지 말라고 하는 이유다. 같은 frame 정책을 쓰는 §9 채팅 미리보기에도 같은
+  통로가 있다고 본다(추정, 채팅 화면에서는 측정하지 않음).
+- 세 CDN의 script·style·글꼴은 계속 받을 수 있으므로 화면이 CDN 주소에 글을 실으면 CDN 운영자 로그에 남을 수 있다(§9와 같음).
+- 별도 sandbox 도메인이 없다. 최상위 문서까지 opaque origin이라 PR #4311에서 남긴 "navigation으로 내보내기는 `frame-src`에
+  의존"은 측정으로 막힘을 확인했지만, 그 한 겹이 브라우저의 `frame-src` 의미에 기댄다는 점은 같다. DNS prefetch
+  (`<link rel=dns-prefetch>`)는 측정하지 않았다.
+- 채팅과 달리 nonce가 없으므로 공유 페이지에서는 inline 이벤트 속성(`onclick="…"`)도 실행된다(`'unsafe-inline'`). 네트워크
+  통로를 더하지는 않는다.
+- 내용 moderation은 없다. 모델에게 피싱 화면을 만들게 한 뒤 공유할 수 있다. 신고 링크와 스위치가 대응 수단이다.
+
+### 19.6 테스트
+
+`tests/artifactShare.test.mjs`(스위치 조합, 거절 순서와 코드, 공유 가능 언어, 답변 포함 검사, 공개 페이지 CSP가 미리보기
+정책과 지시문별로 같고 `sandbox`·`frame-ancestors`만 더함, frame sandbox, 공유 코드가 우리 문서에 없음, React 문서, 크기,
+헤더), `tests/integration/artifact-share.db.test.ts`(migration 스키마: 생성·재사용·만료·중지·남의 것 거절·잠금 경합·cascade·
+계정 삭제와 내보내기·CHECK), `tests/server-contract/artifact-share-page-route.test.ts`(세션 미사용, 헤더, 같은 404, proxy 예외).

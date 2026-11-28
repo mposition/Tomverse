@@ -39,14 +39,14 @@ export function HtmlArtifactPreviewPanel({
   artifact,
   onClose,
   onRevise,
-  shareControl,
+  renderShare,
 }: {
   artifact: ChatStreamArtifact;
   onClose: () => void;
   /** Present only when a change can be asked for from here (see GeneratedArtifactCard). */
   onRevise?: (request: string) => Promise<string | null>;
   /** The share button, when this file may be shared. */
-  shareControl?: ReactNode;
+  renderShare?: (state: { edited: boolean }) => ReactNode;
 }) {
   const { t } = useLanguage();
   const workspace = useChatArtifactWorkspace();
@@ -116,7 +116,7 @@ export function HtmlArtifactPreviewPanel({
           editable={workspace.enabled}
           fillComposer={workspace.fillComposer}
           onClose={onClose}
-          shareControl={shareControl}
+          renderShare={renderShare}
         />
       ) : null}
     </ArtifactPreviewPanelShell>

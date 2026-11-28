@@ -53,7 +53,7 @@ export function ArtifactPreviewWorkspace({
   editable,
   fillComposer,
   onClose,
-  shareControl,
+  renderShare,
 }: {
   source: EditablePreviewSource;
   /** The frame's accessible name. */
@@ -63,8 +63,8 @@ export function ArtifactPreviewWorkspace({
   /** Puts text in the composer; null where there is no composer. */
   fillComposer: ((text: string) => void) | null;
   onClose: () => void;
-  /** The share button, when sharing applies to this source. */
-  shareControl?: ReactNode;
+  /** The share button, when sharing applies to this source; told whether the shown version is edited. */
+  renderShare?: (state: { edited: boolean }) => ReactNode;
 }) {
   const { t, lang } = useLanguage();
   const copy = artifactWorkspaceCopy[lang].edit;
@@ -146,12 +146,14 @@ export function ArtifactPreviewWorkspace({
     </p>
   );
 
+  const shareControl = renderShare?.({ edited });
   const toolbar = editable || shareControl;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="artifact-preview-workspace">
       {toolbar && (
-        <div className="flex flex-wrap items-center gap-1 border-b border-zinc-200 px-2 py-1 dark:border-zinc-700">
+        // `relative`: the share card opens against this toolbar (ArtifactShareControl).
+        <div className="relative flex flex-wrap items-center gap-1 border-b border-zinc-200 px-2 py-1 dark:border-zinc-700">
           {editable && (
             <div role="tablist" aria-label={copy.tabsLabel} className="flex items-center gap-1">
               {(["preview", "code"] as const).map((value) => (

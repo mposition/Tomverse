@@ -40,6 +40,7 @@ import {
 } from "@/lib/appSettings";
 import { isHelpAssistantEnabled, setHelpAssistantEnabled } from "@/lib/helpAssistantSettings";
 import { isScheduledTasksEnabled, setScheduledTasksEnabled } from "@/lib/scheduledTaskSettings";
+import { isArtifactSharingSwitchOn, setArtifactSharingEnabled } from "@/lib/artifactShareSettings";
 import { injectableExtractionPairs } from "@/lib/memoryInjectionGate";
 import { readGuestLeadFacts } from "@/lib/guestLeadFacts";
 import {
@@ -102,6 +103,10 @@ const updateAppSettingsSchema = z
     // from each account's own credits. Same optional shape as the Help Centre
     // assistant: a save that omits it leaves it as it was.
     scheduledTasksEnabled: z.boolean().optional(),
+    // Share links for previewed pages (lib/artifactShareAccess.ts): public pages
+    // made from people's previews. Same optional shape: a save that omits it
+    // leaves it as it was.
+    artifactSharingEnabled: z.boolean().optional(),
     // Release C rollout flags (lib/assistantProfileAccess.ts). Two switches
     // and not one: policy §15 enables profiles before knowledge, and the
     // knowledge flag reads as off on its own while profiles are off.
@@ -221,6 +226,7 @@ export async function GET(req: Request) {
       chatStarterEnabled: await isChatStarterEnabled(),
       helpAssistantEnabled: await isHelpAssistantEnabled(),
       scheduledTasksEnabled: await isScheduledTasksEnabled(),
+      artifactSharingEnabled: await isArtifactSharingSwitchOn(),
       ...(await memoryReleaseStatus()),
     });
   } catch (error) {
@@ -381,6 +387,9 @@ export async function PATCH(req: Request) {
     if (writesFlags && body.scheduledTasksEnabled !== undefined) {
       await setScheduledTasksEnabled(body.scheduledTasksEnabled);
     }
+    if (writesFlags && body.artifactSharingEnabled !== undefined) {
+      await setArtifactSharingEnabled(body.artifactSharingEnabled);
+    }
     const settings = await getPublicAppSettings();
     await writeAdminAuditLog({
       session,
@@ -402,6 +411,7 @@ export async function PATCH(req: Request) {
       chatStarterEnabled: await isChatStarterEnabled(),
       helpAssistantEnabled: await isHelpAssistantEnabled(),
       scheduledTasksEnabled: await isScheduledTasksEnabled(),
+      artifactSharingEnabled: await isArtifactSharingSwitchOn(),
       // Unchanged by this request -- nothing above writes them -- and returned
       // anyway so the panel's read-only card is not left showing what it read
       // on page open while every field beside it has been refreshed.

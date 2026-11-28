@@ -5,6 +5,7 @@ import { Children, isValidElement, useCallback, useMemo, useState, type ReactNod
 
 import { ArtifactPreviewPanelShell } from "@/components/chat/ArtifactPreviewPanelShell";
 import { ArtifactPreviewWorkspace } from "@/components/chat/ArtifactPreviewWorkspace";
+import { ArtifactShareControl } from "@/components/chat/ArtifactShareControl";
 import { useChatArtifactWorkspace, useCodeBlockStreaming } from "@/components/chat/ChatArtifactWorkspaceContext";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
@@ -37,7 +38,13 @@ const languageOfCode = (children: ReactNode): string | null => {
   return null;
 };
 
-type Opened = { kind: CodePreviewKind; language: string; code: string };
+type Opened = {
+  kind: CodePreviewKind;
+  language: string;
+  code: string;
+  /** The answer the block is in, from the message element around it (`data-message-id`); null for an unsaved one. */
+  messageId: string | null;
+};
 
 export function CodeBlockPreview({ children, preRef }: { children: ReactNode; preRef: RefObject<HTMLPreElement | null> }) {
   const { t } = useLanguage();
@@ -66,7 +73,8 @@ export function CodeBlockPreview({ children, preRef }: { children: ReactNode; pr
   const open = () => {
     // The rendered text, as the copy button reads it. mdast ends every block with the one newline that closes it.
     const code = (preRef.current?.textContent ?? "").replace(/\r?\n$/, "");
-    setOpened({ kind, language, code });
+    const messageId = preRef.current?.closest("[data-message-id]")?.getAttribute("data-message-id") || null;
+    setOpened({ kind, language, code, messageId });
   };
 
   const title = t("chat.artifactWorkspaceCodeTitle").replaceAll("{language}", language.toUpperCase());
@@ -92,6 +100,15 @@ export function CodeBlockPreview({ children, preRef }: { children: ReactNode; pr
             editable
             fillComposer={fillComposer}
             onClose={close}
+            // A public link to this block's page (generated-artifacts.md section 19); the control asks the server whether it applies.
+            renderShare={opened.messageId
+              ? ({ edited }) => (
+                  <ArtifactShareControl
+                    source={{ kind: "code_block", messageId: opened.messageId ?? "", language: opened.language, code: opened.code }}
+                    edited={edited}
+                  />
+                )
+              : undefined}
           />
         </ArtifactPreviewPanelShell>
       )}

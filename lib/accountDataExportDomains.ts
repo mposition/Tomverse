@@ -1293,6 +1293,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "The files an assistant answer produced for the user: name, format, size, which answer and model made each one, explicit revision edges and any retained validated workbook specification. The file bytes themselves are not in this export -- they are binaries in object storage, which is a gap rather than a withholding, and remain downloadable from the conversation while it exists. The private object storage key is withheld.",
   },
   {
+    domain: "artifactShare",
+    publicName: "shared_pages",
+    prismaModel: "ArtifactShare",
+    state: "included_filtered",
+    withheldReason:
+      "Each public share link made from a previewed page: the page as it was shared, which conversation, answer and file it came from, its kind and when it was made and expires. The link token is withheld: it is the whole secret of a public page, and an export file holding it would hold a working key to it. The derived source key is withheld as an internal identity.",
+  },
+  {
     domain: "messageAttachment",
     publicName: "message_attachments",
     prismaModel: "MessageAttachment",
