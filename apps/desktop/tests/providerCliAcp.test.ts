@@ -5,9 +5,10 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { permissionModes } from "../src/permission-contract";
-import { acpArguments, acpSafety, acpSecretPath, classifyAcpPermission, insideProject, namesCredential, realPathOf } from "../src/host/provider-cli-acp";
+import { acpArguments, acpSafety, acpSecretPath, classifyAcpPermission, insideProject, namesCredential, realPathOf, trackToolCall, type TrackedCall } from "../src/host/provider-cli-acp";
 import { cliExecEnvironment, runProviderCli, type CliApproval, type ExecEvent, type ExecRun } from "../src/host/provider-cli-exec";
-import { cliPermissionPlan, liveAcpProviders, liveCliFile, liveCliNames, liveCliProviderForModel, liveCliProviders, liveCliRunnable, providerConfigFolders,
+import { desktopNativeCopy } from "../../../locales/desktopNative";
+import { acpOwnRules, cliRunsOwnRules, cliPermissionPlan, liveAcpProviders, liveCliFile, liveCliNames, liveCliProviderForModel, liveCliProviders, liveCliRunnable, providerConfigFolders,
   type LiveAcpProvider } from "../src/provider-cli-exec-contract";
 
 const fakeAgent = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-acp-agent.mjs");
@@ -296,6 +297,133 @@ test("A project that lives under a provider settings folder name is not refused 
     assert.ok(namesCredential(join(cwd, ".claude", "settings.json"), cwd));
     assert.equal(classifyAcpPermission(request({ kind: "edit", locations: [{ path: join(cwd, "src", "a.ts") }] }), { cwd, plan: cliPermissionPlan("qwen", "allow_all") }).verdict, "allow");
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+// ---------------------------------------------------- the requests of the real CLIs
+
+const vibeOptions = [{ optionId: "a", name: "Allow once", kind: "allow_once" }, { optionId: "b", name: "Always", kind: "allow_always" },
+  { optionId: "c", name: "Always, permanently", kind: "allow_always_permanent" }, { optionId: "d", name: "Reject", kind: "reject_once" }];
+const tracking = (updates: Array<[string, object]>) => {
+  const calls = new Map<string, TrackedCall>();
+  for (const [id, update] of updates) trackToolCall(calls, id, update as Record<string, unknown>);
+  return calls;
+};
+const chunk = (text: string) => ({ content: [{ type: "content", content: { type: "text", text } }] });
+
+test("Vibe asks with only the call's id: what its earlier tool_call said is what the card and the checks use", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "tomverse-acp-vibe-"));
+  try {
+    const calls = tracking([
+      ["effect-1", { title: "Writing hello.txt", kind: "edit", content: [{ path: "hello.txt", newText: "hi", type: "diff" }], locations: [{ path: join(cwd, "hello.txt") }], rawInput: { filePath: "hello.txt", content: "hi" } }],
+      ["effect-2", { title: "bash: printf 'hi' > hello.txt && cat hello.txt", kind: "execute", rawInput: { command: "printf 'hi' > hello.txt && cat hello.txt" } }],
+      ["effect-3", { title: "Writing the login", kind: "edit", locations: [{ path: "/home/p/.vibe/.env" }], rawInput: { filePath: "/home/p/.vibe/.env", content: "x" } }],
+    ]);
+    const ask = (id: string, mode: "read_only" | "ask" | "allow_all") => classifyAcpPermission({ sessionId: "s", toolCall: { toolCallId: id }, options: vibeOptions },
+      { cwd, plan: cliPermissionPlan("mistral", mode), tracked: calls.get(id) });
+    const edit = ask("effect-1", "ask");
+    assert.equal(edit.verdict, "ask");
+    assert.deepEqual([edit.approval.tool, edit.approval.input], ["Write", { file_path: "hello.txt", content: "hi" }]);
+    // Only "allow once" is ever chosen: not "always", not "always, permanently".
+    assert.deepEqual([edit.allowOption, edit.rejectOption], ["a", "d"]);
+    assert.equal(ask("effect-1", "allow_all").verdict, "allow");
+    assert.equal(ask("effect-1", "read_only").verdict, "deny");
+    const bash = ask("effect-2", "ask");
+    assert.deepEqual([bash.verdict, bash.approval.tool, bash.approval.input.command], ["ask", "Bash", "printf 'hi' > hello.txt && cat hello.txt"]);
+    assert.equal(ask("effect-2", "allow_all").verdict, "ask", "a command still asks in Allow all");
+    assert.equal(ask("effect-3", "allow_all").verdict, "refuse");
+    assert.equal(ask("effect-3", "ask").approval.refused, true);
+    // A request that says nothing, with nothing tracked, is refused without a card (denied in Read only).
+    for (const mode of ["ask", "auto_review", "allow_all"] as const) {
+      const empty = classifyAcpPermission({ sessionId: "s", toolCall: { toolCallId: "effect-ghost" }, options: vibeOptions }, { cwd, plan: cliPermissionPlan("mistral", mode) });
+      assert.deepEqual([empty.verdict, empty.approval.refused], ["refuse", true], mode);
+    }
+    assert.equal(classifyAcpPermission({ sessionId: "s", toolCall: { toolCallId: "x" }, options: vibeOptions }, { cwd, plan: cliPermissionPlan("mistral", "read_only") }).verdict, "deny");
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("Kimi streams a call's arguments as JSON text before it asks: a whole object is the call's input, anything else is not", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "tomverse-acp-kimi-"));
+  try {
+    const calls = tracking([
+      ["0:tool_1", { title: "Write", kind: "edit", status: "pending" }], ["0:tool_1", chunk('{"path":"hello.txt",')], ["0:tool_1", chunk('"content":"hi"}')],
+      ["0:tool_2", { title: "Bash", kind: "execute", status: "pending" }], ["0:tool_2", chunk('{"command":')], ["0:tool_2", chunk('"ls -la"}')],
+      ["0:tool_3", { title: "Bash", kind: "execute", status: "pending" }], ["0:tool_3", chunk('{"command":"ls')],
+      ["0:tool_4", { title: "Write", kind: "edit", status: "pending" }], ["0:tool_4", chunk('{"path":"/home/p/.kimi-code/credentials/x","content":"x"}')],
+      // A CLI that repeats the whole text in each update.
+      ["0:tool_5", { title: "Write", kind: "edit" }], ["0:tool_5", chunk('{"path":"a.md"')], ["0:tool_5", chunk('{"path":"a.md","content":"A"}')],
+      ["0:tool_6", { title: "Bash", kind: "execute" }], ["0:tool_6", chunk("[1, 2]")],
+    ]);
+    const ask = (id: string, title: string, mode: "read_only" | "ask" | "allow_all") => classifyAcpPermission({ sessionId: "s", options: vibeOptions,
+      toolCall: { toolCallId: id, title, content: [{ type: "content", content: { type: "text", text: `Requesting approval to ${title}` } }] } },
+    { cwd, plan: cliPermissionPlan("moonshot", mode), tracked: calls.get(id) });
+    const write = ask("0:tool_1", "Write", "ask");
+    assert.deepEqual([write.verdict, write.approval.tool, write.approval.input], ["ask", "Write", { file_path: "hello.txt", content: "hi" }]);
+    assert.equal(ask("0:tool_1", "Write", "allow_all").verdict, "allow");
+    assert.equal(ask("0:tool_1", "Write", "read_only").verdict, "deny");
+    const bash = ask("0:tool_2", "Bash", "ask");
+    assert.deepEqual([bash.verdict, bash.approval.tool, bash.approval.input.command], ["ask", "Bash", "ls -la"]);
+    // Text that is not yet, or not at all, one JSON object is not used: a command with no command text is refused.
+    assert.equal(ask("0:tool_3", "Bash", "ask").verdict, "refuse");
+    assert.equal(ask("0:tool_6", "Bash", "ask").verdict, "refuse");
+    assert.equal(ask("0:tool_4", "Write", "allow_all").verdict, "refuse");
+    const again = ask("0:tool_5", "Write", "ask");
+    assert.deepEqual(again.approval.input, { file_path: "a.md", content: "A" });
+    // The request's own text ("Requesting approval...") is never taken for the call's input.
+    assert.equal(classifyAcpPermission({ sessionId: "s", options: vibeOptions, toolCall: { toolCallId: "0:new", title: "Write", content: [{ type: "content", content: { type: "text", text: '{"path":"x"}' } }] } },
+      { cwd, plan: cliPermissionPlan("moonshot", "allow_all") }).approval.input.rawInput, undefined);
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("Antigravity names its arguments in its own way and sends options with no kind", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "tomverse-acp-agy-"));
+  try {
+    const bare = [{ optionId: "allow", name: "Allow" }, { optionId: "deny", name: "Deny" }];
+    const bash = classifyAcpPermission({ sessionId: "s", options: bare, toolCall: { name: "run_command", kind: "execute", title: "echo hi", args: { CommandLine: "echo hi" },
+      rawInput: { CommandLine: "echo hi", WaitMsBeforeAsync: 5000, toolSummary: "Print hi" } } }, { cwd, plan: cliPermissionPlan("google", "ask") });
+    assert.deepEqual([bash.verdict, bash.approval.tool, bash.allowOption, bash.rejectOption], ["ask", "Bash", "allow", "deny"]);
+    // Every field of the request is on the card.
+    assert.deepEqual(bash.approval.input, { command: "echo hi", WaitMsBeforeAsync: 5000, toolSummary: "Print hi" });
+    const write = classifyAcpPermission({ sessionId: "s", options: bare, toolCall: { name: "write_file", kind: "edit", rawInput: { Content: "hi", Overwrite: true, Path: join(cwd, "hello.txt") } } },
+      { cwd, plan: cliPermissionPlan("google", "allow_all") });
+    assert.equal(write.verdict, "allow");
+    const card = classifyAcpPermission({ sessionId: "s", options: bare, toolCall: { name: "write_file", kind: "edit", rawInput: { Content: "hi", Overwrite: true, Path: join(cwd, "hello.txt") } } },
+      { cwd, plan: cliPermissionPlan("google", "ask") });
+    assert.deepEqual([card.approval.tool, card.approval.input], ["Write", { file_path: join(cwd, "hello.txt"), content: "hi", Overwrite: true }]);
+    for (const toolCall of [{ kind: "edit", rawInput: { Content: "x", Path: "/home/p/.gemini/antigravity-cli/state" } }, { kind: "execute", rawInput: { CommandLine: "type ~/.gemini/config" } }]) {
+      assert.equal(classifyAcpPermission({ sessionId: "s", options: bare, toolCall }, { cwd, plan: cliPermissionPlan("google", "ask") }).verdict, "refuse");
+    }
+    // Options that carry a kind of their own are not guessed from their ids.
+    const named = classifyAcpPermission({ sessionId: "s", toolCall: { kind: "read", rawInput: { Path: join(cwd, "a") } }, options: [{ optionId: "allow", kind: "allow_always" }, { optionId: "deny", kind: "reject_always" }] },
+      { cwd, plan: cliPermissionPlan("google", "ask") });
+    assert.deepEqual([named.allowOption, named.rejectOption], [undefined, undefined]);
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("MiniMax Code reports a call's arguments in an update after the call, and the request's own fields win over what was tracked", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "tomverse-acp-minimax-"));
+  try {
+    const calls = tracking([
+      ["m1", { title: "write", name: "write", kind: "edit" }], ["m1", { rawInput: { path: "hello.txt", content: "hi" } }],
+      ["m2", { title: "bash", kind: "execute" }], ["m2", { rawInput: { command: "od -c notes.md | head -5" } }],
+      ["m3", { title: "bash", kind: "execute", rawInput: { command: "cat ~/.minimax/auth.json" } }],
+      ["m4", { title: "bash", kind: "execute", rawInput: { command: "ls" } }],
+    ]);
+    const ask = (toolCall: object, mode: "ask" | "allow_all", id: string) => classifyAcpPermission({ sessionId: "s", options: vibeOptions, toolCall: { toolCallId: id, ...toolCall } },
+      { cwd, plan: cliPermissionPlan("minimax", mode), tracked: calls.get(id) });
+    const write = ask({ title: "write", kind: "edit" }, "ask", "m1");
+    assert.deepEqual([write.verdict, write.approval.tool, write.approval.input], ["ask", "Write", { file_path: "hello.txt", content: "hi" }]);
+    assert.equal(ask({ title: "write", kind: "edit" }, "allow_all", "m1").verdict, "allow");
+    const bash = ask({ title: "bash", kind: "execute" }, "ask", "m2");
+    assert.deepEqual([bash.verdict, bash.approval.input.command], ["ask", "od -c notes.md | head -5"]);
+    // The request's command wins on the card, and the tracked one is checked too.
+    assert.equal(ask({ kind: "execute", rawInput: { command: "pwd" } }, "ask", "m4").approval.input.command, "pwd");
+    assert.equal(ask({ kind: "execute", rawInput: { command: "pwd" } }, "ask", "m3").verdict, "refuse");
+    assert.equal(ask({ kind: "execute", rawInput: { command: "cat ~/.minimax-code/x" } }, "ask", "m4").verdict, "refuse");
+    // A request that names a different place than the call did is judged by both: outside the project asks even in Allow all.
+    const moved = classifyAcpPermission({ sessionId: "s", options: vibeOptions, toolCall: { toolCallId: "m1", kind: "edit", locations: [{ path: join(cwd, "..", "elsewhere.txt") }] } },
+      { cwd, plan: cliPermissionPlan("minimax", "allow_all"), tracked: calls.get("m1") });
+    assert.equal(moved.verdict, "ask");
+  } finally { await rm(cwd, { recursive: true, force: true }); }
 });
 
 // ----------------------------------------------------------------- the process
@@ -620,4 +748,74 @@ test("Each ACP provider runs through the same adapter", async () => {
 
 test("The permission table covers every mode for every ACP provider", () => {
   for (const provider of liveAcpProviders) for (const mode of permissionModes) assert.ok(cliPermissionPlan(provider, mode), `${provider} ${mode}`);
+});
+
+test("The requests of the real CLIs, replayed by a stand-in agent, reach the card and the answers as the plan says", async () => {
+  await withProject(async (directory) => {
+    const names = ["vibe-edit", "vibe-bash", "vibe-credential", "vibe-unknown", "kimi-write", "kimi-bash", "kimi-credential", "kimi-partial", "agy-bash", "agy-write", "agy-credential",
+      "minimax-write", "minimax-bash"];
+    const run = async (mode: "read_only" | "ask" | "allow_all") => {
+      const record = join(directory, "..", `acp-record-formats-${mode}-${Date.now()}.json`);
+      const approvals: CliApproval[] = [];
+      const result = await runProviderCli(acpRun(directory, { scenario: "formats", record }, { mode, approve: async (approval) => { approvals.push(approval); return true; } }));
+      const seen = await seenIn(record);
+      await rm(record, { force: true });
+      assert.equal(result.status, "completed", `${mode}: ${result.error}`);
+      assert.deepEqual(seen.outcomes.map(({ name }) => name), names);
+      return { approvals, seen };
+    };
+    // Ask: every readable request reaches the card whole; credential, empty and argument-less ones are refused and answered no.
+    const ask = await run("ask");
+    const shown = ask.approvals.filter(({ refused }) => !refused);
+    assert.deepEqual(ask.approvals.filter(({ refused }) => refused).map(({ id }) => id).sort(), ["0:tool_3", "0:tool_4", "effect-3", "effect-ghost", "unknown"]);
+    const byId = Object.fromEntries(ask.approvals.map((approval) => [approval.id, approval]));
+    assert.deepEqual([byId["effect-1"]!.tool, byId["effect-1"]!.input], ["Write", { file_path: "hello.txt", content: "hi" }]);
+    assert.equal(byId["effect-2"]!.input.command, "printf 'hi' > hello.txt && cat hello.txt");
+    assert.deepEqual([byId["0:tool_1"]!.tool, byId["0:tool_1"]!.input], ["Write", { file_path: "hello.txt", content: "hi" }]);
+    assert.equal(byId["0:tool_2"]!.input.command, "ls -la");
+    assert.equal(byId["m1"]!.tool, "Write");
+    assert.equal(byId["m2"]!.input.command, "od -c notes.md | head -5");
+    assert.ok(shown.length >= 8);
+    for (const name of ["vibe-credential", "vibe-unknown", "kimi-credential", "kimi-partial"]) assert.ok(rejected(outcomeOf(ask.seen, name)), name);
+    for (const name of ["vibe-edit", "vibe-bash", "kimi-write", "kimi-bash", "minimax-write", "minimax-bash"]) assert.ok(allowed(outcomeOf(ask.seen, name)), name);
+    // Antigravity's options have no kind: "allow" and "deny" are picked by their ids, and a credential is answered "deny".
+    assert.equal(outcomeOf(ask.seen, "agy-bash")?.optionId, "allow");
+    assert.equal(outcomeOf(ask.seen, "agy-credential")?.optionId, "deny");
+    assert.ok(ask.seen.outcomes.every(({ outcome }) => outcome.optionId !== "always" && outcome.optionId !== "permanent"));
+
+    // Allow all: an edit inside the project is answered without a card, in each CLI's own format; commands still ask.
+    const all = await run("allow_all");
+    const asked = all.approvals.map(({ id }) => id);
+    for (const id of ["effect-1", "0:tool_1", "m1"]) assert.ok(!asked.includes(id), `${id} needs no card`);
+    for (const id of ["effect-2", "0:tool_2", "m2"]) assert.ok(asked.includes(id), `${id} asks`);
+    for (const name of ["vibe-edit", "kimi-write", "agy-write", "minimax-write"]) assert.ok(allowed(outcomeOf(all.seen, name)), name);
+    assert.equal(outcomeOf(all.seen, "agy-write")?.optionId, "allow");
+
+    // Read only: nothing is shown, nothing is allowed.
+    const readOnly = await run("read_only");
+    assert.deepEqual(readOnly.approvals, []);
+    for (const name of names) assert.ok(!allowed(outcomeOf(readOnly.seen, name)), name);
+  });
+});
+
+test("The note about a CLI's own rules is for the CLIs seen to read, edit or run commands without asking, and for no other", async () => {
+  assert.deepEqual(acpOwnRules.qwen, { readsWithoutAsking: true, editsWithoutAsking: false, safeCommandsWithoutAsking: true });
+  assert.deepEqual(acpOwnRules.google, { readsWithoutAsking: true, editsWithoutAsking: true, safeCommandsWithoutAsking: false });
+  assert.deepEqual(acpOwnRules.minimax, { readsWithoutAsking: false, editsWithoutAsking: true, safeCommandsWithoutAsking: false });
+  assert.deepEqual(acpOwnRules.mistral, { readsWithoutAsking: false, editsWithoutAsking: false, safeCommandsWithoutAsking: true });
+  for (const provider of ["qwen", "google", "minimax", "mistral"] as const) assert.equal(cliRunsOwnRules(provider), true, provider);
+  for (const provider of ["moonshot", "xai", "openai", "anthropic", "zai"] as const) assert.equal(cliRunsOwnRules(provider), false, provider);
+  // Every language has the note, and it is not the English one copied.
+  const languages = Object.keys(desktopNativeCopy) as Array<keyof typeof desktopNativeCopy>;
+  assert.deepEqual([...languages].sort(), ["de", "en", "es", "fr", "ko", "pt", "zh", "zh-Hant"]);
+  for (const language of languages) {
+    assert.ok(desktopNativeCopy[language].cliOwnRules.length > 40, language);
+    if (language !== "en") assert.notEqual(desktopNativeCopy[language].cliOwnRules, desktopNativeCopy.en.cliOwnRules, language);
+  }
+  // The runner shows it only through that check, once, with the task's other notes.
+  const runner = await readFile(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "host", "runner-process.ts"), "utf8");
+  const start = runner.indexOf("async function executeProviderCli");
+  const body = runner.slice(start, runner.indexOf("async function approveNativePatch"));
+  assert.equal(body.match(/cliOwnRules/g)?.length, 1);
+  assert.match(body, /if \(cliRunsOwnRules\(command\.provider\)\) leading\.push\(desktopCodeNotice\("cliOwnRules"\)\);/);
 });

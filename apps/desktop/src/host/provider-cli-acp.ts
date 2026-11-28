@@ -176,10 +176,32 @@ const listKeys = new Set(["paths", "files", "file_paths"]);
 /** A request to read or search is allowed in Read only when it names where, and every place is inside the project. */
 const readKinds = new Set(["read", "search"]);
 
+// The CLIs name the same argument differently (Vibe `filePath`, Antigravity `CommandLine` and `Path`, Kimi `path`): keys are matched without case.
+const commandNames = ["command", "commandline", "command_line", "cmd"];
+const afterNames = ["newtext", "new_text", "new_string", "newstring", "content", "contents"];
+const beforeNames = ["oldtext", "old_text", "old_string", "oldstring"];
+const pathNames = ["path", "filepath", "file_path", "absolute_path", "absolutepath", "file", "filename", "notebook_path"];
+
 function parsedInput(value: unknown): Json | undefined {
   if (isRecord(value)) return value;
   if (typeof value !== "string" || value.length > 64 * 1024) return undefined;
   try { const parsed: unknown = JSON.parse(value); return isRecord(parsed) ? parsed : undefined; } catch { return undefined; }
+}
+
+/** The value of the first of these keys the object has, compared without case. */
+function field(source: Json | undefined, names: readonly string[]): unknown {
+  if (!source) return undefined;
+  const lower = new Map(Object.keys(source).map((key) => [key.toLowerCase(), key]));
+  for (const name of names) { const key = lower.get(name); if (key !== undefined) return source[key]; }
+  return undefined;
+}
+const stringField = (source: Json | undefined, names: readonly string[]) => { const value = field(source, names); return typeof value === "string" ? value : undefined; };
+
+/** The command text of a request's arguments: a string, or a list of words. */
+function commandOf(source: Json | undefined): string | undefined {
+  const value = field(source, commandNames);
+  if (typeof value === "string") return value.trim() ? value : undefined;
+  return Array.isArray(value) && value.length > 0 && value.every((word) => typeof word === "string") ? value.join(" ") : undefined;
 }
 
 function collectPaths(value: unknown, into: string[], depth = 0) {
@@ -199,38 +221,57 @@ function collectPaths(value: unknown, into: string[], depth = 0) {
 }
 
 type Diff = { path: string; oldText?: string | null; newText: string };
-export type AcpPermission = {
-  /** "allow": answered yes with no card. "deny": answered no with no card. "ask": the person's card. "refuse": no card, and the person is told. */
-  verdict: "allow" | "deny" | "ask" | "refuse";
-  approval: CliApproval;
-  allowOption?: string;
-  rejectOption?: string;
-};
 
 /**
- * Reads one `session/request_permission` and decides what Desktop does with it, by the permission plan:
- * - Read only (no approvals): a read or search that names its places, all inside the project, is allowed; every write, command
- *   or other request is denied, and so is a read or search that names no place.
- * - Ask and Auto review: everything goes to the person's card, except a request naming a credential file or a provider CLI's
- *   settings folder (also through a link), or a command request that carries no command text, which is refused and never shown.
- * - Allow all: a file edit whose every path is inside the project is allowed; commands, network and anything outside the
- *   project still go to the card, as with Claude Code.
- * "Allow always" is never chosen: only `allow_once` is ever selected.
+ * What an agent has said of one tool call before it asks about it. Vibe asks with only a `toolCallId` (the call itself came in an
+ * earlier `tool_call`); Kimi streams the call's arguments as JSON text in `tool_call_update` content before it asks, and only
+ * reports `rawInput` and `locations` afterwards; MiniMax Code reports `rawInput` in an update after the call.
  */
-export function classifyAcpPermission(params: unknown, context: { cwd: string; plan: CliPermissionPlan }): AcpPermission {
-  const body = isRecord(params) ? params : {};
-  const call = isRecord(body.toolCall) ? body.toolCall : {};
-  const options = Array.isArray(body.options) ? body.options.filter(isRecord) : [];
-  const optionOf = (kind: string) => options.find((option) => option.kind === kind && typeof option.optionId === "string")?.optionId as string | undefined;
-  const allowOption = optionOf("allow_once");
-  const rejectOption = optionOf("reject_once");
-  const id = text(call.toolCallId, 200) ?? "unknown";
-  const kind = text(call.kind, 40) ?? "other";
-  const title = text(call.title, 300);
-  const raw = parsedInput(call.rawInput);
+export type TrackedCall = { kind?: string; title?: string; rawInput?: unknown; diffs: unknown[]; locations: unknown[]; streamed: string; lastChunk: string };
+const STREAM_LIMIT = 64 * 1024;
 
+/** Adds what a `tool_call` or `tool_call_update` says to what is known of that call. */
+export function trackToolCall(calls: Map<string, TrackedCall>, id: string, update: Json) {
+  let known = calls.get(id);
+  if (!known) {
+    if (calls.size >= 5_000) return;
+    known = { diffs: [], locations: [], streamed: "", lastChunk: "" };
+    calls.set(id, known);
+  }
+  known.kind = text(update.kind, 40) ?? known.kind;
+  known.title = text(update.title, 300) ?? known.title;
+  if (update.rawInput !== undefined && update.rawInput !== null) known.rawInput = update.rawInput;
+  if (Array.isArray(update.locations) && update.locations.length > 0) known.locations = update.locations.slice(0, 64);
+  if (Array.isArray(update.content)) {
+    const diffs = update.content.slice(0, 64).filter((entry) => isRecord(entry) && entry.type === "diff");
+    if (diffs.length > 0) known.diffs = diffs;
+    for (const entry of update.content.slice(0, 64)) {
+      if (!isRecord(entry) || entry.type !== "content" || !isRecord(entry.content) || typeof entry.content.text !== "string") continue;
+      known.lastChunk = entry.content.text.slice(0, STREAM_LIMIT);
+      if (known.streamed.length + known.lastChunk.length <= STREAM_LIMIT) known.streamed += known.lastChunk;
+    }
+  }
+}
+
+/**
+ * The call's arguments from the text a CLI streamed (Kimi): only a text that is, whole, one JSON object counts. The pieces added
+ * together are tried first, then the last piece alone (a CLI that repeats the whole text each time).
+ */
+function streamedInput(tracked: TrackedCall | undefined): Json | undefined {
+  for (const candidate of [tracked?.streamed, tracked?.lastChunk]) {
+    const trimmed = candidate?.trim();
+    if (trimmed?.startsWith("{")) { const parsed = parsedInput(trimmed); if (parsed) return parsed; }
+  }
+  return undefined;
+}
+
+type Facts = { kind?: string; title?: string; raw?: Json; paths: string[]; diffs: Diff[]; command?: string; named: boolean };
+
+/** What one description of a tool call (the request's own, or the tracked one) says. */
+function factsOf(call: Json, tracked?: TrackedCall): Facts {
   const paths: string[] = [];
   const diffs: Diff[] = [];
+  const raw = parsedInput(call.rawInput) ?? (tracked ? streamedInput(tracked) : undefined) ?? parsedInput(call.args);
   for (const location of Array.isArray(call.locations) ? call.locations.slice(0, 64) : []) {
     const path = isRecord(location) ? text(location.path, 4_096) : undefined;
     if (path) paths.push(path);
@@ -241,33 +282,92 @@ export function classifyAcpPermission(params: unknown, context: { cwd: string; p
     diffs.push({ path: entry.path, oldText: typeof entry.oldText === "string" ? entry.oldText : null, newText: typeof entry.newText === "string" ? entry.newText : "" });
   }
   collectPaths(raw, paths);
-  // The command is the one the CLI will run, from its own arguments; the title is a description and is never taken for it.
-  const rawCommand = raw?.command ?? raw?.cmd;
-  const command = typeof rawCommand === "string" && rawCommand.trim() ? rawCommand
-    : Array.isArray(rawCommand) && rawCommand.length > 0 && rawCommand.every((word) => typeof word === "string") ? rawCommand.join(" ") : undefined;
-  const commandMissing = kind === "execute" && command === undefined;
+  const kind = text(call.kind, 40);
+  const title = text(call.title, 300);
+  return { kind, title, raw, paths, diffs, command: commandOf(raw), named: kind !== undefined || title !== undefined || raw !== undefined || paths.length > 0 };
+}
 
+const unique = (values: readonly string[]) => [...new Set(values)];
+
+export type AcpPermission = {
+  /** "allow": answered yes with no card. "deny": answered no with no card. "ask": the person's card. "refuse": no card, and the person is told. */
+  verdict: "allow" | "deny" | "ask" | "refuse";
+  approval: CliApproval;
+  allowOption?: string;
+  rejectOption?: string;
+};
+
+/** The option a request offers for an answer: by its kind, or for a CLI that sends no kind (Antigravity `allow` / `deny`) by its id. */
+function optionFor(options: Json[], kind: "allow_once" | "reject_once") {
+  const named = options.find((option) => option.kind === kind && typeof option.optionId === "string");
+  if (named) return named.optionId as string;
+  const plain = kind === "allow_once" ? /^allow(_once)?$/i : /^(deny|reject)(_once)?$/i;
+  return options.find((option) => typeof option.kind !== "string" && typeof option.optionId === "string" && plain.test(option.optionId))?.optionId as string | undefined;
+}
+
+/**
+ * Reads one `session/request_permission` and decides what Desktop does with it, by the permission plan. What the request says is
+ * merged with what the agent said of the same `toolCallId` before (`tracked`): a field the request carries wins, but every path and
+ * command from either is checked. A request that names nothing at all, with nothing tracked, is refused.
+ * - Read only (no approvals): a read or search that names its places, all inside the project, is allowed; every write, command
+ *   or other request is denied, and so is a read or search that names no place.
+ * - Ask and Auto review: everything goes to the person's card, except a request naming a credential file or a provider CLI's
+ *   settings folder (also through a link), a command request that carries no command text, or a request with no content, which is
+ *   refused and never shown.
+ * - Allow all: a file edit whose every path is inside the project is allowed; commands, network and anything outside the
+ *   project still go to the card, as with Claude Code.
+ * "Allow always" is never chosen: only `allow_once` is ever selected.
+ */
+export function classifyAcpPermission(params: unknown, context: { cwd: string; plan: CliPermissionPlan; tracked?: TrackedCall }): AcpPermission {
+  const body = isRecord(params) ? params : {};
+  const call = isRecord(body.toolCall) ? body.toolCall : {};
+  const options = Array.isArray(body.options) ? body.options.filter(isRecord) : [];
+  const allowOption = optionFor(options, "allow_once");
+  const rejectOption = optionFor(options, "reject_once");
+  const id = text(call.toolCallId, 200) ?? "unknown";
+  const own = factsOf(call);
+  const earlier = context.tracked ? factsOf({ kind: context.tracked.kind, title: context.tracked.title, rawInput: context.tracked.rawInput, locations: context.tracked.locations,
+    content: context.tracked.diffs }, context.tracked) : undefined;
+  const kind = own.kind ?? earlier?.kind ?? "other";
+  const title = own.title ?? earlier?.title;
+  const raw = own.raw ?? earlier?.raw;
+  const diffs = own.diffs.length > 0 ? own.diffs : earlier?.diffs ?? [];
+  const paths = unique([...own.paths, ...(earlier?.paths ?? [])]);
+  const command = own.command ?? earlier?.command;
+  const commands = [own.command, earlier?.command].filter((value): value is string => value !== undefined);
+  const commandMissing = kind === "execute" && command === undefined;
+  const blank = !own.named && !earlier?.named;
+
+  // The card, from the arguments the CLI will run with; the title is a description and is never taken for them.
+  const known = new Set([...commandNames, ...afterNames, ...beforeNames, ...pathNames]);
+  const extras = Object.fromEntries(Object.entries(raw ?? {}).filter(([key]) => !known.has(key.toLowerCase())));
+  const rawPath = stringField(raw, pathNames);
+  const after = stringField(raw, afterNames);
+  const before = stringField(raw, beforeNames);
   let approval: CliApproval;
   if (kind === "execute" && command) {
-    approval = { id, tool: "Bash", input: { command, ...(title && title !== command ? { description: title } : {}) } };
+    approval = { id, tool: "Bash", input: { command, ...(title && title !== command ? { description: title } : {}), ...extras } };
   } else if (kind === "edit" && diffs.length === 1) {
     const [diff] = diffs;
     approval = diff.oldText === null || diff.oldText === undefined
-      ? { id, tool: "Write", input: { file_path: diff.path, content: diff.newText } }
-      : { id, tool: "Edit", input: { file_path: diff.path, old_string: diff.oldText, new_string: diff.newText } };
+      ? { id, tool: "Write", input: { file_path: diff.path, content: diff.newText, ...extras } }
+      : { id, tool: "Edit", input: { file_path: diff.path, old_string: diff.oldText, new_string: diff.newText, ...extras } };
   } else if (kind === "edit" && diffs.length > 1) {
     approval = { id, tool: "MultiEdit", input: { file_path: diffs[0]!.path, edits: diffs.map(({ path, oldText, newText }) => ({ path, old_string: oldText ?? "", new_string: newText })) } };
+  } else if (kind === "edit" && rawPath && after !== undefined) {
+    approval = before === undefined ? { id, tool: "Write", input: { file_path: rawPath, content: after, ...extras } }
+      : { id, tool: "Edit", input: { file_path: rawPath, old_string: before, new_string: after, ...extras } };
   } else {
     approval = { id, tool: title ?? kind, input: { kind, ...(title ? { title } : {}), ...(paths.length ? { paths } : {}), ...(raw ? { rawInput: raw } : {}) } };
   }
 
-  const secret = paths.some((path) => namesCredential(path, context.cwd)) || (command !== undefined && commandNamesCredential(command));
+  const secret = paths.some((path) => namesCredential(path, context.cwd)) || commands.some(commandNamesCredential);
   const inside = paths.every((path) => insideProject(path, context.cwd));
   const result = (verdict: AcpPermission["verdict"], marked = approval): AcpPermission => ({ verdict, approval: marked, allowOption, rejectOption });
   if (context.plan.approvals === "none") {
-    return result(!secret && !commandMissing && inside && readKinds.has(kind) && paths.length > 0 && !command && allowOption ? "allow" : "deny");
+    return result(!blank && !secret && !commandMissing && inside && readKinds.has(kind) && paths.length > 0 && !command && allowOption ? "allow" : "deny");
   }
-  if (secret || commandMissing) return result("refuse", { ...approval, refused: true });
+  if (secret || commandMissing || blank) return result("refuse", { ...approval, refused: true });
   if (context.plan.grants === "allow_all" && kind === "edit" && paths.length > 0 && inside && !command && allowOption) return result("allow");
   return result("ask");
 }
@@ -300,6 +400,8 @@ export function createAcpClient(options: AcpClientOptions) {
   let nextId = 1;
   const waiting = new Map<number, (frame: Json) => void>();
   const tools = new Map<string, Tool>();
+  /** What the agent said of each tool call before it asked about it (see TrackedCall). */
+  const calls = new Map<string, TrackedCall>();
   const pendingApprovals = new Set<AbortController>();
   const early: Json[] = [];
   const watchers = new Set<() => void>();
@@ -431,8 +533,7 @@ export function createAcpClient(options: AcpClientOptions) {
     if (fileKinds[kind] || kind === "delete") for (const location of Array.isArray(update.locations) ? update.locations.slice(0, 64) : []) {
       addFile(isRecord(location) ? text(location.path, 2_048) : undefined, false);
     }
-    const rawCommand = raw?.command ?? raw?.cmd;
-    const command = known?.command ?? (typeof rawCommand === "string" ? rawCommand : kind === "execute" ? title : undefined);
+    const command = known?.command ?? commandOf(raw) ?? (kind === "execute" ? title : undefined);
     if (tools.size < 5_000 || known) tools.set(id, { kind, title, files, ...(command ? { command } : {}) });
     const status = text(update.status, 20);
     const state = (status && toolStates[status]) || "running";
@@ -464,7 +565,10 @@ export function createAcpClient(options: AcpClientOptions) {
     if (kind === "agent_thought_chunk" || kind === "user_message_chunk") return;
     flush();
     const id = text(update.toolCallId, 200);
-    if ((kind === "tool_call" || kind === "tool_call_update") && id) for (const event of toolEvents(id, update)) options.emit(event);
+    if ((kind === "tool_call" || kind === "tool_call_update") && id) {
+      trackToolCall(calls, id, update);
+      for (const event of toolEvents(id, update)) options.emit(event);
+    }
   }
 
   function answer(id: unknown, params: unknown) {
@@ -472,7 +576,8 @@ export function createAcpClient(options: AcpClientOptions) {
     pendingApprovals.add(controller);
     const signal = AbortSignal.any([options.signal, controller.signal]);
     approvals = approvals.then(async () => {
-      const decision = classifyAcpPermission(params, { cwd: options.cwd, plan: options.plan });
+      const asked = isRecord(params) && isRecord(params.toolCall) ? text(params.toolCall.toolCallId, 200) : undefined;
+      const decision = classifyAcpPermission(params, { cwd: options.cwd, plan: options.plan, ...(asked && calls.has(asked) ? { tracked: calls.get(asked) } : {}) });
       let allowed = decision.verdict === "allow";
       if (!finished && !signal.aborted && (decision.verdict === "ask" || decision.verdict === "refuse") && options.approve && options.plan.approvals === "card") {
         try { allowed = (await options.approve(decision.approval, signal)) && decision.verdict === "ask" && !!decision.allowOption; } catch { allowed = false; }

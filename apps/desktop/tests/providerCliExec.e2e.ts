@@ -173,6 +173,8 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
     await expect(denyWindow.getByRole("button", { name: "Allow always" })).toHaveCount(0);
     await decide(denyWindow, "Deny");
     await expect(page.getByText("denied: The person declined this action in Tomverse Desktop.")).toBeVisible({ timeout: 30_000 });
+    // The note about a CLI's own rules is for the ACP CLIs that have some; Claude Code has none.
+    await expect(page.locator("summary", { hasText: "under its own rules" })).toHaveCount(0);
     run = await seen();
     assert.equal(run.response?.response.response.behavior, "deny");
     assert.ok(run.args.includes("--restricted") && run.args.includes("--no-session-persistence"));
@@ -250,6 +252,7 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
     await expect(vibeDeny.getByRole("button", { name: "Allow always" })).toHaveCount(0);
     await decide(vibeDeny, "Deny");
     await expect(page.getByText("I will work. denied it", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator("summary", { hasText: "under its own rules" })).toBeAttached();
     const vibeRun = await outcomes();
     assert.equal(vibeRun.outcomes[0]!.outcome.optionId, "reject");
     assert.deepEqual(vibeRun.args, []);

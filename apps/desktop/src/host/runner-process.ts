@@ -33,7 +33,7 @@ import { createReviewWorker } from "./review-worker";
 import { createGitDraftWorker } from "./git-draft-worker";
 import { runProviderCli } from "./provider-cli-exec";
 import { approvalRequestFor, createTranscript, holdsText, withoutKey } from "./provider-cli-transcript";
-import { cliPermissionPlan, liveCliExecution } from "../provider-cli-exec-contract";
+import { cliPermissionPlan, cliRunsOwnRules, liveCliExecution } from "../provider-cli-exec-contract";
 import { startCodeSandbox } from "./code-sandbox";
 import { composeLaunch, type SandboxRuntime } from "../../../tomverse-cli/src/sandbox.js";
 import type { RemoteWorkspace } from "../../../tomverse-cli/src/remote-workspace.js";
@@ -613,6 +613,7 @@ async function executeProviderCli(command: Extract<WorkerCommand, { type: "start
       text = withWorkspaceReferences(text, task.references);
     }
     if (plan.notice) leading.push(desktopCodeNotice(plan.notice));
+    if (cliRunsOwnRules(command.provider)) leading.push(desktopCodeNotice("cliOwnRules"));
     task.status = "running";
     refresh();
     const result = await runProviderCli({

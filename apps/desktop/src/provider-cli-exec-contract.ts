@@ -40,6 +40,26 @@ export function liveCliRunnable(provider: LiveCliProvider, saved: Pick<SavedCliP
 }
 
 /**
+ * What each ACP CLI does under its own rules, without sending Desktop a permission request (seen in real runs on the owner's computer,
+ * 2026-11-28). Desktop can only answer the requests it receives, so none of this can be refused: Qwen Code and Antigravity read
+ * project files, including a `.env`, and the content goes to the model; Antigravity and MiniMax Code edit project files in Ask
+ * too; Mistral Vibe and Qwen Code run commands they judge safe (`ls`, `echo`) in Read only. Grok Build: not checked yet, so nothing
+ * is claimed for it. Kimi Code asked for everything that was tried. A task on a CLI with any of these says so (`cliOwnRules`).
+ * Qwen Code's `--disallowed-tools` / `--tools` options exist, but their value format is not confirmed, so they are not used.
+ */
+export type AcpOwnRules = { readsWithoutAsking: boolean; editsWithoutAsking: boolean; safeCommandsWithoutAsking: boolean };
+export const acpOwnRules: Record<LiveAcpProvider, AcpOwnRules> = {
+  qwen: { readsWithoutAsking: true, editsWithoutAsking: false, safeCommandsWithoutAsking: true },
+  google: { readsWithoutAsking: true, editsWithoutAsking: true, safeCommandsWithoutAsking: false },
+  minimax: { readsWithoutAsking: false, editsWithoutAsking: true, safeCommandsWithoutAsking: false },
+  mistral: { readsWithoutAsking: false, editsWithoutAsking: false, safeCommandsWithoutAsking: true },
+  moonshot: { readsWithoutAsking: false, editsWithoutAsking: false, safeCommandsWithoutAsking: false },
+  xai: { readsWithoutAsking: false, editsWithoutAsking: false, safeCommandsWithoutAsking: false },
+};
+/** Whether a task on this route runs something under the CLI's own rules that Desktop cannot ask about. */
+export const cliRunsOwnRules = (provider: LiveCliProvider) => isLiveAcpProvider(provider) && Object.values(acpOwnRules[provider]).some(Boolean);
+
+/**
  * The folders in a person's home where the provider CLIs keep their sign-in and settings. A live ACP run uses the person's
  * real home, so these are the files a CLI could be asked to read or change on a model's say-so: a request naming anything
  * under one is refused in every permission mode and never shown on an approval card. Names are matched as whole path
