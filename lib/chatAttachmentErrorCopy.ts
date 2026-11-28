@@ -52,6 +52,9 @@ export const CHAT_ATTACHMENT_ERROR_COPY_KEYS: Readonly<Record<string, string>> =
     ATTACHMENT_MODEL_UNSUPPORTED: "chat.attachmentModelUnsupported",
     // Scanned PDF, OCR service down, and a model that cannot read the PDF itself.
     PDF_OCR_UNAVAILABLE: "chat.attachmentOcrUnavailable",
+    // A photo an image edit refuses before it reserves anything (lib/imageEditSource.ts).
+    IMAGE_EDIT_SOURCE_TOO_LARGE: "chat.imageEditSourceTooLarge",
+    IMAGE_EDIT_SOURCE_UNSUPPORTED: "chat.imageEditSourceUnsupported",
 
     // -- Type and size ------------------------------------------------------
     UNSUPPORTED_ATTACHMENT_TYPE: "chat.attachmentTypeError",

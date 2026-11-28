@@ -11,25 +11,32 @@ import { createContext, useContext, useMemo, type ReactNode } from "react";
  * switch guards (the Preview button on a code block, React previews, the
  * "change this screen" box) reads it here, so a surface that never sits under
  * the provider -- a shared page, a test -- shows none of it.
+ *
+ * `codeRunEnabled` is the separate default-off `TOMVERSE_CHAT_CODE_RUN_ENABLED`
+ * switch (lib/chatCodeRun.ts), read the same way: the Run button on a Python
+ * block. It does not depend on `enabled`.
  */
 type ChatArtifactWorkspace = {
   enabled: boolean;
+  codeRunEnabled: boolean;
   /** Puts text at the top of the composer's draft. Null where there is no composer to write to. */
   fillComposer: ((text: string) => void) | null;
 };
 
-const WorkspaceContext = createContext<ChatArtifactWorkspace>({ enabled: false, fillComposer: null });
+const WorkspaceContext = createContext<ChatArtifactWorkspace>({ enabled: false, codeRunEnabled: false, fillComposer: null });
 
 export function ChatArtifactWorkspaceProvider({
   enabled,
+  codeRunEnabled = false,
   fillComposer,
   children,
 }: {
   enabled: boolean;
+  codeRunEnabled?: boolean;
   fillComposer: ((text: string) => void) | null;
   children: ReactNode;
 }) {
-  const value = useMemo(() => ({ enabled, fillComposer }), [enabled, fillComposer]);
+  const value = useMemo(() => ({ enabled, codeRunEnabled, fillComposer }), [enabled, codeRunEnabled, fillComposer]);
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }
 

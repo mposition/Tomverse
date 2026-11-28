@@ -105,7 +105,7 @@ import {
   watchInterruptedChatAttempts,
   type ChatStreamInterruption,
 } from "@/lib/chatStreamReattach";
-import { readChatImageTurnRef, readChatImageTurnRequest } from "@/lib/chatImageTurnCore";
+import { imageEditSourceRefusalCode, readChatImageTurnRef, readChatImageTurnRequest } from "@/lib/chatImageTurnCore";
 import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
 import type { ReviewImageTurns } from "@/lib/reviewImageTurn";
 import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
@@ -2391,9 +2391,16 @@ function ChatAppComponent({
         if (!imageTurnRef) {
           const errorCode =
             typeof body.code === "string" ? body.code : "CHAT_IMAGE_TURN_FAILED";
+          // A photo the edit refuses before reserving anything is explained in
+          // the person's language, not by the server's English sentence.
+          const editSourceCopyKey = imageEditSourceRefusalCode(errorCode)
+            ? chatAttachmentErrorCopyKey(errorCode)
+            : null;
           setAssistantMessage(
             assistantMessageId,
-            typeof body.error === "string" ? body.error : t("chat.responseError"),
+            editSourceCopyKey
+              ? t(editSourceCopyKey)
+              : typeof body.error === "string" ? body.error : t("chat.responseError"),
             "error",
             { errorCode }
           );

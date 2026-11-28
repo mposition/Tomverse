@@ -148,6 +148,8 @@ export async function saveMessagesWithAttachmentReferences(input: {
   beforeCommit?: (
     tx: Prisma.TransactionClient
   ) => Promise<{ replay: boolean } | void>;
+  /** In the creating transaction, only when at least one new row was written. */
+  afterCreate?: (tx: Prisma.TransactionClient) => Promise<void>;
 }): Promise<{ count: number }> {
   if (new Set(input.messages.map((message) => message.id)).size !== input.messages.length) {
     throw new MessageAttachmentResendError("MESSAGE_SAVE_CONFLICT", 409);
@@ -280,6 +282,7 @@ export async function saveMessagesWithAttachmentReferences(input: {
           await bindMessageAttachments(tx, { ...input, messageId: message.id, uploadIds: message.attachmentUploadIds });
         }
       }
+      if (count > 0) await input.afterCreate?.(tx);
       return { count };
     });
   } finally {

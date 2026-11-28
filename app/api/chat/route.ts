@@ -57,7 +57,7 @@ import {
     ChatAttachmentValidationError,
     validateChatAttachmentUpload,
 } from "@/lib/chatAttachmentValidation";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import {
@@ -271,6 +271,7 @@ import {
     CHAT_MAX_TOTAL_ATTACHMENT_BYTES,
     PAST_ATTACHMENT_OMITTED_KIND,
     PAST_ATTACHMENT_OMITTED_TEXT,
+    PAST_IMAGE_OMITTED_TEXT,
     PAST_ATTACHMENT_UNDELIVERABLE_TEXT,
     pastTurnAttachmentTokenBudget,
 } from "@/lib/chatAttachmentLimits";
@@ -280,11 +281,21 @@ import {
     readAttachmentTextCache,
     writeAttachmentTextCache,
 } from "@/lib/attachmentTextCache";
+import {
+    describeImagePayloadLimit,
+    claimInConversationOrder,
+    messageReadingOrder,
+    oldestAttachmentSlots,
+} from "@/lib/chatImageBudget";
 import { extractLegacyOfficeText, type LegacyOfficeFormatId } from "@/lib/legacyOfficeText";
 import { legacyOfficeValidationCode } from "@/lib/chatAttachmentValidation";
 import {
     AnimatedImageError,
-    extractPdfTextSafely,
+    describeUnreadPdfPages,
+    pdfReadingOutcome,
+    pdfTextCharacterBudget,
+    type PdfReadingOutcome,
+    extractPdfTextWithPagesSafely,
     normalizeImageSafely,
     validatePdfSafely,
     type NormalizableImageMediaType,
@@ -292,6 +303,7 @@ import {
 import {
     extractPdfTextWithMistralOcr,
     MISTRAL_OCR_COST_MICRO_USD_PER_PAGE,
+    type MistralOcrResult,
 } from "@/lib/mistralOcr";
 import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
 import {
@@ -619,6 +631,14 @@ const providerCallUsage = async (stream: {
         return undefined;
     }
 };
+
+/**
+ * Paid OCR calls under way in this process, keyed by account, file content and
+ * page selection. Review sends one request per panel with the same files; a
+ * panel that arrives while another is reading the file waits for that result
+ * instead of paying for the pages again. Never shared between accounts.
+ */
+const pdfOcrInFlight = new Map<string, Promise<MistralOcrResult | null>>();
 
 const MAX_ATTACHMENTS = CHAT_MAX_ATTACHMENTS_PER_MESSAGE;
 // Every request resends the full conversation history, so this bounds how many
@@ -3591,12 +3611,16 @@ async function handleChatPost(
             message.role !== "assistant" && Array.isArray(message.attachments)
                 ? message.attachments.length
                 : 0;
-        let olderAttachmentsToOmit = Math.max(
+        const olderAttachmentsToOmit = Math.max(
             0,
             executionMessages.reduce(
                 (count, message) => count + readAttachmentCount(message),
                 0
             ) - MAX_CONVERSATION_ATTACHMENTS
+        );
+        const countOmittedSlots = oldestAttachmentSlots(
+            executionMessages.map(readAttachmentCount),
+            olderAttachmentsToOmit
         );
         /*
           The files that count leaves out are still asked about: a lost file is
@@ -4332,19 +4356,37 @@ async function handleChatPost(
         // User files (images, native PDFs) the provider is sent as file parts.
         let nativeFilePartCount = 0;
 
-        for (const [messageIndex, msg] of executionMessages.entries()) {
+        // The message being sent is read FIRST, whatever its files are made of
+        // (an archive's images and a guest's unsized images included), then the
+        // earlier messages from the nearest to the oldest. Every shared
+        // allowance -- images, text, OCR -- is spent in that order, so what is
+        // left out is the oldest, and only the message's own overflow is an
+        // error (lib/chatImageBudget.ts).
+        // The stored reasoning and tool context of an answer belongs to the n-th
+        // answer with that text, in conversation order -- claimed here, not in the
+        // loop below, which reads the messages in another order.
+        const preservedContexts = claimInConversationOrder(
+            executionMessages.map((message) =>
+                message.role === "assistant" ? String(message.content ?? "") : null
+            ),
+            providerContextQueues
+        );
+        // Messages are built in that order but sent in conversation order.
+        const builtMessages: ModelMessage[][] = executionMessages.map(() => []);
+        for (const messageIndex of messageReadingOrder(executionMessages.length)) {
+            const msg = executionMessages[messageIndex];
             if (msg.role === "assistant") {
                 const content = String(msg.content ?? "");
-                const preserved = providerContextQueues.get(content)?.shift();
+                const preserved = preservedContexts.get(messageIndex);
                 if (preserved) {
                     estimatedInputTokens += estimateTextTokens(
                         providerContextText(preserved)
                     );
-                    formattedMessages.push(...preserved);
+                    builtMessages[messageIndex].push(...preserved);
                     continue;
                 }
                 estimatedInputTokens += estimateTextTokens(content);
-                formattedMessages.push({ role: "assistant", content });
+                builtMessages[messageIndex].push({ role: "assistant", content });
                 continue;
             }
 
@@ -4353,6 +4395,9 @@ async function handleChatPost(
             ) as IncomingAttachment[];
             const textAttachments: ExtractedAttachment[] = [];
             const fileParts: FilePart[] = [];
+            // Set by a reader whose text must not be stored for the next turn
+            // or the next panel: it stands in for pages that were not read.
+            let textCacheBlocked = false;
             // One entry per image in `fileParts`, from the bytes sent.
             const imageInputTokenEstimates: number[] = [];
             /*
@@ -4405,6 +4450,31 @@ async function handleChatPost(
                             `${modelConfig.name} does not support image input. Choose an image-capable model or retry without attachments.`
                         );
                     }
+                    const imageCapabilities = modelConfig.inputCapabilities;
+                    // Named to the model and left out; an earlier image never
+                    // fails the turn for the allowance the new one needs.
+                    const leaveOutEarlierImage = () => {
+                        // Counted against the earlier files' share like any other
+                        // line that goes to the model.
+                        totalExtractedCharacters += PAST_IMAGE_OMITTED_TEXT.length;
+                        pastAttachmentTokens += estimatePromptTokens(PAST_IMAGE_OMITTED_TEXT);
+                        textAttachments.push({
+                            name,
+                            kind: PAST_ATTACHMENT_OMITTED_KIND,
+                            text: PAST_IMAGE_OMITTED_TEXT,
+                        });
+                        return "ok" as const;
+                    };
+                    if (!isLatestMessage) {
+                        // The message being sent, and the messages after this one,
+                        // have already taken their share.
+                        if (
+                            imageCapabilities?.maxImages &&
+                            totalImageCount + 1 > imageCapabilities.maxImages
+                        ) {
+                            return leaveOutEarlierImage();
+                        }
+                    }
                     let normalized: Buffer;
                     try {
                         normalized = await normalizeImageSafely(
@@ -4429,9 +4499,17 @@ async function handleChatPost(
                     }
 
                     const encoded = normalized.toString("base64");
+                    const encodedBytes = Buffer.byteLength(encoded, "utf8");
+                    if (
+                        !isLatestMessage &&
+                        imageCapabilities?.maxBase64ImagePayloadBytes &&
+                        totalBase64ImagePayloadBytes + encodedBytes >
+                            imageCapabilities.maxBase64ImagePayloadBytes
+                    ) {
+                        return leaveOutEarlierImage();
+                    }
                     totalImageCount += 1;
-                    totalBase64ImagePayloadBytes += Buffer.byteLength(encoded, "utf8");
-                    const imageCapabilities = modelConfig.inputCapabilities;
+                    totalBase64ImagePayloadBytes += encodedBytes;
                     if (
                         imageCapabilities?.maxImages &&
                         totalImageCount > imageCapabilities.maxImages
@@ -4450,7 +4528,9 @@ async function handleChatPost(
                         throw new ChatAccessError(
                             413,
                             "ATTACHMENT_MODEL_IMAGE_PAYLOAD_TOO_LARGE",
-                            `${modelConfig.name} accepts up to 4 MB of base64 image data per request. Use a smaller image.`
+                            `${modelConfig.name} accepts up to ${describeImagePayloadLimit(
+                                imageCapabilities.maxBase64ImagePayloadBytes
+                            )} of base64 image data per request. Use a smaller image.`
                         );
                     }
 
@@ -4490,7 +4570,11 @@ async function handleChatPost(
                     CHAT_ATTACHMENT_PARSE_CHARACTERS - totalExtractedCharacters;
                 const strictLatestText = isLatestMessage &&
                     (format.category === "office" || format.category === "text");
-                if (remainingCharacters <= (strictLatestText ? 0 : 64)) {
+                if (
+                    format.category === "pdf"
+                        ? pdfTextCharacterBudget(remainingCharacters) <= 0
+                        : remainingCharacters <= (strictLatestText ? 0 : 64)
+                ) {
                     if (!isLatestMessage) return omitPastAttachment();
                     throw new ChatAccessError(
                         413,
@@ -4499,12 +4583,14 @@ async function handleChatPost(
                     );
                 }
 
-                const addExtractedText = (kind: string, text: string) => {
+                // False when an earlier file's text did not fit its share and
+                // was named as omitted instead.
+                const addExtractedText = (kind: string, text: string): boolean => {
                     if (!isLatestMessage) {
                         const tokens = estimatePromptTokens(text);
                         if (pastAttachmentTokens + tokens > pastAttachmentTokenBudget) {
                             omitPastAttachment();
-                            return;
+                            return false;
                         }
                         pastAttachmentTokens += tokens;
                     }
@@ -4519,6 +4605,7 @@ async function handleChatPost(
                         );
                     }
                     textAttachments.push({ name, kind, text });
+                    return true;
                 };
 
                 if (format.category === "audio") {
@@ -4587,12 +4674,51 @@ async function handleChatPost(
 
                 if (format.category === "pdf") {
                     let extractedPdfText = "";
+                    // Pages the text layer gave nothing for: scans and pictures.
+                    let textlessPdfPages: number[] = [];
+                    // 0 when the text pass failed and the count is not known.
+                    let pdfPageCount = 0;
+                    // What came of OCR for a wholly scanned file (pdfReadingOutcome).
+                    let ocrOutcome: PdfReadingOutcome | null = null;
+                    // One place decides what the model did not get of this file and
+                    // whether its text may be stored: the notice for the pages not
+                    // read (or read in part) and the cache block follow from it.
+                    const settlePdfReading = (outcome: PdfReadingOutcome) => {
+                        if (!outcome.cacheable) textCacheBlocked = true;
+                        if (
+                            outcome.unreadPages.length > 0 ||
+                            outcome.partialPages.length > 0 ||
+                            outcome.budgetUnreadPages.length > 0 ||
+                            outcome.pageCountUnknown ||
+                            outcome.ocrUnmatched
+                        ) {
+                            // Not put through addExtractedText: the notice is what tells
+                            // the model what the text beside it lacks, so it is never
+                            // turned down for an earlier file's share (which would also
+                            // leave a general "not included" line beside text that was
+                            // included). Its room was set aside from the character limit
+                            // before the text was read (pdfTextCharacterBudget), and it
+                            // is counted against the share here, so it is bounded.
+                            const notice = describeUnreadPdfPages(outcome);
+                            totalExtractedCharacters += notice.length;
+                            if (!isLatestMessage) pastAttachmentTokens += estimatePromptTokens(notice);
+                            textAttachments.push({ name, kind: "PDF page notice", text: notice });
+                        }
+                    };
+                    // Pages the text pass never reached, because it ran into the limit.
+                    let budgetUnreadPages: number[] = [];
+                    let budgetPartialPage: number | null = null;
                     let pdfValidated = false;
                     try {
-                        extractedPdfText = await extractPdfTextSafely(
+                        const extraction = await extractPdfTextWithPagesSafely(
                             buffer,
-                            remainingCharacters - 64
+                            pdfTextCharacterBudget(remainingCharacters)
                         );
+                        extractedPdfText = extraction.text;
+                        textlessPdfPages = extraction.textlessPages;
+                        pdfPageCount = extraction.pageCount;
+                        budgetUnreadPages = extraction.budgetUnreadPages;
+                        budgetPartialPage = extraction.budgetPartialPage;
                     } catch (error) {
                         logRequestError(
                             "pdf_text_extraction_failed",
@@ -4601,7 +4727,7 @@ async function handleChatPost(
                             requestedModelId
                         );
                         try {
-                            await validatePdfSafely(buffer);
+                            pdfPageCount = (await validatePdfSafely(buffer)).pageCount;
                             pdfValidated = true;
                         } catch {
                             if (fromArchive) return "unreadable";
@@ -4613,49 +4739,30 @@ async function handleChatPost(
                         }
                     }
 
-                    // Scanned or image-only PDFs have no local text layer.
-                    // Validate them before leaving the process, then use OCR 4
-                    // as a backend conversion model. It is never exposed in
-                    // the Tomverse Review model picker and never consumes user model
-                    // credits; its page cost is recorded as internal usage.
-                    //
-                    // An archived PDF only reaches OCR while the archive's own
-                    // allowance lasts (`maxOcrPdfs`): one PDF dragged in is a
-                    // deliberate act, twenty arriving inside a container the
-                    // person did not enumerate is a bill nothing in the
-                    // request asked about.
-                    if (!extractedPdfText) {
-                        if (!pdfValidated) {
-                            try {
-                                await validatePdfSafely(buffer);
-                                pdfValidated = true;
-                            } catch {
-                                if (fromArchive) return "unreadable";
-                                throw new ChatAccessError(
-                                    400,
-                                    "INVALID_PDF_ATTACHMENT",
-                                    "The attached PDF is invalid or unsupported."
-                                );
-                            }
-                        }
-
-                        const ocrAllowance = fromArchive
-                            ? archiveOcrBudget > archiveOcrUsed
-                            : true;
-                        if (!ocrAllowance) return "no-text";
-                        if (fromArchive) archiveOcrUsed += 1;
-
-                        // Paid per page, and a scanned file on the message being
-                        // sent is not cached: a resend would be billed again.
+                    // One paid OCR read of this file, or of some of its pages.
+                    // The usage is recorded by the request that pays; a request
+                    // that arrives while the same account is reading the same
+                    // file and pages shares that result (`pdfOcrInFlight`).
+                    const runPdfOcr = async (
+                        maxCharacters: number,
+                        pages?: number[]
+                    ): Promise<MistralOcrResult | null> => {
+                        const flightKey = access.userId
+                            ? `${access.userId}:${createHash("sha256").update(buffer).digest("hex")}:${pages?.join(",") ?? "all"}:${maxCharacters}`
+                            : null;
+                        // The character budget is part of the key: a result cut
+                        // for a smaller budget is not the answer for a larger
+                        // one, which runs by itself.
+                        const shared = flightKey ? pdfOcrInFlight.get(flightKey) : undefined;
+                        if (shared) return shared;
+                        // Only the request that starts the paid call has started paid work.
                         paidExternalWorkStarted = true;
-                        try {
+                        const call = (async () => {
                             const ocrResult = await extractPdfTextWithMistralOcr(
                                 buffer,
-                                remainingCharacters - 64
+                                maxCharacters,
+                                { pages }
                             );
-                            if (ocrResult?.text) {
-                                extractedPdfText = ocrResult.text;
-                            }
                             if (ocrResult) {
                                 const ocrCostMicroUsd =
                                     ocrResult.pageCount *
@@ -4685,11 +4792,78 @@ async function handleChatPost(
                                         traceId,
                                         backendModelId: ocrResult.modelId,
                                         pageCount: ocrResult.pageCount,
+                                        partial: Boolean(pages),
                                         attachmentBytes: buffer.byteLength,
                                         fromArchive,
                                         timestamp: new Date().toISOString(),
                                     })
                                 );
+                            }
+                            return ocrResult;
+                        })();
+                        if (flightKey) {
+                            pdfOcrInFlight.set(flightKey, call);
+                            const release = () => {
+                                if (pdfOcrInFlight.get(flightKey) === call) {
+                                    pdfOcrInFlight.delete(flightKey);
+                                }
+                            };
+                            call.then(release, release);
+                        }
+                        return call;
+                    };
+
+                    // Scanned or image-only PDFs have no local text layer.
+                    // Validate them before leaving the process, then use OCR 4
+                    // as a backend conversion model. It is never exposed in
+                    // the Tomverse Review model picker and never consumes user model
+                    // credits; its page cost is recorded as internal usage.
+                    //
+                    // An archived PDF only reaches OCR while the archive's own
+                    // allowance lasts (`maxOcrPdfs`): one PDF dragged in is a
+                    // deliberate act, twenty arriving inside a container the
+                    // person did not enumerate is a bill nothing in the
+                    // request asked about.
+                    if (!extractedPdfText) {
+                        if (!pdfValidated) {
+                            try {
+                                pdfPageCount = (await validatePdfSafely(buffer)).pageCount;
+                                pdfValidated = true;
+                            } catch {
+                                if (fromArchive) return "unreadable";
+                                throw new ChatAccessError(
+                                    400,
+                                    "INVALID_PDF_ATTACHMENT",
+                                    "The attached PDF is invalid or unsupported."
+                                );
+                            }
+                        }
+
+                        const ocrAllowance = fromArchive
+                            ? archiveOcrBudget > archiveOcrUsed
+                            : true;
+                        if (!ocrAllowance) return "no-text";
+                        if (fromArchive) archiveOcrUsed += 1;
+
+                        // Paid per page; the result is stored with the file's
+                        // other text once the file is bound to a message, so a
+                        // resend, another panel or the next turn reads it.
+                        try {
+                            const ocrResult = await runPdfOcr(pdfTextCharacterBudget(remainingCharacters));
+                            if (ocrResult?.text) {
+                                extractedPdfText = ocrResult.text;
+                                // Text for some pages is not text for all: every page
+                                // of the file is checked against the ones answered, and
+                                // a cut at the budget is named, by the one rule the
+                                // partly scanned file below uses too.
+                                // A page count that neither the text pass nor the
+                                // validation gave means a skipped page cannot be told:
+                                // that is named, and the text is never stored.
+                                ocrOutcome = pdfReadingOutcome({
+                                    expectedPages: Array.from({ length: pdfPageCount }, (_, index) => index + 1),
+                                    ocr: ocrResult,
+                                    pageCountUnknown: pdfPageCount === 0,
+                                });
                             }
                         } catch (error) {
                             logRequestError(
@@ -4707,10 +4881,126 @@ async function handleChatPost(
                                 );
                             }
                         }
+                    } else if (textlessPdfPages.length > 0 || budgetUnreadPages.length > 0 || budgetPartialPage !== null) {
+                        /*
+                          Text on some pages and none on others: a report with
+                          a scanned appendix, a form with a pasted screenshot.
+                          The text layer used to stand for the whole file and
+                          the other pages went missing without a word. They are
+                          read here, or the model is told they were not:
+                          - a model that reads PDFs natively gets the original
+                            beside the text (the turn's own file only -- an
+                            earlier one is not sent again on every turn);
+                          - otherwise the pages are read by OCR, under the same
+                            allowance and ledger as a wholly scanned file;
+                          - otherwise the pages are named as unread.
+                        */
+                        if (!addExtractedText(format.promptKind, extractedPdfText)) {
+                            return "ok";
+                        }
+                        // Scanned pages are read (OCR, or the original) when there are
+                        // any. Pages the text limit stopped short of are not scans:
+                        // they are named, below, and nothing is spent on them.
+                        const hasScans = textlessPdfPages.length > 0;
+                        if (
+                            hasScans &&
+                            isLatestMessage &&
+                            !fromArchive &&
+                            modelSupportsNativePdfInput(modelConfig)
+                        ) {
+                            fileParts.push({
+                                type: "file",
+                                data: { type: "data", data: new Uint8Array(buffer) },
+                                mediaType: format.mediaType,
+                                filename: name,
+                            });
+                            // The text layer alone is not this file: never stored as it.
+                            settlePdfReading(
+                                pdfReadingOutcome({
+                                    expectedPages: textlessPdfPages,
+                                    ocr: null,
+                                    budgetUnreadPages,
+                                    budgetPartialPage,
+                                    originalSentToModel: true,
+                                })
+                            );
+                            return "ok";
+                        }
+                        let scanned: MistralOcrResult | null = null;
+                        const ocrRoom = pdfTextCharacterBudget(
+                            CHAT_ATTACHMENT_PARSE_CHARACTERS - totalExtractedCharacters
+                        );
+                        const ocrAllowance =
+                            hasScans &&
+                            ocrRoom > 0 &&
+                            (fromArchive ? archiveOcrBudget > archiveOcrUsed : true);
+                        if (ocrAllowance) {
+                            try {
+                                if (!pdfValidated) {
+                                    await validatePdfSafely(buffer);
+                                    pdfValidated = true;
+                                }
+                                if (fromArchive) archiveOcrUsed += 1;
+                                scanned = await runPdfOcr(ocrRoom, textlessPdfPages);
+                            } catch (error) {
+                                logRequestError(
+                                    "mistral_ocr_failed",
+                                    traceId,
+                                    error,
+                                    requestedModelId
+                                );
+                            }
+                        }
+                        // Text coming back is not proof the pages were read: the
+                        // provider may skip a page, return it empty, or be cut by
+                        // the budget. Each page asked for is checked against the
+                        // pages it answered.
+                        const outcome = pdfReadingOutcome({
+                            expectedPages: textlessPdfPages,
+                            ocr: scanned,
+                            budgetUnreadPages,
+                            budgetPartialPage,
+                        });
+                        if (
+                            scanned?.text &&
+                            !addExtractedText(`${format.promptKind} (scanned pages)`, scanned.text)
+                        ) {
+                            // An earlier file's scanned text did not fit its share
+                            // and was named as left out: say which pages, too, and
+                            // do not store the file's text as if it were whole.
+                            settlePdfReading({
+                                unreadPages: textlessPdfPages,
+                                partialPages: budgetPartialPage === null ? [] : [budgetPartialPage],
+                                budgetUnreadPages,
+                                pageCountUnknown: false,
+                                ocrUnmatched: false,
+                                cacheable: false,
+                            });
+                            return "ok";
+                        }
+                        settlePdfReading(outcome);
+                        return "ok";
                     }
 
                     if (extractedPdfText) {
-                        addExtractedText(format.promptKind, extractedPdfText);
+                        const added = addExtractedText(format.promptKind, extractedPdfText);
+                        if (ocrOutcome) {
+                            // An earlier file's OCR text that did not fit its share is
+                            // named as left out; the pages and the cache block follow
+                            // the same path as when it was included.
+                            settlePdfReading(
+                                added
+                                    ? ocrOutcome
+                                    : {
+                                          unreadPages: Array.from({ length: pdfPageCount }, (_, index) => index + 1),
+                                          partialPages: [],
+                                          budgetUnreadPages: [],
+                                          pageCountUnknown: pdfPageCount === 0,
+                                          ocrUnmatched: false,
+                                          cacheable: false,
+                                      }
+                            );
+                        }
                         return "ok";
                     }
                     if (fromArchive) return "no-text";
@@ -5024,9 +5314,9 @@ async function handleChatPost(
                 }
 
                 // One of the oldest earlier files past the conversation's count:
-                // decided here, in the same order the probe above counted them.
-                const countOmitted = !isLatestMessage && olderAttachmentsToOmit > 0;
-                if (countOmitted) olderAttachmentsToOmit -= 1;
+                // decided by position, in the order the probe above counted them
+                // (the messages are not read in that order).
+                const countOmitted = countOmittedSlots.has(`${messageIndex}:${attachmentIndex}`);
 
                 const attachmentScope: "current_turn" | "past_turn" =
                     isLatestMessage ? "current_turn" : "past_turn";
@@ -5078,13 +5368,23 @@ async function handleChatPost(
                   transcription waits on the audio switch (the audio branch).
                 */
                 const textCacheEligible =
-                    !isLatestMessage &&
                     !isGuestObject &&
                     Boolean(resolved?.attachmentId) &&
                     ATTACHMENT_TEXT_CACHE_CATEGORIES.has(format.category) &&
                     !(revisionEnabled && format.id === "xlsx" && resolved?.sourceLineageId) &&
-                    (attachmentTextCacheEnabled() || format.category === "audio");
-                if (textCacheEligible) {
+                    // The message being sent is stored too, once its text is
+                    // read: a scanned PDF went through paid OCR again for the
+                    // next turn, the resend and every Review panel. Its
+                    // recording is claimed on its own row, not here.
+                    (isLatestMessage
+                        ? format.category !== "audio" && attachmentTextCacheEnabled()
+                        : attachmentTextCacheEnabled() || format.category === "audio");
+                // Read for an earlier message only. The turn's own file is always
+                // read from storage: this turn's tools (file creation, conversion,
+                // spreadsheet revision) work on its bytes and lineage, which are
+                // registered below, and a cache hit would skip that. Its text is
+                // still stored once read, for the next turn.
+                if (textCacheEligible && !isLatestMessage) {
                     const cached = await readAttachmentTextCache(resolved!.attachmentId!);
                     // The cache stands in for reading the file, not for
                     // knowing it exists: storage is still asked, and a file it
@@ -5096,22 +5396,32 @@ async function handleChatPost(
                         cached !== null &&
                         (await probeR2Object(attachment.objectKey)).state === "missing";
                     if (cached && !originalGone) {
+                        // All of the file or none of it: a file whose text came in
+                        // two parts (its own and its scanned pages) is not half
+                        // included, and is named once, not once per part.
+                        const cachedTokens = cached.reduce(
+                            (sum, entry) => sum + estimatePromptTokens(entry.text),
+                            0
+                        );
+                        const cachedCharacters = cached.reduce(
+                            (sum, entry) => sum + entry.text.length,
+                            0
+                        );
+                        if (
+                            pastAttachmentTokens + cachedTokens > pastAttachmentTokenBudget ||
+                            totalExtractedCharacters + cachedCharacters >
+                                CHAT_ATTACHMENT_PARSE_CHARACTERS
+                        ) {
+                            textAttachments.push({
+                                name: attachment.name,
+                                kind: PAST_ATTACHMENT_OMITTED_KIND,
+                                text: PAST_ATTACHMENT_OMITTED_TEXT,
+                            });
+                            continue;
+                        }
+                        pastAttachmentTokens += cachedTokens;
+                        totalExtractedCharacters += cachedCharacters;
                         for (const entry of cached) {
-                            const tokens = estimatePromptTokens(entry.text);
-                            if (
-                                pastAttachmentTokens + tokens > pastAttachmentTokenBudget ||
-                                totalExtractedCharacters + entry.text.length >
-                                    CHAT_ATTACHMENT_PARSE_CHARACTERS
-                            ) {
-                                textAttachments.push({
-                                    name: attachment.name,
-                                    kind: PAST_ATTACHMENT_OMITTED_KIND,
-                                    text: PAST_ATTACHMENT_OMITTED_TEXT,
-                                });
-                                continue;
-                            }
-                            pastAttachmentTokens += tokens;
-                            totalExtractedCharacters += entry.text.length;
                             textAttachments.push({
                                 name: attachment.name,
                                 kind: entry.kind,
@@ -5361,6 +5671,7 @@ async function handleChatPost(
                                   objectKey: attachment.objectKey,
                               })
                             : null;
+                    textCacheBlocked = false;
                     await deliverAttachment(attachmentName, () =>
                         ingestAttachmentFile({
                             format,
@@ -5370,7 +5681,7 @@ async function handleChatPost(
                             transcriptAttachmentId: recordingAttachmentId,
                         })
                     );
-                    if (textCacheEligible && format.category !== "audio") {
+                    if (textCacheEligible && !textCacheBlocked && format.category !== "audio") {
                         // Stored only when the extraction is whole: text and
                         // nothing else, not omitted, and not stopped by the
                         // parse budget (the extractors stop 64 short of it).
@@ -5497,7 +5808,7 @@ async function handleChatPost(
             if (textAttachments.length === 0 && fileParts.length === 0) {
                 const content = String(msg.content ?? "");
                 estimatedInputTokens += estimateTextTokens(content);
-                formattedMessages.push({ role: "user", content });
+                builtMessages[messageIndex].push({ role: "user", content });
                 continue;
             }
 
@@ -5530,7 +5841,7 @@ async function handleChatPost(
                 estimateTextTokens(text) + nativeAttachmentTokens;
 
             nativeFilePartCount += fileParts.length;
-            formattedMessages.push({
+            builtMessages[messageIndex].push({
                 role: "user",
                 content: [
                     { type: "text", text: text || "Please analyze the attached file." },
@@ -5538,6 +5849,7 @@ async function handleChatPost(
                 ],
             });
         }
+        for (const built of builtMessages) formattedMessages.push(...built);
         if (isResearchPreview) {
             // Replace every ordinary Chat prelude with the same one-shot
             // payload the offer and reservation helpers measured.

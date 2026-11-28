@@ -395,7 +395,8 @@ test("two different files are still both read and both priced", async () => {
       user("second", question, [stored("right")])
     )
   );
-  assert.deepEqual(world.reads, ["left", "right"]);
+  // Each file is read once; the current message is read first for the budgets.
+  assert.deepEqual([...world.reads].sort(), ["left", "right"]);
   const twoFiles = world.budgets[0] as { inputTokens: number };
 
   world = freshWorld(["left"]);

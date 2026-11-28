@@ -38,7 +38,7 @@ import { prisma } from "@/lib/prisma";
  * it did, and nothing already written is consulted -- again except a paid
  * transcript, which the audio path reads and writes either way.
  */
-export const ATTACHMENT_TEXT_CACHE_VERSION = 1;
+export const ATTACHMENT_TEXT_CACHE_VERSION = 2;
 
 /**
  * Versions from here up are a recording's paid transcription result, never an

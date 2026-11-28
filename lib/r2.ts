@@ -467,3 +467,46 @@ export async function listExpiredR2Objects(
 
   return expired;
 }
+
+export type R2ObjectPage = {
+  /** Keys of this page, in key order, with the time each was last written. */
+  objects: Array<{ key: string; lastModified: Date }>;
+  /**
+   * The key to pass as `startAfter` for the next page, or null when the
+   * listing under the prefix has ended.
+   */
+  nextStartAfter: string | null;
+};
+
+/**
+ * One page of objects under a prefix, in key order, after `startAfter`.
+ *
+ * `listExpiredR2Objects` always starts at the first key, so a sweep that takes
+ * "the first N old objects" never gets past N old objects that must stay. A
+ * sweep that keeps its own position -- the last key of the page it just read --
+ * visits the whole prefix over successive runs.
+ */
+export async function listR2ObjectsPage(
+  prefix: string,
+  options: { startAfter?: string | null; maxKeys?: number } = {}
+): Promise<R2ObjectPage> {
+  const { client, bucket } = getR2Client();
+  const maxKeys = Math.min(1_000, Math.max(1, options.maxKeys ?? 1_000));
+  const page = await r2Call("list", () =>
+    client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: prefix,
+        MaxKeys: maxKeys,
+        ...(options.startAfter ? { StartAfter: options.startAfter } : {}),
+      })
+    )
+  );
+  const objects: R2ObjectPage["objects"] = [];
+  for (const object of page.Contents || []) {
+    if (!object.Key || !object.LastModified) continue;
+    objects.push({ key: object.Key, lastModified: object.LastModified });
+  }
+  const last = (page.Contents || []).at(-1)?.Key ?? null;
+  return { objects, nextStartAfter: page.IsTruncated && last ? last : null };
+}

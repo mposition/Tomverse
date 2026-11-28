@@ -24,6 +24,12 @@ import {
     formatExportMessagePageMarkdown,
 } from "@/lib/exportConversationMarkdown";
 import {
+    ConversationPdfTooLarge,
+    PDF_EXPORT_LIMITS,
+    conversationPdfSpec,
+    renderConversationPdf,
+} from "@/lib/exportConversationPdf";
+import {
     conversationLockedResponse,
     hasConversationUnlockGrant,
 } from "@/lib/conversationLock";
@@ -41,6 +47,14 @@ import {
 } from "@/lib/continuationSourceExport";
 
 const MESSAGE_PAGE_SIZE = 20;
+
+/*
+  Which messages an export contains, and in what order -- one definition for
+  the text, Markdown and PDF forms, so the three cannot drift apart.
+*/
+const exportMessageWhere = (conversationId: string) => ({ conversationId });
+const EXPORT_MESSAGE_ORDER = [{ createdAt: "asc" as const }, { id: "asc" as const }];
+const EXPORT_MESSAGE_SELECT = { role: true, content: true, modelId: true, createdAt: true } as const;
 
 /**
  * The continuation's own turns *and* the imported original, as one file.
@@ -257,6 +271,65 @@ export async function GET(
         // `?include=source` document above stays text-only.
         const asMarkdown = new URL(req.url).searchParams.get("format") === "md";
 
+        // `?format=pdf`: the same messages and header lines as Markdown, behind
+        // the same checks above, read whole and rendered by the generated-file
+        // PDF writer (lib/exportConversationPdf.ts). Not streamed: a PDF has
+        // its page tree at the end, so nothing can be sent before all of it.
+        if (new URL(req.url).searchParams.get("format") === "pdf") {
+            const messages = await prisma.message.findMany({
+                where: exportMessageWhere(conversationId),
+                orderBy: EXPORT_MESSAGE_ORDER,
+                take: PDF_EXPORT_LIMITS.messages + 1,
+                select: EXPORT_MESSAGE_SELECT,
+            });
+            let spec;
+            try {
+                spec = conversationPdfSpec({
+                    title: displayTitle,
+                    createdAt: conversation.createdAt,
+                    productKey: conversation.productKey,
+                    headerLines: [
+                        ...(personalizationNotice ? [personalizationNotice] : []),
+                        ...continuationProvenance,
+                        ...titleHeaderLines,
+                    ],
+                    messages,
+                });
+            } catch (error) {
+                if (error instanceof ConversationPdfTooLarge) {
+                    return NextResponse.json({ error: error.message, code: "EXPORT_TOO_LARGE" }, { status: 413 });
+                }
+                throw error;
+            }
+            const rendered = renderConversationPdf(spec);
+            if (!rendered.ok) {
+                return NextResponse.json(
+                    { error: "This conversation cannot be written as a PDF.", code: rendered.code },
+                    { status: rendered.code === "EXPORT_TOO_LARGE" ? 413 : 422 }
+                );
+            }
+            // Rendering takes a moment; a lock set meanwhile is honoured before
+            // any byte leaves (the answer-analysis export does the same).
+            const current = await prisma.conversation.findFirst({
+                where: { id: conversationId, userId },
+                select: { password: true, passwordVersion: true },
+            });
+            if (!current) return NextResponse.json({ error: "Not found" }, { status: 404 });
+            if (!hasConversationUnlockGrant(req, userId, conversationId, current.password == null ? null : current.passwordVersion)) {
+                return conversationLockedResponse();
+            }
+            return new Response(rendered.bytes as unknown as BodyInit, {
+                headers: {
+                    "Content-Type": "application/pdf",
+                    "Content-Disposition": conversationExportContentDisposition(displayTitle, ".pdf"),
+                    "Cache-Control": "no-store",
+                    "X-Content-Type-Options": "nosniff",
+                    // Some characters were drawn as boxes; the menu says so.
+                    ...(rendered.charactersReplaced ? { "X-Export-Characters-Replaced": "1" } : {}),
+                },
+            });
+        }
+
         const encoder = new TextEncoder();
         let cursor: string | undefined;
         let headerPending = true;
@@ -279,17 +352,11 @@ export async function GET(
                 }
 
                 const messages = await prisma.message.findMany({
-                    where: { conversationId },
-                    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+                    where: exportMessageWhere(conversationId),
+                    orderBy: EXPORT_MESSAGE_ORDER,
                     take: MESSAGE_PAGE_SIZE,
                     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-                    select: {
-                        id: true,
-                        role: true,
-                        content: true,
-                        modelId: true,
-                        createdAt: true,
-                    },
+                    select: { id: true, ...EXPORT_MESSAGE_SELECT },
                 });
 
                 if (messages.length === 0) {
