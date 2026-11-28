@@ -782,6 +782,8 @@ export const en = {
         artifactDownloadFailed: "The file could not be downloaded. Please try again.",
         artifactDownloadLocked: "Unlock this conversation to download the file.",
         searchCitationsLabel: "Sources",
+        memorySavedNote: "Saved to memory.",
+        memorySavedManage: "Manage memory",
         answerContextKnowledge: "{count} profile knowledge excerpts",
         modelsSelectedOne: "AI",
         modelsSelectedOther: "AIs",
@@ -1847,6 +1849,8 @@ export const en = {
     // only review and creation actions follow it.
     accountDataExport: {
         dataTabTitle: "Your account data",
+        trainingNoticeBody: "The AI provider that answers a chat receives its content. The privacy policy lists, for each provider, where that content is stored and processed, whether it is used to train models, and how long it is kept.",
+        trainingNoticeLink: "See the provider table in the privacy policy",
         dataTabDescription:
             "Download your exportable account data -- conversations, memories, imports, payments and usage -- as a single file. Operator records and other non-user data are excluded.",
         dataTabOpen: "Download your data",
@@ -2201,6 +2205,7 @@ export const en = {
         loadMore: "Show more",
         evidenceManual: "Grounds you wrote:",
         evidenceExternal: "Extracted from an imported conversation",
+        evidenceChat: "Learned from a Chat conversation",
         evidenceViewSource: "View source conversation",
         createTitle: "Add a memory yourself",
         createDescription:
