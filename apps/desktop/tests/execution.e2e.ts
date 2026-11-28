@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { _electron as electron, expect, type ElectronApplication } from "@playwright/test";
+import { chooseCodeModel, codeModelControl, codeModelPicker } from "./code-model-picker";
 import { DEFAULT_MODELS, FakeGateway, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
 
 const executablePath: string = createRequire(import.meta.url)("electron");
@@ -31,8 +32,6 @@ test("Code saves its execution preference and only sends requests through the sh
     app = await launch();
     const page = await app.firstWindow();
     const state = () => page.evaluate(() => window.desktop.state());
-    const modelMenu = page.getByLabel("Model and reasoning effort");
-    const model = page.getByLabel("Model", { exact: true });
     const send = page.getByRole("button", { name: "Send Code request" });
     const request = page.getByRole("textbox", { name: "Code request", exact: true });
     const settings = async () => {
@@ -80,9 +79,11 @@ test("Code saves its execution preference and only sends requests through the sh
     await request.fill("Check the selected route");
     await expect(page.getByText("Choose Tomverse API to use this model.")).toBeVisible();
     await expect(send).toBeDisabled();
-    await modelMenu.click();
-    await expect(model.locator('option[value="image-only"]')).toHaveCount(0);
-    await model.selectOption("fake-coder");
+    await codeModelControl(page).click();
+    await expect(codeModelPicker(page).locator('[data-model-id="fake-coder"]')).toBeVisible();
+    await expect(codeModelPicker(page).locator('[data-model-id="image-only"]')).toHaveCount(0);
+    await codeModelPicker(page).getByTestId("model-picker-done").click();
+    await chooseCodeModel(page, { model: "fake-coder" });
     const codexSupported = (await state()).supportedCliPaths.includes("openai");
     await expect(page.getByText(codexSupported ? "Codex · Commercial integration approval required" : "Codex · Unsupported on this platform")).toBeVisible();
     await expect(send).toBeDisabled();
@@ -99,9 +100,7 @@ test("Code saves its execution preference and only sends requests through the sh
     await settings();
     await preference.selectOption("provider_cli");
     await page.getByRole("button", { name: "Code", exact: true }).click();
-    await modelMenu.click();
-    await model.selectOption("api-only");
-    await modelMenu.click();
+    await chooseCodeModel(page, { model: "api-only" });
     await expect(page.getByRole("status").filter({ hasText: /^Tomverse API$/ })).toBeVisible();
     await selectCodeMode(page, "ask");
     await send.click();
@@ -140,9 +139,7 @@ test("Code saves its execution preference and only sends requests through the sh
     await preference.selectOption("tomverse_api");
     await expect.poll(async () => (await state()).codeExecutionPreference).toBe("tomverse_api");
     await page.getByRole("button", { name: "Code", exact: true }).click();
-    await modelMenu.click();
-    await model.selectOption("fake-coder");
-    await modelMenu.click();
+    await chooseCodeModel(page, { model: "fake-coder" });
     await request.fill("Use the vendor model through the API");
     await send.click();
     await expect.poll(async () => (await state()).task?.status).toBe("completed");

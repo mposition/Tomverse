@@ -291,6 +291,12 @@ async function startGuestJourney(page: Page, options: JourneyOptions) {
   await mockGuestUsage(page, 0, GUEST_DAILY_CREDIT_LIMIT, options.guestUsage ?? {});
   await mockChatStream(page, "Stage the migration and keep a full snapshot.");
   await mockGuestQuickSummary(page);
+  // The first answer fires the guest title request in the background. This
+  // journey is not about titles, and the test server has no Turnstile secret,
+  // so the real route answers 503 and the browser logs it as a console error.
+  await page.route("**/api/chat/conversation-title", (route) => route.fulfill({
+    json: { updated: false },
+  }));
   const uploads = await mockGuestUpload(page);
   const review = await mockGuestReview(page, options.review);
   const watch = watchConsole(page);

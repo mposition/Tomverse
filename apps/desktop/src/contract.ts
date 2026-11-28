@@ -166,7 +166,9 @@ export type StartInput = z.infer<typeof startInput>;
 export type WorkspaceHandoffInput = z.infer<typeof workspaceHandoffInput>;
 export type WorkspaceHandoff = { id: string; target: WorkspaceHandoffInput["target"]; excerpt: string; project: string };
 export type Decision = z.infer<typeof decisions>;
-export type Model = { id: string; name: string; provider: string; efforts: string[] };
+/** One entry of the coding catalogue. The optional facts are what the model picker shows beside the name. */
+export type Model = { id: string; name: string; provider: string; efforts: string[];
+  credits?: number; vision?: boolean; reasoning?: boolean; contextWindowTokens?: number };
 export type RunStatus = "starting" | "running" | "approval" | "stopping" | "completed" | "clarification" | "blocked" | "stopped" | "unknown" | "failed";
 export type CodeEventEntry = { role: "event"; text: string; notice?: DesktopDetail };
 /** turn: the position of a user message among the turns of a saved task, for rewinding and forking there. */

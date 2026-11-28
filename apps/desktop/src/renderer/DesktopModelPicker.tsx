@@ -25,13 +25,16 @@ function readIds(key: string): string[] {
 }
 
 export function DesktopModelPicker({ account, language, label, children, models, choices, limit, plan, disabled,
-  mode, autoOffered, onModeChange, onChoose, effort, hasImageAttachments, imageCapability, onImage, searchReadiness, singleModel = false }: {
+  mode, autoOffered, onModeChange, onChoose, effort, hasImageAttachments, imageCapability, onImage, searchReadiness, singleModel = false,
+  catalogueOnly = false, scope = "" }: {
   account?: string; language: Language; label: string; children: ReactNode;
   models: AiModel[]; choices: string[]; limit: number; plan: ModelTier; disabled: boolean;
   mode?: Mode; autoOffered?: boolean; onModeChange?(mode: Mode): void; onChoose(ids: string[]): void;
   effort?: ReactNode; hasImageAttachments?: boolean;
   imageCapability?: ImageCapability | null; onImage?(id: string): void;
   searchReadiness?: { brave: boolean }; singleModel?: boolean;
+  /** The models are a catalogue of their own (Code): no Chat recommendations, and its own favourites. */
+  catalogueOnly?: boolean; scope?: string;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -43,7 +46,7 @@ export function DesktopModelPicker({ account, language, label, children, models,
   const [swap, setSwap] = useState<AiModel>();
   const [favorites, setFavorites] = useState<string[]>([]);
   const [recent, setRecent] = useState<string[]>([]);
-  const key = `desktop.model-picker.${account ?? "local"}`;
+  const key = `desktop.model-picker${scope}.${account ?? "local"}`;
   const imageModels = IMAGE_MODEL_REGISTRY.flatMap((model) => {
     const entry = imageCapability?.models.find(({ id }) => id === model.id);
     return entry ? [{ ...model, name: entry.name, disabledReason: null, prices: entry.prices.map((price) => ({
@@ -92,14 +95,19 @@ export function DesktopModelPicker({ account, language, label, children, models,
       onCancel={(event) => {
         if (swap || escape.current?.()) { event.preventDefault(); if (swap) setSwap(undefined); }
       }}
-      onClose={() => { setOpen(false); setSwap(undefined); trigger.current?.focus(); }}>
+      onClose={() => {
+        setOpen(false); setSwap(undefined);
+        // Closing already returned focus to the control that opened the picker. This event arrives later,
+        // so it only places focus when there is none, and never takes it back from where the person went next.
+        if (!document.activeElement || document.activeElement === document.body) trigger.current?.focus();
+      }}>
       {open && <div className="desktop-model-panel">
         <LanguageProvider initialLang={isLanguage(language) ? language : "en"} forceInitialLang>
           <ModelLogoAssets.Provider value={modelAsset}>
             <AvailableCreditsProvider value={credits}>
               <ImageModelCatalogProvider models={imageModels}>
                 <WebSearchBackendReadinessProvider readiness={searchReadiness}>
-                <ModelPickerPanel models={models} singleModelSelection={singleModel} selectedModelIds={choices}
+                <ModelPickerPanel models={models} singleModelSelection={singleModel} catalogueOnly={catalogueOnly} selectedModelIds={choices}
                   maxSelectableModels={limit} currentPlan={plan} isGuestMode={false} isMobileShell={false}
                   isCompactLayout={false} isKeyboardCompact={false} modelStatuses={emptyStatuses}
                   hasImageAttachments={hasImageAttachments ?? false} favoriteModelIds={favorites} recentModelIds={recent}

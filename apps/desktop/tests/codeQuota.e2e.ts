@@ -9,6 +9,7 @@ import test from "node:test";
 import { openCodeProject } from "./code-project-fixture";
 import { fileURLToPath } from "node:url";
 import { _electron as electron, expect, type ElectronApplication } from "@playwright/test";
+import { codeModelControl } from "./code-model-picker";
 import { claimLock, Journal } from "../../tomverse-cli/src/session.js";
 import { FakeGateway, TEST_KEY, type ScriptedReply } from "../../tomverse-cli/tests/fakeGateway.js";
 import { codeHistoryScope } from "../src/host/history-scope";
@@ -227,7 +228,7 @@ test("A confirmed Codex limit continues the saved read-only task on the capped C
     await request(firstPrompt, "plan");
     const started = (await state()).task;
     assert.ok(started?.id);
-    await expect(page.getByLabel("Model and reasoning effort")).toContainText("Fake Coder", { timeout: 20_000 });
+    await expect(codeModelControl(page)).toContainText("Fake Coder", { timeout: 20_000 });
     releaseFirstApiReply();
     await expect.poll(async () => (await state()).busy, { timeout: 25_000 }).toBe(false);
     assert.ifError(nativeFailure);

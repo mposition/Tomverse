@@ -59,23 +59,23 @@ test("output is bounded to the first and last 32 KB with the omission counted", 
     assert.match(result.stdout, /bytes omitted/);
 });
 
-/** A parent that starts a grandchild which would write a marker file after 4 s. */
+/** The arguments after node for a parent that starts a grandchild which would write a marker file after 4 s. The paths travel as arguments, never inside the script text. */
 const treeScript = (marker: string) => {
     const dir = tempDir("tree");
     const grandchild = join(dir, "grandchild.cjs");
-    writeFileSync(grandchild, `setTimeout(() => require("fs").writeFileSync(${JSON.stringify(marker)}, "survived"), 4000); setInterval(() => {}, 1000);\n`);
+    writeFileSync(grandchild, `setTimeout(() => require("fs").writeFileSync(process.argv[2], "survived"), 4000); setInterval(() => {}, 1000);\n`);
     const parent = join(dir, "parent.cjs");
     writeFileSync(
         parent,
-        `const child = require("child_process").spawn(process.execPath, [${JSON.stringify(grandchild)}], { stdio: "ignore" });\nconsole.log("child " + child.pid);\nsetInterval(() => {}, 1000);\n`
+        `const child = require("child_process").spawn(process.execPath, [process.argv[2], process.argv[3]], { stdio: "ignore" });\nconsole.log("child " + child.pid);\nsetInterval(() => {}, 1000);\n`
     );
-    return parent;
+    return [parent, grandchild, marker];
 };
 
 test("a timeout ends the command and the process it started", async () => {
     const cwd = tempDir("cmd");
     const marker = join(cwd, "survived.txt");
-    const plan = planCommand({ argv: [node, treeScript(marker)], timeoutSeconds: 1.5 }, cwd, 10_000);
+    const plan = planCommand({ argv: [node, ...treeScript(marker)], timeoutSeconds: 1.5 }, cwd, 10_000);
     const result = await runCommand(plan, never);
     assert.equal(result.timedOut, true);
     assert.deepEqual(result.residualProcesses, []);
@@ -89,7 +89,7 @@ test("cancelling ends the command tree too", async () => {
     const cwd = tempDir("cmd");
     const marker = join(cwd, "survived.txt");
     const controller = new AbortController();
-    const plan = planCommand({ argv: [node, treeScript(marker)] }, cwd, 60_000);
+    const plan = planCommand({ argv: [node, ...treeScript(marker)] }, cwd, 60_000);
     const running = runCommand(plan, controller.signal);
     setTimeout(() => controller.abort(), 800);
     const result = await running;

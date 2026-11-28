@@ -65,12 +65,13 @@ test("links are taken from the user's own words, with prose punctuation and part
     "붙여쓴 링크https://d.example.com/p를 요약해줘, 그리고 https://e.example.com/q!",
     "not a link: ftp://f.example.com/x javascript:alert(1)",
   ]);
-  assert.ok(links.includes("https://a.example.com/x?y=1"), "fragment dropped");
-  assert.ok(links.includes("https://b.example.com/wiki/Foo_(bar)"), "balanced parenthesis kept");
-  assert.ok(links.includes("https://c.example.com/path"), "trailing full stop dropped");
-  assert.ok(links.includes("https://d.example.com/p"), "Korean particle after the link dropped");
-  assert.ok(links.includes("https://e.example.com/q"));
-  assert.ok(!links.some((link) => link.startsWith("ftp:") || link.startsWith("javascript:")));
+  const found = new Set(links);
+  assert.ok(found.has("https://a.example.com/x?y=1"), "fragment dropped");
+  assert.ok(found.has("https://b.example.com/wiki/Foo_(bar)"), "balanced parenthesis kept");
+  assert.ok(found.has("https://c.example.com/path"), "trailing full stop dropped");
+  assert.ok(found.has("https://d.example.com/p"), "Korean particle after the link dropped");
+  assert.ok(found.has("https://e.example.com/q"));
+  assert.ok(links.every((link) => ["http:", "https:"].includes(new URL(link).protocol)), "only web links");
   assert.equal(canonicalUserLink("mailto:a@b.co"), null);
 });
 

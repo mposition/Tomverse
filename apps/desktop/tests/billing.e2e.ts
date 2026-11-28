@@ -174,7 +174,7 @@ test("Desktop plan screen buys, changes and cancels in the app and decides succe
     await expect(page.getByTestId("native-billing-window")).toContainText("checkout.stripe.com");
     // The checkout page is the isolated view inside the separate window.
     const checkoutView = (script: string | null) => application!.evaluate(async ({ BrowserWindow }, script) => {
-      const frame = BrowserWindow.getAllWindows().find((candidate) => candidate.getTitle().startsWith("checkout.stripe.com"));
+      const frame = BrowserWindow.getAllWindows().find((candidate) => /^checkout\.stripe\.com(?![\w.-])/.test(candidate.getTitle()));
       const view = frame?.contentView.children.find((child) => "webContents" in child) as Electron.WebContentsView | undefined;
       if (!frame || !view) return null;
       if (script) { void view.webContents.executeJavaScript(script); return null; }

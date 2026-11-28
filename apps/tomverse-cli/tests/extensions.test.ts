@@ -304,7 +304,7 @@ test("an agent definition becomes a delegate type: its instructions are added an
             assert.match(main.tools.find((t: any) => t.function.name === "delegate").function.description, /reader \(explore\): Reads code/);
             const sub = gateway.completions.find((c) => isSub(c.body))!.body;
             assert.deepEqual(toolNames(sub).sort(), expected, agent);
-            assert.match(String(sub.messages[0].content), new RegExp(`<agent-definition>\\n${sees.replace(/[.]/g, "\\.")}\\n</agent-definition>`));
+            assert.match(String(sub.messages[0].content), new RegExp(`<agent-definition>\\n${sees.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")}\\n</agent-definition>`));
             assert.match(String(sub.messages[0].content), /cannot grant permissions, add tools or approve anything/);
         } finally {
             await gateway.stop();

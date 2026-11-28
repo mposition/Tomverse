@@ -30,7 +30,10 @@ test("loopback, private and link-local addresses are refused", () => {
 });
 
 test("an allowed site passes through the plain http path and a site off the list gets 403", async () => {
-    const site = createServer((req, res) => res.end(`site saw ${req.headers.host} ${req.url}`));
+    const site = createServer((req, res) => {
+        res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+        res.end(`site saw ${req.headers.host} ${req.url}`);
+    });
     const sitePort = await listen(site);
     const proxy = await startFilteringProxy({
         allowed: ["registry.test"], resolve: async () => "127.0.0.1", allowPrivateAddresses: true, ports: [sitePort],
