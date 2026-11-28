@@ -17,10 +17,20 @@ import { amuxV22ChannelPreflight } from "../lib/amux/v22ChannelRun.mjs";
 import { mkdtemp, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AMUX_V22_ZAI_BASE_URL, amuxV22ClaudeArgs, amuxV22CliEnv, amuxV22ZaiDisallowedTools,
+// One name per line: gitleaks' generic-api-key rule read a name ending in
+// "Key" with the next import on its line as a key and its value (#4331's
+// fingerprint in .gitleaksignore).
+import {
+  AMUX_V22_ZAI_BASE_URL,
+  amuxV22ClaudeArgs,
+  amuxV22CliEnv,
+  amuxV22ZaiDisallowedTools,
+  amuxV22ZaiEnv,
   createAmuxV22ZaiRunHome,
-  amuxV22ZaiEnv, parseAmuxV22OneShotRequest, readAmuxV22ZaiCodingPlanKey, runAmuxV22OneShot } from
-  "../lib/amux/v22OneShotSidecar.mjs";
+  parseAmuxV22OneShotRequest,
+  readAmuxV22ZaiCodingPlanKey,
+  runAmuxV22OneShot,
+} from "../lib/amux/v22OneShotSidecar.mjs";
 import { v22ExecutionReceiptVerified, v22ExecutionSourceForProvider } from
   "../lib/amux/v22TaskExecutionCore.ts";
 import { AMUX_V22_PROVIDERS, amuxV22OneShotRouteSupported, amuxV22ProviderForClass,
