@@ -811,6 +811,8 @@ export const zh = {
         artifactFailedFormat: "该文件格式暂不支持。",
         artifactFailedLimit: "请求的文件过大，无法创建。",
         artifactFailedIncomplete: "回答在文件完成前就结束了。",
+        artifactFailedSourceRevoked: "此文件使用的私有资料已不可用，正在去掉相关内容后重新生成文件。请稍后重新打开此对话。",
+        artifactFailedContentTooLarge: "报告内容超出此文件类型的容量，因此未生成文件。请使用此回答中的报告，或在 Research 报告标签页中导出。",
         artifactOnlyAnswer: "已为你生成所需的文件。",
         artifactRetry: "重新创建文件",
         artifactSignInTitle: "登录后可创建文件",

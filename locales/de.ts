@@ -749,6 +749,8 @@ export const de = {
         artifactFailedFormat: "Dieses Dateiformat wird noch nicht unterstützt.",
         artifactFailedLimit: "Die angeforderte Datei ist zu groß zum Erstellen.",
         artifactFailedIncomplete: "Die Antwort endete, bevor die Datei fertig war.",
+        artifactFailedSourceRevoked: "Private Inhalte, die diese Datei verwendet hat, sind nicht mehr verfügbar; die Datei wird ohne sie neu erstellt. Öffnen Sie diesen Chat gleich noch einmal.",
+        artifactFailedContentTooLarge: "Der Bericht ist für diesen Dateityp zu lang, daher wurde keine Datei erstellt. Nutzen Sie den Bericht in dieser Antwort oder exportieren Sie ihn im Research-Tab „Bericht“.",
         artifactOnlyAnswer: "Hier ist die angeforderte Datei.",
         artifactRetry: "Datei erneut erstellen",
         artifactSignInTitle: "Zum Erstellen von Dateien anmelden",

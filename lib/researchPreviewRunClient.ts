@@ -34,6 +34,8 @@ export function researchRunMessage(run: ResearchPreviewRunDto): Message {
     status: message?.status === "normal" || message?.status === "incomplete" ? message.status
       : run.status === "cancelled" ? "cancelled" : run.status === "failed" || run.status === "attention" ? "error" : "pending",
     ...(message?.searchMetadata ? { searchMetadata: message.searchMetadata as Message["searchMetadata"] } : {}),
+    // A delegated task's file arrives with the answer it belongs to (the server allowlist, lib/publicChatMessage.ts).
+    ...(Array.isArray(message?.artifacts) && message.artifacts.length ? { artifacts: message.artifacts as Message["artifacts"] } : {}),
     createdAt: String(message?.createdAt ?? run.createdAt),
   };
 }

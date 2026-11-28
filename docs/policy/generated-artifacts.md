@@ -1318,6 +1318,29 @@ revision 기본값 변경은 기존 Native gate를 켜지 않는다. 새 device 
 파일 bytes는 여전히 포함하지 않으며, 일반 앱/공유 DTO에 이 내용을 노출하지 않는다.
 schema migration과 로컬 검증은 운영 migration·활성화·merge·deploy 승인과 별개다.
 
+## 20. Deep Research 작업 맡기기의 결과 파일 (2026-11-28, 기본 꺼짐)
+
+`CHAT_TASK_AGENT_ENABLED`로 맡긴 작업(`docs/ops/research-engine-v2.md` §9)은 끝난 보고서를 이 문서의
+생성기로 docx·xlsx·pptx 하나로 만들어 그 답변 메시지의 `MessageArtifact`로 붙인다. 카드, `/api/artifacts/{id}`
+다운로드, 소유권 검사, 버전(앞 revision 파일이 parent), 대화·계정 삭제 정리는 §5·§8 그대로다.
+
+- **모델은 명세도 만들지 않는다.** writer가 검증된 claim으로 이미 쓴 보고서 문서를 서버가 명세로 배치한다
+  (`lib/researchEngineTaskOutput.ts`). 그래서 파일 단계에는 tool 호출·입력 토큰·예약이 없고 §11의 별도 credit
+  없음과 같다. §3의 상한은 같은 `ARTIFACT_LIMITS`와 `bounded()`가 지킨다.
+- **못 만들면 실패 행이다.** 생성 실패는 `generation_failed`, 저장 실패는 `storage_failed`로 남겨 답변이 파일이
+  없다고 말한다(§1).
+- **보고서의 모든 필드를 담는다.** 요약, scope, 섹션, 인용과 검증 표시, 상충, 완료 조건, 한계, 다음 질문, 출처를 세 형식 모두에
+  담는다(`RESEARCH_REPORT_FILE_PLACEMENT`, 보고서 schema와 테스트로 대조). 버전은 앞 파일이 ready가 아니어도 같은 답변의
+  앞 파일에 잇는다.
+- **내용을 버리지 않는다.** 긴 글은 나눠 담고, 표가 시트보다 많으면 남는 표를 마지막 표 시트에 이어 붙이고, 슬라이드가 100장을 넘으면 더
+  촘촘히 배치한다(요점 전문은 발표자 노트). 그래도 §3의 한도를 넘으면 파일을 만들지 않고 `content_too_large`로
+  남긴다. 카드는 답변의 보고서나 보고서 탭 내보내기를 안내한다.
+- **비공개 자료 철회는 파일에도 적용된다.** 철회하는 트랜잭션 안에서 파일을 `source_revoked`(실패, 객체 없음)로
+  보류하고 옛 객체를 `MessageArtifactCleanup`(`source_revoked`)에 넣는다. 정리된 revision에서 다시 만들면 같은 행이
+  ready로 돌아가고, 실패하거나 끊긴 재생성은 새 철회가 없어도 다음 Research 읽기, 그 파일의 요청, maintenance가 다시 한다. 다운로드·수정 입력 복사·
+  프로젝트 저장은 비공개 자료를 고른 Research run의 파일이면 그 run의 비공개 자료를 먼저 다시 확인한다
+  (`researchTaskFileServable`, `lib/researchEngineTaskFiles.ts`). 두 실패 코드의 카드에는 재전송 버튼이 없다.
+
 ## 19. 미리보기 화면 공유 링크 (2026-11-28, 기본 꺼짐)
 
 운영자 지시(2026-11-28)로 만든 기능이다. 미리보기 패널의 "공유"가 그 화면 하나만 보여 주는 공개 읽기 전용 페이지

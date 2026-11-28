@@ -31,6 +31,7 @@ DB 제약(`ResearchPreviewRun_v2_shape_check`)상 run 단위 checkpoint·예약�
 | `RESEARCH_ENGINE_DEFAULT_ENTRY` | rollout: composer에서 v2를 기본 Research 진입으로 보이고 Perplexity 신규 선택 행을 숨김. 기존 Perplexity run·가격·조회는 그대로 |
 | `RESEARCH_ENGINE_MAX_APPROVED_CREDITS` | 사용자가 한 run에 승인할 수 있는 총액 상한(기본 2,000) |
 | `RESEARCH_ENGINE_MAX_RUNNING_ITEMS{,_PER_ACCOUNT,_PER_RUN,_PER_PROVIDER}` | 동시 실행 한도(기본 32/4/4/16) |
+| `CHAT_TASK_AGENT_ENABLED` | 작업 맡기기(§9). 정확히 `true`이고 `RESEARCH_ENGINE_ENABLED`도 켜져 있을 때만. 끄면 새 작업 run과 작업 run의 유료 작업 시작(계획 요청·승인·재개·예산·마무리·범위·수정)이 `CHAT_TASK_AGENT_DISABLED`로 거절되고, 일시정지·취소·삭제는 그대로 됩니다 |
 
 Chat의 Auto/manual 선택은 바꾸지 않습니다. Research 실행 모델은 run의 `executionProfile`에
 고정되고, dispatch 직전 registry의 provider/API ID/reasoning/가격 version이 다르면 보내지
@@ -121,7 +122,10 @@ node --conditions=react-server --import tsx --test --test-concurrency=1 tests/in
 node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/research-engine-boundaries.db.test.ts
 node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/research-engine-chat-finance.db.test.ts
 node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/research-engine-scale.db.test.ts
+node --conditions=react-server --experimental-test-module-mocks --import tsx --test --test-concurrency=1 tests/integration/research-engine-task.db.test.ts
 ```
+
+작업 맡기기(§9)의 unit·화면 검사: `tests/researchEngineTask.test.ts`(react-server 조건), `tests/client/deepResearchTaskRender.test.tsx`.
 
 scale suite는 synthetic 기능·부하 목표입니다(한 run에 generation 20회 이상, source 후보
 500개 이상, 성공 read 100개 이상, 인용 40개 이상, 출력 4,096 tokens 초과 보고서, 20개 동시
@@ -143,3 +147,46 @@ CSV를 만듭니다. run을 새로 시작하거나 provider를 부르지 않습�
 - Project workspace 자료 — develop에 Project 서비스가 없어 adapter 경계
   (`setResearchProjectSourceAdapter`)만 있고 기본은 사용 불가.
 - 스캔 PDF OCR/vision — 유료 provider 권한이 없어 `no_text_layer`로 표시만 함.
+- 작업 맡기기(§9)의 실제 모델 계획·결과 파일 품질 — fake 모델 DB 테스트만, live 미실행.
+
+## 9. 작업 맡기기(delegated task, 기본 꺼짐 `CHAT_TASK_AGENT_ENABLED`)
+
+새 실행 엔진이 아니라 이 엔진의 run 하나입니다. 차이는 brief의 `taskOutput`(`document` | `spreadsheet` |
+`presentation`) 하나이고 manifest JSON에만 들어가므로 migration이 없습니다. 강도는 기존 standard/deep 프로필을
+그대로 쓰고(새 한도 값 없음), 요금제·승인 총액 상한·동시 실행 한도도 Research와 같습니다.
+
+- **맡기기**: composer 도구 메뉴의 Deep Research 시트에 "결과물: 보고서 / 문서 / 표 / 발표 자료"가 보입니다
+  (offer의 `features.taskAgent`). 보고서는 지금의 Research 그대로이고, 나머지를 고르면 작업 run이 됩니다.
+- **계획**: planner가 "해야 할 일의 단계"(plan schema의 `subquestions`)와 결과물 구성(`outline`)을 냅니다.
+  같은 plan schema·편집·승인·`autoStart`를 씁니다. 표는 모든 섹션이 표로 작성되고, 발표 자료는 짧은 요점으로
+  작성됩니다(writer 지시). 결과물 종류는 닫힌 enum이라 공개 context(`PublicResearchContext`)에 들어가도 됩니다.
+- **도구**: 모델 호출은 `RESEARCH_MODEL_TOOL_NAMES`의 구조화 제출 7개(`submit_research_plan`, `_turn`,
+  `_private_analysis`, `_coverage`, `_verification`, `_section`, `_synthesis`) 중 하나만, 호출마다 하나를 강제로
+  받으며 `execute`는 입력을 받아 두기만 합니다. 목록 밖 이름은 `callResearchModel`이 예약 전에 거절합니다. 실행기의
+  동작은 기존 공개 웹 검색(Brave)·공개 페이지 읽기·사용자가 고른 비공개 자료 읽기, 그리고 마지막의 파일 배치뿐입니다.
+  이메일·MCP 쓰기·결제·게시·브라우저 조작 도구는 없고, 계획이나 읽은 페이지가 그렇게 하라고 해도 실행기에 그 동작이 없습니다.
+- **결과물**: 보고서가 끝나면(`finalizeReport`) 같은 보고서 문서를 모델 호출 없이 기존 생성 파일 렌더러로
+  docx·xlsx·pptx로 배치해(`lib/researchEngineTaskOutput.ts`) 답변 메시지의 `MessageArtifact`로 붙입니다
+  (`lib/researchEngineTaskFiles.ts`). 카드·내려받기·버전은 일반 생성 파일과 같습니다. 보고서 revision마다 파일
+  하나(ordinal = revision − 1)이고, 수정 요청의 파일은 앞 파일의 다음 버전입니다. 바이트를 먼저 쓰고 행은 finalize
+  트랜잭션에서 씁니다. 행을 못 쓰면 바로 지우고, 그 사이 crash는 orphan sweep이 회수합니다.
+  보고서 document의 모든 필드(제목, 품질, 요약, scope의 질문·note·가정·기준일, 섹션 본문·표·인용 [n]과 검증 표시, 상충, 완료
+  조건, 한계, 다음 질문, 출처의 번호·제목·URL·비공개·snippet·게시일·확인일·재게재)를 세 결과물 모두에 담습니다. 필드별 위치는
+  `RESEARCH_REPORT_FILE_PLACEMENT`이고, 테스트가 이 표를 보고서 schema와 대조하므로 필드가 늘면 배치할 때까지 테스트가 깨집니다.
+  배치는 내용을 버리지 않습니다. 한 값에 들어가지 않는 긴 글은 문단·행·요점으로 나눠 담습니다. 표가 시트보다 많으면 남는 표를 마지막 표 시트에 이름·머리행과 함께 이어 붙이고,
+  슬라이드가 100장을 넘으면 더 촘촘히(슬라이드당 요점 20개, 그다음 구분 슬라이드 없이) 배치합니다. 슬라이드의 요점이
+  잘려도 전문은 그 슬라이드의 발표자 노트에 있습니다. 그래도 한도를 넘으면 파일을 실패(`content_too_large`)로 남기고
+  카드가 답변의 보고서나 보고서 탭 내보내기를 안내합니다.
+- **비공개 자료 철회**: 철회(§3)하는 트랜잭션 안에서 그 run의 파일을 먼저 보류합니다(`source_revoked`: 실패 상태, 객체
+  없음, 옛 객체는 같은 트랜잭션에서 삭제 큐 `MessageArtifactCleanup`의 `source_revoked`). finalize나 다른 commit의
+  보류가 revision을 바꾸면 그 revision의 파일도 같은 트랜잭션에서 보류됩니다. 그 commit 뒤 정리된 revision에서 다시
+  배치해 같은 행을 ready로 되돌립니다(run lock 아래 revision digest가 같고 아직 보류 중일 때만). 재생성이 저장에 실패하거나
+  중간에 끊기면 행은 `source_revoked`로 남고, 새 철회가 없어도 다음 Research 읽기(`revalidateRunPrivateSources`), 그 파일의
+  다운로드·수정 입력 복사·프로젝트 저장 요청(`retryWithheldResearchTaskFile`), maintenance(`rebuildWithheldResearchFiles`)가
+  다시 만듭니다. 버전은 앞 파일의 상태(ready, 보류, 실패)와 상관없이 같은 답변의 앞 파일을 parent로 잇습니다. 파일 바이트를 내주거나 복사하는 곳(다운로드, 생성 파일 수정 입력,
+  프로젝트 저장)은 비공개 자료를 고른 run의 파일이면 먼저 그 run의 비공개 자료를 다시 확인하고, 철회가 발견되면 내주지
+  않습니다. run 삭제는 답변 파일을 `message_deleted`로 삭제 큐에 넣습니다.
+- **진행·멈추기·알림**: 진행 화면, 일시정지·재개·취소·지금 마무리·예산 늘리기는 Research 그대로입니다. workspace가
+  열린 채 run이 끝나면 기존 답변 완료 브라우저 알림(설정에서 켠 경우, 탭이 숨겨졌을 때만)을 띄웁니다. 웹 푸시·이메일은 없습니다.
+- **비용**: 결과 파일 단계는 모델을 부르지 않으므로 크레딧이 없습니다. 같은 fake 응답이면 작업 run과 Research run의
+  정산 총액·모델 호출이 같다는 것을 DB 테스트가 확인합니다.
