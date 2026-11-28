@@ -71,7 +71,10 @@ export const reviewTurnInput = z.object({
    * the first of them that fit beside it).
    */
   deepResearchDepth: deepResearchDepth.optional(),
+  /** The plugin connection chosen for this Review; each model may use it, as in Chat. Never with Deep Research or a one-model follow-up. */
+  mcpConnectionId: chatTurnInput.shape.mcpConnectionId,
 }).strict().refine((input) => input.prompt.length > 0 || Boolean(input.attachmentUploadIds?.length))
+  .refine((input) => !input.mcpConnectionId || (!input.deepResearchDepth && !input.onlyModelId))
   .refine((input) => !input.onlyModelId || (Boolean(input.conversationId) && !input.tools && input.choices.length === 1 && input.choices[0] === input.onlyModelId))
   .refine((input) => !input.deepResearchDepth || (input.mode === "professional" && !input.onlyModelId && input.effort === "default" &&
     input.prompt.length > 0 && !input.choices.includes(DEEP_RESEARCH_MODEL_ID)));

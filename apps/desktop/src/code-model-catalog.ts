@@ -18,7 +18,7 @@ export function codePickerModel(model: Model, contextCopy: string): AiModel {
   const known = AVAILABLE_MODELS.find(({ id }) => id === model.id);
   return {
     id: model.id, name: model.name, apiModel: model.id, provider: model.provider as AiProvider, icon: "",
-    bestFor: known?.bestFor ?? (model.contextWindowTokens ? contextCopy.replace("{size}", tokenSize(model.contextWindowTokens)) : ""),
+    bestFor: model.via ?? known?.bestFor ?? (model.contextWindowTokens ? contextCopy.replace("{size}", tokenSize(model.contextWindowTokens)) : ""),
     minimumPlan: "Guest", usageClass: "standard", creditWeight: model.credits, enabled: true, status: "enabled",
     reasoning: model.reasoning || model.efforts.length ? "medium" : "none", contextWindowTokens: model.contextWindowTokens,
     inputCapabilities: { image: model.vision === true, nativePdf: false }, webSearchOverride: "off",

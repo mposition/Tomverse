@@ -18,6 +18,7 @@ import { AttachmentDraftStatus, AttachmentPicker, type DesktopAttachmentDraft } 
 import { DesktopModelPicker } from "./DesktopModelPicker";
 import { SavedImageTurn } from "./ImageWorkspace";
 import { ComposerTools } from "./ComposerTools";
+import { ChatConnectorPicker, ChatConnectorStatus, useChatConnector } from "./ChatConnectorPicker";
 import { ChatLocationStatus, ChatLocationTool, useChatLocation } from "./ChatDraftLocation";
 import { sendToolOptions, shownWebSearchMode } from "./new-conversation-search";
 import { useSendGuard } from "./send-guard";
@@ -82,7 +83,7 @@ export function useReviewRun(history: History) {
 
   /** Sends the composer draft to the chosen models, or, with `followUp`, one question to one model of the saved Review. */
   async function send(mode: ReviewMode, choices: string[], effort: Effort, attachmentUploadIds: string[], followUp?: { prompt: string; modelId: string },
-    extra: Pick<ReviewTurnInput, "currentLocation" | "tools" | "deepResearchDepth"> = {}) {
+    extra: Pick<ReviewTurnInput, "currentLocation" | "tools" | "deepResearchDepth" | "mcpConnectionId"> = {}) {
     const prompt = followUp ? followUp.prompt : history.draft;
     if (request.current || (!prompt.trim() && !attachmentUploadIds.length) || (history.selected && !history.conversation)) return false;
     const requestId = crypto.randomUUID();
@@ -102,7 +103,8 @@ export function useReviewRun(history: History) {
         conversationId: history.conversation?.id, ...(followUp ? { onlyModelId: followUp.modelId } : {}),
         ...(extra.currentLocation ? { currentLocation: extra.currentLocation } : {}),
         ...(!followUp && extra.tools && Object.keys(extra.tools).length ? { tools: extra.tools } : {}),
-        ...(extra.deepResearchDepth ? { deepResearchDepth: extra.deepResearchDepth } : {}) });
+        ...(extra.deepResearchDepth ? { deepResearchDepth: extra.deepResearchDepth } : {}),
+        ...(!followUp && !extra.deepResearchDepth && extra.mcpConnectionId ? { mcpConnectionId: extra.mcpConnectionId } : {}) });
       if (request.current !== requestId) return false;
       if (result.savedQuestion && !followUp) history.setDraft("");
       if (result.conversation) history.applyConversation(result.conversation);
@@ -127,7 +129,7 @@ export function useReviewRun(history: History) {
 }
 
 export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages, onImageStarter, attachments, online, dictation, preferredModelIds,
-  analysisEnabled, searchReadiness, imageCapability, onModelImage, composerTools, deviceLocation, deepResearch }: {
+  analysisEnabled, searchReadiness, imageCapability, onModelImage, composerTools, deviceLocation, deepResearch, connectors, onManageConnectors }: {
   history: History; capability: ReviewCapability | null; run: ReturnType<typeof useReviewRun>;
   onFollowUp?: (draft: string) => void;
   onImages: (offer: ReviewImageOffer) => void;
@@ -142,6 +144,8 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
   composerTools?: boolean; deviceLocation?: boolean;
   /** The server runs Deep Research as a column of a Review: the "+" menu offers it in Professional. */
   deepResearch?: boolean;
+  /** The server takes a chosen plugin in a Review: the composer shows Chat's plugin control. */
+  connectors?: boolean; onManageConnectors?: () => void;
 }) {
   const { language } = history;
   const copy = desktopReviewCopy[language];
@@ -157,6 +161,7 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
   const [modeChoice, setModeChoice] = useState<ReviewMode | null>(null);
   const [picked, setPicked] = useState<{ conversationId?: string; mode: ReviewMode; choices: string[] }>();
   const [effort, setEffort] = useState<Effort>("default");
+  const [connectorApproval, setConnectorApproval] = useState(false);
   useEffect(() => {
     let active = true;
     void window.desktop.chatModels().then((available) => {
@@ -176,6 +181,7 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
   const eligible = useMemo(() => models.filter((model) => capability && canUseModelWithPlan(capability.plan, model)), [models, capability]);
   const providerIds = [...new Set(eligible.map((model) => model.provider))];
   const id = history.selected?.id;
+  const connector = useChatConnector(id);
   const chatKey = id ?? "new";
   const toolsScope = `${history.account ?? ""}:${chatKey}`;
   const [toolDraft, setToolDraft] = useState<{ scope: string; changes: ComposerOptions }>();
@@ -385,6 +391,8 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
         conversationId={id} scope={JSON.stringify([latest?.question.id, latest?.answers.map(({ id }) => id)])}
         ready={online && !history.writing} />}
     </div>}
+    {connectors && <ChatConnectorStatus language={language} progress={undefined} waiting={connectorApproval} sending={run.running}
+      onManage={onManageConnectors ?? (() => {})} onResolved={() => setConnectorApproval(false)} />}
     <form className="composer chat-composer" aria-label={copy.composer} onSubmit={async (event) => {
       event.preventDefault();
       if (!online || !choices.length || (!history.draft.trim() && !attachments.files.length) || run.running || preparing || location.state.pending) return;
@@ -394,7 +402,9 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
         // A fresh fix for this message only; a failed read continues without a location.
         const currentLocation = await location.read();
         if (stale()) return;
-        if (await run.send(mode, choices, actualEffort, attachmentUploadIds, undefined, { currentLocation, tools: composerTools ? sendTools : undefined })) {
+        if (await run.send(mode, choices, actualEffort, attachmentUploadIds, undefined, { currentLocation, tools: composerTools ? sendTools : undefined,
+          mcpConnectionId: connectors ? connector : undefined })) {
+          if (connectors && connector) setConnectorApproval(true);
           attachments.clear();
           setToolDraft(undefined);
         }
@@ -402,12 +412,36 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
     }}>
       <AttachmentDraftStatus draft={attachments} busy={run.running} />
       <ChatLocationStatus location={location} language={language} />
-      <div className="review-setup">
-        {capability.easy && <div className="review-mode-toggle" role="group" aria-label={copy.mode}>
+      {capability.easy && <div className="review-setup">
+        <div className="review-mode-toggle" role="group" aria-label={copy.mode}>
           {(["easy", "professional"] as const).map((value) => <button type="button" key={value} aria-pressed={mode === value}
             disabled={run.running} onClick={() => setModeChoice(value)}>{welcome[value]}</button>)}
-        </div>}
-        {mode === "easy" ? <div className="review-participants" role="group" aria-label={welcome.providers}>
+        </div>
+      </div>}
+      <textarea id="review-draft-input" aria-label={copy.question} placeholder={copy.ask} value={history.draft}
+        disabled={run.running || attachments.uploading || preparing} onPaste={attachments.onPaste}
+        onChange={(event) => history.setDraft(event.currentTarget.value)} onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
+            event.preventDefault();
+            event.currentTarget.form?.requestSubmit();
+          }
+        }} />
+      <div className="composer-actions">
+        {(attachments.enabled || composerTools || deviceLocation || researchOffer) && <ComposerTools language={language} key={toolsScope}
+          disabled={run.running || attachments.uploading || preparing}
+          onResearch={researchOffer ? () => setResearchSetup(toolsScope) : undefined}
+          researchBlocked={researchRoom ? undefined : copy.researchNeedsRoom}
+          onDrive={online && attachments.googleDrive ? () => void attachments.importDrive() : undefined} driveFull={attachments.driveFull}
+          options={composerTools ? { webSearchMode: shownWebSearchMode(Boolean(id), history.conversation?.webSearchMode, undefined), memoryMode: history.conversation?.memoryMode,
+            assistantProfileId: history.conversation?.assistantProfile?.profileId, ...toolChanges } : undefined}
+          setOptions={(change) => setToolDraft({ scope: toolsScope, changes: { ...toolChanges, ...change } })}>
+          {deviceLocation && <ChatLocationTool location={location} disabled={run.running || attachments.uploading || preparing} />}
+          {attachments.enabled && <AttachmentPicker draft={attachments} busy={run.running} tool />}
+        </ComposerTools>}
+        {connectors && <ChatConnectorPicker key={"connectors:" + toolsScope} language={language} conversationId={id}
+          disabled={run.running || history.writing} onManage={onManageConnectors ?? (() => {})} />}
+        <span className="spacer"/>
+        {mode === "easy" ? <div className="review-participants review-composer-picks" role="group" aria-label={welcome.providers}>
           <span className="review-participants-label">{welcome.providers} <b>{choices.length} / {limit}</b></span>
           {shownProviders.map((provider) => {
             const on = choices.includes(provider);
@@ -433,30 +467,8 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
           </span>)}
           {!choices.length && <span className="review-chip review-chip--empty">{welcome.choose}</span>}
         </DesktopModelPicker>}
-      </div>
-      <textarea id="review-draft-input" aria-label={copy.question} placeholder={copy.ask} value={history.draft}
-        disabled={run.running || attachments.uploading || preparing} onPaste={attachments.onPaste}
-        onChange={(event) => history.setDraft(event.currentTarget.value)} onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
-            event.preventDefault();
-            event.currentTarget.form?.requestSubmit();
-          }
-        }} />
-      <div className="composer-actions">
-        {(attachments.enabled || composerTools || deviceLocation || researchOffer) && <ComposerTools language={language} key={toolsScope}
-          disabled={run.running || attachments.uploading || preparing}
-          onResearch={researchOffer ? () => setResearchSetup(toolsScope) : undefined}
-          researchBlocked={researchRoom ? undefined : copy.researchNeedsRoom}
-          onDrive={online && attachments.googleDrive ? () => void attachments.importDrive() : undefined} driveFull={attachments.driveFull}
-          options={composerTools ? { webSearchMode: shownWebSearchMode(Boolean(id), history.conversation?.webSearchMode, undefined), memoryMode: history.conversation?.memoryMode,
-            assistantProfileId: history.conversation?.assistantProfile?.profileId, ...toolChanges } : undefined}
-          setOptions={(change) => setToolDraft({ scope: toolsScope, changes: { ...toolChanges, ...change } })}>
-          {deviceLocation && <ChatLocationTool location={location} disabled={run.running || attachments.uploading || preparing} />}
-          {attachments.enabled && <AttachmentPicker draft={attachments} busy={run.running} tool />}
-        </ComposerTools>}
         {dictation && <DraftDictation language={language} scope={"review:" + (history.selected?.id ?? "new")}
           disabled={run.running || attachments.uploading || preparing} draft={history.draft} setDraft={history.setDraft} />}
-        <span className="spacer"/>
         {/* With an empty draft, a spoken instruction takes the Send button's place: it is sent as typed words are, and nothing is read back. */}
         {run.running
           ? <button className="send stop" type="button" aria-label={copy.stop} onClick={() => void window.desktop.stopChat()}><Square size={16} /></button>

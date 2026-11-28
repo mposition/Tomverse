@@ -53,6 +53,7 @@ import { desktopIdentityProvider, desktopLoginEmail, type DesktopEmailResult, ty
 import { link, open, readFile, realpath, unlink } from "node:fs/promises";
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from "node:path";
+import { copyOutsideFile, discardAttachmentCopy, savePastedImage } from "./code-attachments";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { z } from "zod";
@@ -60,10 +61,10 @@ import { readOsLocationStatus, WINDOWS_LOCATION_SETTINGS_URI, type OsLocationSta
 import { Journal, deleteSession, listSessions, Workspace, writeFileAtomic } from "../../../tomverse-cli/src/runtime.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
 import { permissionCommand, type PermissionModeId } from "../permission-contract";
-import { liveCliExecution, liveCliFile, liveCliProviderForModel, liveCliProviders, type LiveCliProvider } from "../provider-cli-exec-contract";
+import { cliModelArgumentPattern, liveCliCatalogProvider, liveCliChoiceForModel, liveCliExecution, liveCliFile, liveCliProviderForModel, liveCliProviders, type LiveCliProvider } from "../provider-cli-exec-contract";
 import { subagentStopInput } from "../orchestrate-contract";
 import { DesktopPermissions } from "./permission-host";
-import { codePermissionProfile, codeReferenceKind, codeReferencePath, decisions, MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES,
+import { codePermissionProfile, codePastedImage, codeReferenceKind, codeReferencePath, decisions, MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES,
   MAX_HANDOFF_EXCERPT_CHARACTERS, backgroundInput, codeExtensionsInput, codeMemoryInput, followUpInput, historyTurnInput, queueInput, sessionId, startInput, workspaceHandoffInput,
   type ApprovalRequest, type CodeReference, type CompactHistoryResult, type DeleteHistoryResult,
   type Decision, type ForkTurnResult, type RecoveryResult, type RewindTurnResult, type Snapshot, type Task, type UndoChangeResult, type WorkspaceHandoff, type WorkspaceHandoffInput } from "../contract";
@@ -1210,8 +1211,14 @@ function startNativeTask(cliFixture: NonNullable<typeof cliRunFixture>, project:
  */
 async function startProviderCliTask(project: ProjectRoot, draft: Pick<z.infer<typeof startInput>, "prompt" | "model" | "mode" | "saveHistory">,
     executionMode: CodeExecutionMode | undefined, references: Task["references"]) {
-  const provider = liveCliProviderForModel(draft.model);
+  const choice = liveCliChoiceForModel(draft.model);
+  const provider = choice?.provider;
   const file = provider ? liveCliFile[provider] : undefined;
+  // A Tomverse model the person chose runs by its provider's own id, read from the catalogue this window was given; the window never names that id.
+  const chosen = choice?.catalogueModelId ? state.models.find(({ id, provider: owner }) => id === choice.catalogueModelId && owner === liveCliCatalogProvider[choice.provider]) : undefined;
+  if (choice?.catalogueModelId && !(chosen?.providerModelId && cliModelArgumentPattern.test(chosen.providerModelId))) {
+    throw new Error("The selected model is unavailable on this CLI.");
+  }
   const saved = file ? state.cliPaths[file] : undefined;
   const zai = provider === "zai" && zaiKey ? { key: zaiKey, configDir: zaiClaudeConfigDir() } : undefined;
   if (!provider || !saved || executionMode !== "provider_cli" || !state.capabilities?.providerCliExec || !worker ||
@@ -1251,6 +1258,7 @@ async function startProviderCliTask(project: ProjectRoot, draft: Pick<z.infer<ty
   codeReferences.clear();
   try {
     send({ type: "start-provider-cli", runId, project, provider, file: resolved.file, prompt: draft.prompt, permission,
+      ...(chosen?.providerModelId ? { model: chosen.providerModelId } : {}),
       protectedRoot: app.getPath("userData"), references, ...(home && id ? { history: { id, directory: nativeSessionDirectory(home, id) } } : {}),
       ...(providerCliExecFixture ? { argsPrefix: providerCliExecFixture.argsPrefix } : {}), ...(zai ? { zai } : {}) });
   } catch {
@@ -1944,6 +1952,29 @@ async function chooseRoot(target: string) {
   }
 }
 
+/** An image pasted into the Code composer: saved in the project's attachment folder and attached like a chosen file. */
+async function pasteCodeImage(input: z.infer<typeof codePastedImage>) {
+  const root = state.root;
+  const project = projectRoot;
+  const connection = codeConnection();
+  if (!root || !project || project.remote || !workspaceNamespace() || state.busy || signingOut || closing) {
+    throw new Error("Open a Code project of this computer to attach an image.");
+  }
+  if (codeReferences.size >= MAX_CODE_REFERENCES) return { references: [...codeReferences.values()], rejected: 1 };
+  assertProjectRoot(project);
+  let rejected = 0;
+  try {
+    const reference = new Workspace(root, [app.getPath("userData")]).reference(await savePastedImage(root, input));
+    if (projectRoot !== project || state.root !== root) throw new Error("The Code project changed.");
+    if (connection && cleanText(reference.path, connection.key) !== reference.path) rejected++;
+    else { const id = randomUUID(); codeReferences.set(id, { id, ...reference }); }
+  } catch (error) {
+    if (projectRoot !== project) throw error;
+    rejected++;
+  }
+  return { references: [...codeReferences.values()], rejected };
+}
+
 async function chooseCodeReferences(kind: CodeReference["kind"]) {
   const root = state.root;
   const project = projectRoot;
@@ -1977,7 +2008,10 @@ async function chooseCodeReferences(kind: CodeReference["kind"]) {
           continue;
         }
         try {
-          const reference = workspace.reference(path);
+          // A file from outside the project is copied into the project's attachment folder (code-attachments.ts) and attached there.
+          const outside = relative(root, path);
+          const source = kind === "file" && (outside.startsWith("..") || isAbsolute(outside)) ? await copyOutsideFile(root, path) : path;
+          const reference = workspace.reference(source);
           if (reference.kind !== kind || !codeReferencePath.safeParse(reference.path).success ||
               cleanText(reference.path, connection.key) !== reference.path) {
             rejected++;
@@ -3753,7 +3787,7 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
   const capability = state.capabilities?.review;
   if (!capability || input.choices.length > capability.modelLimit || (input.mode === "easy" && !capability.easy) ||
       (input.tools && !state.capabilities?.reviewTools) || (input.deepResearchDepth && !state.capabilities?.reviewDeepResearch) ||
-      (input.onlyModelId === DEEP_RESEARCH_MODEL_ID && !input.deepResearchDepth)) {
+      (input.onlyModelId === DEEP_RESEARCH_MODEL_ID && !input.deepResearchDepth) || (input.mcpConnectionId && !state.capabilities?.reviewPlugin)) {
     throw new Error("The selected Review options are unavailable.");
   }
   const currentLocation = chatLocationAllowed() ? input.currentLocation : undefined;
@@ -3844,6 +3878,7 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
           responses.set(modelId, assistant);
           let lastProgressAt = 0;
           const result = await api.stream(saved, { modelId, selectionMode: "manual", effort: input.effort, review: true, admission, reviewContext,
+            ...(input.mcpConnectionId ? { mcpConnectionId: input.mcpConnectionId } : {}),
             currentLocation: input.deepResearchDepth ? undefined : currentLocation, deepResearchDepth: input.deepResearchDepth },
             sourceId, assistant.id, signal, (text) => {
               assistant.text = text;
@@ -4481,7 +4516,14 @@ function registerIpc() {
   main("desktop:confirm-handoff", (value) => confirmWorkspaceHandoff(workspaceHandoffInput.parse(value)));
   main("desktop:remove-handoff", (value) => removeWorkspaceHandoff(z.uuid().parse(value)));
   main("desktop:choose-code-references", (value) => chooseCodeReferences(codeReferenceKind.parse(value)));
-  main("desktop:remove-code-reference", (value) => { codeReferences.delete(z.uuid().parse(value)); });
+  main("desktop:remove-code-reference", async (value) => {
+    const id = z.uuid().parse(value);
+    const reference = codeReferences.get(id);
+    codeReferences.delete(id);
+    // A copy this app made for the draft goes with it; the person's own project files are never touched.
+    if (reference && state.root) await discardAttachmentCopy(new Workspace(state.root, [app.getPath("userData")]), reference.path).catch(() => {});
+  });
+  main("desktop:paste-code-image", (value) => pasteCodeImage(codePastedImage.parse(value)));
   main("desktop:new-task", async () => {
     if (state.busy || pendingMutation || choosing) return;
     discardTransientTask(state.task);

@@ -32,6 +32,12 @@ test("what a turn may carry comes from the server that was reached, and an older
   body = { ...body, desktopTurnLocation: true, desktopChatPlugin: true, desktopReviewContext: true, desktopReviewTools: true };
   const current = await load();
   assert.deepEqual([current?.turnLocation, current?.chatPlugin, current?.reviewContext, current?.reviewTools], [true, true, true, true]);
+  // A plugin in a Review needs the server's own switch, and a Review to put it in.
+  assert.equal(current?.reviewPlugin, false);
+  body = { ...body, desktopReviewPlugin: true };
+  assert.equal((await load())?.reviewPlugin, false);
+  body = { ...body, desktopReview: { easy: true, modelLimit: 3, plan: "Max" } };
+  assert.equal((await load())?.reviewPlugin, true);
   // The "+" menu's choices reach a model through the Review turn's context, so they are not offered without it.
   body = { ...body, desktopReviewContext: false };
   assert.equal((await load())?.reviewTools, false);

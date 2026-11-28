@@ -111,6 +111,8 @@ test("client configs carry the real model facts and never a stored secret", () =
     const entry = toOpenAiModelEntry(caps);
     assert.equal(entry.id, "fixture");
     assert.equal(entry.tomverse.max_output_tokens, 16_000);
+    // The provider's own id, so a client running the model on its own provider subscription (Desktop Code's CLIs) can name it.
+    assert.equal(entry.tomverse.provider_model_id, baseModel.apiModel);
     const aside = asideProviderConfig("https://tomverse.app/api/v1", [caps]);
     const provider = aside.providers.tomverse;
     assert.equal(provider.api, "openai-completions");

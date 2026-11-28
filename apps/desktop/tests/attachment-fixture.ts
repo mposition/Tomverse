@@ -148,6 +148,10 @@ export async function verifyAttachments(application: ElectronApplication, page: 
     }, pixel.toString("base64"));
     await page.locator("main").dispatchEvent("drop", { dataTransfer: transfer });
     await expect(staged.getByRole("listitem")).toHaveCount(2);
+    // An image waiting to be sent shows as a thumbnail drawn from the local file; a text file keeps its name chip.
+    const thumbnail = staged.getByTestId("attachment-draft-thumb");
+    await expect(thumbnail).toHaveCount(1);
+    await expect.poll(() => thumbnail.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth)).toBe(16);
     assert.equal(uploads.length, 0);
     assert.equal((await turns()).length, 0);
     await send.click();

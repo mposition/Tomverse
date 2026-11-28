@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { voiceConversationConfig } from "@tomverse/chat-core";
 import { randomUUID } from "node:crypto";
-import { desktopBillingEnabled, desktopCodeSessionEnabled, desktopDeepResearchEnabled, desktopReviewDeepResearchEnabled, desktopDriveEnabled, desktopPluginSourcesEnabled, desktopPluginsEnabled, desktopPromptRefinerEnabled, desktopProviderCliExecEnabled, desktopRemotePreviewEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
+import { desktopBillingEnabled, desktopCodeSessionEnabled, desktopDeepResearchEnabled, desktopReviewDeepResearchEnabled, desktopDriveEnabled, desktopPluginSourcesEnabled, desktopPluginsEnabled, desktopReviewPluginEnabled, desktopPromptRefinerEnabled, desktopProviderCliExecEnabled, desktopRemotePreviewEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
 import { reasoningEffortStepsEnabled } from "@/lib/reasoningEffort";
 import { desktopManagedCodeEnabled } from "@/lib/desktopManagedCodeSwitch";
 import { codeWebSearchOffered } from "@/lib/codeWebSearch";
@@ -105,6 +105,7 @@ async function desktopChatCapabilities(userId: string, orderSeed: number | null)
     // and the "+" menu's choices for a Review only where the server it reached says so, whatever its own version.
     desktopTurnLocation: desktopWrite || desktopReview,
     desktopChatPlugin: desktopWrite && desktopPluginsEnabled() && mcpPreviewEnabled(),
+    desktopReviewPlugin: desktopReview && desktopReviewPluginEnabled() && mcpPreviewEnabled(),
     desktopReviewContext: desktopReview,
     desktopReviewTools: desktopReview && desktopComposerToolsEnabled(),
     // The reasoning steps a Desktop turn may ask for (the catalogue lists them per model), and the Prompt Refiner

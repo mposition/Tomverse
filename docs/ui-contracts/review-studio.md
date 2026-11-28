@@ -263,6 +263,15 @@ the question is put to alone, at that model's own price; the other columns keep 
 the models the composer shows plus Deep Research, so the row is switched off, with its reason, while every place of the
 plan is taken. Coverage: `apps/desktop/tests/reviewColumns.e2e.ts`.
 
+## Desktop composer order (owner direction, 2026-11-28)
+
+Desktop Review's composer row follows Desktop Chat's: `+`, the plugin control, a spacer, the providers (Easy) or the
+model picker (Professional), the microphone, then Send. The Easy / Professional switch stays above the text box.
+An image waiting to be sent shows as a thumbnail in Chat and Review. The plugin control appears only where the server
+names `desktopReviewPlugin` (`TOMVERSE_DESKTOP_REVIEW_PLUGIN_ENABLED`, default off, on top of the Desktop plugin
+switches); each model of the Review may then use the chosen connection, and every outbound action still waits for
+the person's approval. Coverage: `apps/desktop/tests/reviewColumns.e2e.ts`, `apps/desktop/tests/attachment-fixture.ts`.
+
 ## Credit presentation (owner direction, 2026-10-20)
 
 Text composers show no credit estimate or variable-cost badge, including their

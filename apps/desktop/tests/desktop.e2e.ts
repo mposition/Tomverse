@@ -386,9 +386,30 @@ setTimeout(() => process.exit(0), 35000).unref();
     const requestsBeforeAttach = gateway.completions.length;
     await attach.click();
     await page.getByRole("button", { name: "Attach files", exact: true }).click();
-    await expect(draftReferences.getByRole("listitem")).toHaveCount(2);
+    // The file from outside the project is copied into the project's attachment folder, which Git ignores; the credential file is refused.
+    await expect(draftReferences.getByRole("listitem")).toHaveCount(3);
     await expect(attach).toBeFocused();
     await expect(page.getByRole("alert")).toContainText("Some items could not be attached");
+    await expect(draftReferences).toContainText(/\.tomverse-attachments\/\d{8}-\d{6}-outside\.txt/);
+    const attachmentCopies = (await readdir(join(root, ".tomverse-attachments"))).sort();
+    assert.equal(attachmentCopies.length, 2);
+    assert.match(attachmentCopies[1]!, /^\d{8}-\d{6}-outside\.txt$/);
+    assert.equal(await readFile(join(root, ".tomverse-attachments", attachmentCopies[1]!), "utf8"), "Outside the project.");
+    assert.equal(await readFile(join(root, ".tomverse-attachments", ".gitignore"), "utf8"), "*\n");
+    await draftReferences.getByRole("button", { name: /^Remove \.tomverse-attachments\// }).click();
+    // Taking the copy off the draft deletes it; the folder keeps only its .gitignore.
+    await expect.poll(() => readdir(join(root, ".tomverse-attachments"))).toEqual([".gitignore"]);
+    // "+" is the first control of the Code composer, as in Chat and Review.
+    assert.equal(await page.locator("form.composer .composer-actions > *").first().evaluate((node) => node.classList.contains("code-attach-menu")), true);
+    // A pasted screenshot is saved in the same folder and attached as a project file.
+    await composer.evaluate((textarea, encoded) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0))], "image.png", { type: "image/png" }));
+      textarea.dispatchEvent(new ClipboardEvent("paste", { clipboardData: transfer, bubbles: true, cancelable: true }));
+    }, "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
+    await expect(draftReferences).toContainText(/\.tomverse-attachments\/\d{8}-\d{6}-image\.png/);
+    await draftReferences.getByRole("button", { name: /^Remove \.tomverse-attachments\// }).click();
+    await expect.poll(() => readdir(join(root, ".tomverse-attachments"))).toEqual([".gitignore"]);
     await draftReferences.getByRole("button", { name: "Remove check.mjs" }).click();
     await expect(draftReferences.getByRole("listitem")).toHaveCount(1);
     await attach.click();

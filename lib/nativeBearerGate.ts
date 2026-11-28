@@ -465,6 +465,14 @@ export function desktopPluginsEnabled() {
 }
 
 /**
+ * A chosen plugin in a Review, as in Chat: each model of the Review may use the connection's tools, and every action
+ * that would change something outside Tomverse still waits for the person's approval. Off unless its own switch is on.
+ */
+export function desktopReviewPluginEnabled() {
+  return desktopPluginsEnabled() && process.env.TOMVERSE_DESKTOP_REVIEW_PLUGIN_ENABLED === "true";
+}
+
+/**
  * Desktop's plugins from a zip file, an address of a zip file, an npm package or a private GitHub repository, and the marketplace
  * Desktop carries. It touches no route: these downloads run on the person's own computer after the person confirms each one, so this
  * is only the kill switch Desktop reads as the `desktopPluginSources` capability. It needs the Desktop session, not the connector

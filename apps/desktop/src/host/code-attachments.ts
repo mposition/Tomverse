@@ -1,0 +1,77 @@
+import { lstat, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { basename, extname, join } from "node:path";
+import { isSecretPath, type Workspace } from "../../../tomverse-cli/src/runtime.js";
+
+/**
+ * Files the person attaches to a Code request from outside the project (a screenshot, a pasted image, a log from
+ * Downloads) are copied into this project folder, so the agent reads them with its own project tools: Tomverse's
+ * read_file and view_image, or the provider CLI's. The folder ignores itself in Git (its `.gitignore` is `*`), so the
+ * copies never show up as changes to commit.
+ */
+export const CODE_ATTACHMENT_FOLDER = ".tomverse-attachments";
+/** One copied file at most; view_image itself takes images up to 3 MB. */
+export const CODE_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+/** What a pasted clipboard image may be: the types the agents' image tools read. */
+export const CODE_PASTE_IMAGE_TYPES = { "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif" } as const;
+
+export class CodeAttachmentRefused extends Error {}
+
+const stamp = (now: Date) => now.toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+
+/** A name made only of letters, digits, `.`, `-` and `_`, without a leading dot, kept short; the extension stays. */
+export function attachmentFileName(name: string, now = new Date(), fallbackExtension = "") {
+  const extension = (extname(name) || fallbackExtension).toLowerCase().replace(/[^.a-z0-9]/g, "").slice(0, 10);
+  const stem = basename(name, extname(name)).normalize("NFKC").replace(/[^\p{L}\p{N}_-]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "attachment";
+  return `${stamp(now)}-${stem}${extension}`;
+}
+
+async function attachmentFolder(root: string) {
+  const folder = join(root, CODE_ATTACHMENT_FOLDER);
+  await mkdir(folder, { recursive: true });
+  // A link could point the copies anywhere; only a real folder is written to.
+  if (!(await lstat(folder)).isDirectory()) throw new CodeAttachmentRefused("The attachment folder is not a folder.");
+  await writeFile(join(folder, ".gitignore"), "*\n", { flag: "wx" }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "EEXIST") throw error;
+  });
+  return folder;
+}
+
+/** Writes the bytes as a new file of the attachment folder and returns its path; an existing file is never replaced. */
+async function writeAttachment(root: string, name: string, bytes: Uint8Array) {
+  const folder = await attachmentFolder(root);
+  const extension = extname(name);
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const candidate = join(folder, attempt ? `${basename(name, extension)}-${attempt + 1}${extension}` : name);
+    try {
+      await writeFile(candidate, bytes, { flag: "wx" });
+      return candidate;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+  }
+  throw new CodeAttachmentRefused("No free attachment name.");
+}
+
+/** Copies a file the person chose outside the project; a credential file by name, an empty or too large file is refused. */
+export async function copyOutsideFile(root: string, source: string, now = new Date()) {
+  if (isSecretPath(source)) throw new CodeAttachmentRefused("The file can hold credentials.");
+  const info = await stat(source);
+  if (!info.isFile() || !info.size || info.size > CODE_ATTACHMENT_MAX_BYTES) throw new CodeAttachmentRefused("The file cannot be attached.");
+  return writeAttachment(root, attachmentFileName(basename(source), now), await readFile(source));
+}
+
+/** Saves an image pasted into the Code composer. */
+export async function savePastedImage(root: string, input: { name: string; mediaType: string; bytes: Uint8Array }, now = new Date()) {
+  const extension = CODE_PASTE_IMAGE_TYPES[input.mediaType as keyof typeof CODE_PASTE_IMAGE_TYPES];
+  if (!extension || !input.bytes.byteLength || input.bytes.byteLength > CODE_ATTACHMENT_MAX_BYTES) throw new CodeAttachmentRefused("The image cannot be attached.");
+  const stem = basename(input.name || "pasted-image", extname(input.name || ""));
+  return writeAttachment(root, attachmentFileName(stem + extension, now), input.bytes);
+}
+
+/** Deletes a copy this app made, when the person takes it off the draft; any other path is left alone. */
+export async function discardAttachmentCopy(workspace: Workspace, path: string) {
+  const parts = path.split("/");
+  if (parts.length !== 2 || parts[0] !== CODE_ATTACHMENT_FOLDER || parts[1] === ".gitignore") return;
+  const resolved = workspace.resolve(path, "write");
+  if (resolved.exists) await rm(resolved.absolute);
+}

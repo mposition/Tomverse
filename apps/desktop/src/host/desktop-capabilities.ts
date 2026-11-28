@@ -35,6 +35,7 @@ const capabilities = z.object({
   // What this server accepts in a Desktop turn. An older server names none of them, and the app then offers none.
   desktopTurnLocation: z.boolean().optional(),
   desktopChatPlugin: z.boolean().optional(),
+  desktopReviewPlugin: z.boolean().optional(),
   desktopReviewContext: z.boolean().optional(),
   desktopReviewTools: z.boolean().optional(),
   desktopReviewDeepResearch: z.boolean().optional(),
@@ -76,6 +77,7 @@ export async function readDesktopCapabilities(accessToken: string, signal: Abort
     codeSession: data.desktopCodeSession === true,
     cloudExecution: data.desktopCloudExecution === true,
     turnLocation: data.desktopTurnLocation === true, chatPlugin: data.desktopChatPlugin === true,
+    reviewPlugin: data.desktopReviewPlugin === true && data.desktopReview !== undefined,
     reviewContext: data.desktopReviewContext === true,
     reviewTools: data.desktopReviewTools === true && data.desktopReviewContext === true,
     // A Deep Research column of a Review prepares its own context, as a one-model Review turn does.

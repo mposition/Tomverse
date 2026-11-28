@@ -124,6 +124,7 @@ if (trustedWindow) {
     retryCodeCatalog: () => ipcRenderer.invoke("desktop:retry-code-catalog"),
     chooseCodeReferences: (kind: Parameters<DesktopApi["chooseCodeReferences"]>[0]) => ipcRenderer.invoke("desktop:choose-code-references", kind),
     removeCodeReference: (id: string) => ipcRenderer.invoke("desktop:remove-code-reference", id),
+    pasteCodeImage: (input: Parameters<DesktopApi["pasteCodeImage"]>[0]) => ipcRenderer.invoke("desktop:paste-code-image", input),
     newTask: () => ipcRenderer.invoke("desktop:new-task"),
     confirmHandoff: (input: Parameters<DesktopApi["confirmHandoff"]>[0]) => ipcRenderer.invoke("desktop:confirm-handoff", input),
     removeHandoff: (id: string) => ipcRenderer.invoke("desktop:remove-handoff", id),
