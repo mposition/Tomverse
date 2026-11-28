@@ -460,7 +460,7 @@
     "fflate": "^0.8.3",
     "highlight.js": "^11.12.0",
     "js-tiktoken": "1.0.21",
-    "katex": "^0.16.22",
+    "katex": "^0.18.2",
     "lucide-react": "^1.75.0",
     "mermaid": "^11.12.0",
     "next": "16.4.6",
@@ -506,6 +506,7 @@
     "vite": "^8.3.8"
   },
   "overrides": {
+    "katex": "$katex",
     "@eslint/config-array": {
       "brace-expansion": "^1.1.17"
     },
