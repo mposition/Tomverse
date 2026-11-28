@@ -105,11 +105,14 @@ export function antigravityAnswer(stdout) {
  * The quota from `agy -p /usage --output-format json` (no model turn, zero
  * tokens; measured on agy 1.5.4). The plan groups models and each group has
  * one or two buckets (weekly, five-hour). Which group bounds a reviewer
- * depends on its model: "Gemini Models" holds Gemini Flash and Pro, while
- * Gemini 4 Argon has a group of its own (seen on the box 2026-11-13). So the
+ * depends on its model: "Gemini Models" holds every Gemini 4 model (Argon
+ * included since its own group went, by 2026-11-23) and Flash, while "Claude
+ * and GPT models" holds Claude and GPT-OSS (box, 2026-11-28). So the
  * provider names its groups (`quotaGroups`, default "Gemini Models"), and the
  * least-remaining bucket across them is what is left. A named group that is
  * missing or empty is unknown: the panel changed, and a guess would assign.
+ * A window nobody has used yet comes full with `reset_time` 1970-01-01 (it
+ * starts at the first request): that is full, not an old reading.
  */
 export const DEFAULT_QUOTA_GROUPS = Object.freeze(["Gemini Models"]);
 
@@ -127,9 +130,10 @@ export function antigravityQuotaFromUsage(body, now = Date.now(), groups = DEFAU
   for (const bucket of buckets) {
     const fraction = bucket?.remaining_fraction;
     const reset = typeof bucket?.reset_time === "string" ? Date.parse(bucket.reset_time) : NaN;
+    const unstarted = fraction === 1 && reset === 0;
     // A bucket whose reset already passed is an old reading, not the account now.
     if (typeof fraction !== "number" || !Number.isFinite(fraction) || fraction < 0 || fraction > 1 ||
-        !Number.isFinite(reset) || reset <= now) return UNKNOWN;
+        !Number.isFinite(reset) || (reset <= now && !unstarted)) return UNKNOWN;
     remaining.push(fraction * 100);
   }
   const remainingPercent = Math.round(Math.min(...remaining) * 10) / 10;
