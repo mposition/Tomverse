@@ -131,7 +131,12 @@ test("the page carries its own enforced policy and the conversation share's cach
   assert.match(csp, /form-action 'none'/);
   assert.match(csp, /frame-src 'none'/);
   assert.match(csp, /; webrtc 'block'; /);
-  assert.ok(csp.includes(`script-src 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com ${ORIGIN}/vendor/artifact-preview/;`));
+  // This origin's three vendored preview files by exact URL (lib/htmlArtifactPreview.ts HTML_PREVIEW_VENDOR_FILES), not the directory.
+  const vendor = ["react-18.3.1.production.min.js", "react-dom-18.3.1.production.min.js", "babel-standalone-7.26.2.min.js"]
+    .map((file) => ` ${ORIGIN}/vendor/artifact-preview/${file}`)
+    .join("");
+  assert.ok(csp.includes(`script-src 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com${vendor};`), csp);
+  assert.ok(!csp.includes(`${ORIGIN}/vendor/artifact-preview/ `) && !csp.includes(`${ORIGIN}/vendor/artifact-preview/;`), csp);
   assert.equal(response.headers.get("content-security-policy-report-only"), null);
   assert.equal(response.headers.get("content-type"), "text/html; charset=utf-8");
   assert.equal(response.headers.get("cache-control"), "private, no-store, max-age=0");

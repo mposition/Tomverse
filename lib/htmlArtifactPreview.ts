@@ -290,7 +290,10 @@ export function buildHtmlPreviewSrcdoc(
     // frame. A CSP does not cover resource hints (`<link rel="preconnect">`
     // and the like); they are a known residual risk. The page is NOT parsed
     // here to strip them: this parent document never parses or rewrites the
-    // model's HTML (see withEmbedderNonce for the one existing exception).
+    // model's HTML, with two exceptions -- withEmbedderNonce, and the
+    // attribute rename in neutralizeDeclarativeShadowRoots above, a text
+    // substitution (no parse) because nothing else can switch a declarative
+    // shadow root off.
     const inner =
         `<!doctype html><meta http-equiv="Content-Security-Policy" content="${htmlPreviewCsp(assetOrigin)}">` +
         `<meta http-equiv="x-dns-prefetch-control" content="off">` +

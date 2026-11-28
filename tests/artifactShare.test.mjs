@@ -224,7 +224,8 @@ test("the shared page's code is never part of our document: it is only inside th
     const inner = srcdocOf(outer);
     assert.ok(
         inner.startsWith(
-            `<!doctype html><meta http-equiv="Content-Security-Policy" content="${htmlPreviewCsp(ORIGIN)}"><script>${HTML_PREVIEW_GUARD_SCRIPT}</script>`
+            `<!doctype html><meta http-equiv="Content-Security-Policy" content="${htmlPreviewCsp(ORIGIN)}">` +
+                `<meta http-equiv="x-dns-prefetch-control" content="off"><script>${HTML_PREVIEW_GUARD_SCRIPT}</script>`
         )
     );
     assert.ok(inner.endsWith(hostile));

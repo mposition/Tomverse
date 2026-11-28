@@ -512,7 +512,10 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
     파싱하거나 고쳐 쓰지 않습니다**(`DOMParser`로 지우는 시도는 신뢰할 수 없는 HTML을 부모 문서가 다루게 해 철회했고, 정규식은 우회됩니다).
     남는 방어는 안쪽 문서의 CSP(`connect-src 'none'`을 브라우저가 이 hint에 적용하는 만큼)와 그 다음에 둔
     `x-dns-prefetch-control: off` meta뿐이며 Browser 창에서는 관찰하지 못했습니다. 부모 문서가 page를 파싱하는 곳은 앱 문서에 nonce가 있을 때
-    nonce를 붙이는 `withEmbedderNonce` 하나뿐이고, 이는 이번 변경 전부터 있던 것입니다(위 설명).
+    nonce를 붙이는 `withEmbedderNonce` 하나뿐이고, 이는 이번 변경 전부터 있던 것입니다(위 설명). page를 고쳐 쓰는 곳은 이것과
+    `shadowrootmode` 속성 이름 바꾸기(`neutralizeDeclarativeShadowRoots`, 파싱하지 않는 문자열 치환, §19.7) 둘입니다. 정규식이
+    우회된다는 위 판단은 쓰는 방법이 여러 가지인 resource hint에 대한 것입니다. 선언형 shadow root는 속성 이름 하나가 tokenizer가
+    정한 경계 안에 그대로 있어야 생기므로, 그 경계를 그대로 따른 치환으로 닫힙니다(측정: 따옴표 바로 뒤·`/`·대문자 포함 UDP 0).
   - 미리보기는 **frame 안의 frame**입니다. 안쪽이 모델의 page(위 sandbox·CSP)이고 바깥쪽은 우리 문서로
     `frame-src 'none'`**만** 갖습니다(`srcdoc` 자식은 부모의 모든 정책을 상속하므로 다른 지시문을 더하면 page에
     닿습니다). script가 `location`을 바꿔 자기 frame을 임의 주소로 보내는 것은 page 정책으로 막을 수 없는

