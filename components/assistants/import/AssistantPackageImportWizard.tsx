@@ -342,7 +342,7 @@ const PROBLEM_KEY: Record<string, string> = {
 
 /* ---------------------------------------------------------------- wizard */
 
-const ACCEPT = ".zip,.json";
+const ACCEPT = ".zip,.json,.md,.markdown";
 
 /**
  * How long step 7 watches before it stops asking.

@@ -129,9 +129,9 @@ test("Antigravity quota is the named group's more-used bucket, other groups asid
   // Measured shape: a 5-hour bucket at 1 and a weekly one just below it.
   assert.equal(read(agyUsage([0.9998478293418884, 1])).remaining_basis_points, 9998);
   assertObservation(read(agyUsage([0.4, 0])), "antigravity", 0, "2026-11-08T03:00:00.000Z");
-  // The default group is Gemini 4 Argon's own, exhausted in this fixture.
-  assertObservation(normalizeAmuxV22AntigravityQuota(agyUsage(), at), "antigravity", 0,
-    "2026-11-14T09:42:27.000Z");
+  // The default group is "Gemini Models", where Argon now sits (2026-11-28).
+  assertObservation(normalizeAmuxV22AntigravityQuota(agyUsage(), at), "antigravity", 7500,
+    "2026-11-08T03:00:00.000Z");
   // A group the panel does not have, or a name that is not one, is unknown.
   for (const group of ["Gemini 5 Argon", "", " Gemini Models", null, 7])
     assert.equal(read(agyUsage(), group), null, String(group));
@@ -166,9 +166,9 @@ const measuredAgyUsage = () => ({ conversation_id: "", status: "SUCCESS", durati
       { id: "gemini-argon-wtu-weekly", window: "weekly", remaining_fraction: 0.97,
         reset_time: "2026-11-17T09:42:27Z" }] }] } } });
 
-test("the measured 2026-11-13 panel gives the Argon worker Argon's weekly bucket", () => {
+test("the measured 2026-11-13 panel gives a worker named on Argon's old group that weekly bucket", () => {
   const measuredAt = "2026-11-13T02:00:00.000Z";
-  const argon = normalizeAmuxV22AntigravityQuota(measuredAgyUsage(), measuredAt);
+  const argon = normalizeAmuxV22AntigravityQuota(measuredAgyUsage(), measuredAt, "Gemini 4 Argon");
   assert.equal(argon.remaining_basis_points, 9700);
   assert.equal(argon.reset_at, "2026-11-17T09:42:27.000Z");
   assert.equal(argon.exhausted, false);
@@ -176,10 +176,45 @@ test("the measured 2026-11-13 panel gives the Argon worker Argon's weekly bucket
   const flashPro = normalizeAmuxV22AntigravityQuota(measuredAgyUsage(), measuredAt, "Gemini Models");
   assert.equal(flashPro.remaining_basis_points, 9998);
   assert.equal(flashPro.reset_at, "2026-11-13T06:41:39.000Z");
-  // Argon's group missing from a later panel is unknown, never Flash/Pro's number.
+  // A named group missing from a later panel is unknown, never another group's number.
   const withoutArgon = measuredAgyUsage();
   withoutArgon.command.data.groups.pop();
-  assert.equal(normalizeAmuxV22AntigravityQuota(withoutArgon, measuredAt), null);
+  assert.equal(normalizeAmuxV22AntigravityQuota(withoutArgon, measuredAt, "Gemini 4 Argon"), null);
+});
+
+/** agy 1.5.4 `/usage` on the box 2026-11-28: Argon's own group is gone (it is
+ * listed in "Gemini Models"), and a window nobody has used yet comes full with
+ * reset_time 1970-01-01. */
+const agyUsage20261128 = () => ({ conversation_id: "", status: "SUCCESS",
+  command: { name: "usage", data: { groups: [
+    { name: "Gemini Models", description: "Models within this group: Gemini 4 Neon, Gemini 4 Carbon, " +
+      "Gemini 4 Argon, Gemini 4 Hydrogen, Orchestrator (Neon), Orchestrator (Carbon), " +
+      "Orchestrator (Argon), Gemini 3.8 Flash", buckets: [
+      { id: "gemini-weekly", window: "weekly", remaining_fraction: 0.9994462132453918,
+        reset_time: "2026-12-05T03:58:17Z" },
+      { id: "gemini-5h", window: "5h", remaining_fraction: 0.99, reset_time: "2026-11-28T08:58:17Z" }] },
+    { name: "Claude and GPT models", buckets: [
+      { id: "3p-weekly", window: "weekly", remaining_fraction: 1, reset_time: "1970-01-01T00:00:00Z" },
+      { id: "3p-5h", window: "5h", remaining_fraction: 1, reset_time: "1970-01-01T00:00:00Z" }] }] } } });
+
+test("the measured 2026-11-28 panel: Argon reads Gemini Models, an unused window is full", () => {
+  const measuredAt = "2026-11-28T03:59:00.000Z";
+  // The Argon worker names no group, so it takes the default, Gemini Models.
+  const argon = normalizeAmuxV22AntigravityQuota(agyUsage20261128(), measuredAt);
+  assert.equal(argon.remaining_basis_points, 9900);
+  assert.equal(argon.reset_at, "2026-11-28T08:58:17.000Z");
+  assert.equal(normalizeAmuxV22AntigravityQuota(agyUsage20261128(), measuredAt, "Gemini 4 Argon"), null);
+  // Unused Claude and GPT windows: full, resetting no earlier than one 5-hour window away.
+  const opus = normalizeAmuxV22AntigravityQuota(agyUsage20261128(), measuredAt, "Claude and GPT models");
+  assert.equal(opus.remaining_basis_points, 10_000);
+  assert.equal(opus.exhausted, false);
+  assert.equal(opus.reset_at, "2026-11-28T08:59:00.000Z");
+  // The epoch is only "unused" for a full bucket of a known window.
+  const mutate = (change) => { const body = agyUsage20261128(); change(body.command.data.groups[1].buckets[0]); return body; };
+  for (const bad of [mutate((b) => { b.remaining_fraction = 0.5; }), mutate((b) => { b.window = "daily"; }),
+    mutate((b) => { b.reset_time = "1970-01-01T00:00:01Z"; })])
+    assert.equal(normalizeAmuxV22AntigravityQuota(bad, measuredAt, "Claude and GPT models"), null,
+      JSON.stringify(bad.command.data.groups[1].buckets[0]));
 });
 
 /** A fake CLI: records what it was started with and answers each written
@@ -309,16 +344,16 @@ test("Antigravity probe prints only the usage panel, from a read-only run home",
     roleAsked = options.role;
     return home.create(provider, given, options);
   };
-  // Without a named group the probe reads Gemini 4 Argon's (exhausted here).
+  // Without a named group the probe reads Gemini Models.
   const result = await probeAmuxV22ChannelQuota("antigravity", config,
     { now: () => now, spawn: spawnChild, createRunHome: create });
-  assertObservation(result, "antigravity", 0, "2026-11-14T09:42:27.000Z");
+  assertObservation(result, "antigravity", 7500, "2026-11-08T03:00:00.000Z");
   // The sidecar's TOMVERSE_AMUX_V22_ANTIGRAVITY_QUOTA_GROUP names another group.
-  const named = { ...config, quotaGroup: "Gemini Models" };
+  const named = { ...config, quotaGroup: "Claude and GPT models" };
   assertObservation(await probeAmuxV22ChannelQuota("antigravity", named, { now: () => now,
     spawn: spawnChild, createRunHome: async (_provider, given) => ({
       config: { ...given, homePath: "/home/review/codex-chore/run-y" }, cleanup: async () => {} }) }),
-  "antigravity", 7500, "2026-11-08T03:00:00.000Z");
+  "antigravity", 100, "2026-11-14T08:03:00.000Z");
   assert.equal(roleAsked, "review");
   const [{ binary, args, options }] = started;
   assert.equal(binary, config.binaryPath);

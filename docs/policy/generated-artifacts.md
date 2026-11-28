@@ -317,7 +317,7 @@ modelId. 서명 URL은 DB에 저장하지 않는다(애초에 만들지 않는�
   참조가 있으면 거절한다. HTML은 여기에 걸지 않는다: script가 있는 page가
   "웹 페이지를 만들어 달라"의 의미이고, 그것을 막는 것은 안전하게 만드는 것이
   아니라 형식을 거절하는 것이다. 둘 다 `nosniff`가 붙은 attachment로만 나가므로
-  이 애플리케이션의 origin에서는 어느 쪽도 실행되지 않는다. HTML이 실행되는 곳은 §9의 격리된 미리보기 frame 하나뿐이다(앱 origin 없음).
+  이 애플리케이션의 origin에서는 어느 쪽도 실행되지 않는다. HTML이 실행되는 곳은 §9의 격리된 미리보기 frame과, 같은 frame을 한 겹 더 감싼 §19의 공유 페이지뿐이다(둘 다 앱 origin 없음).
 - **아카이브 경로는 정규화하지 않고 거절한다.** 파일명은 label이라 다듬어도
   여전히 그 파일을 가리키지만, 경로는 **위치**다. `../../etc/passwd`를 조용히
   `etc/passwd`로 옮기면 모델이 말한 곳에 없는 내용을 담은 아카이브가 배달된다.
@@ -403,7 +403,14 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
 - **sweep**: 15분 유지보수 cron이 (a) tombstone queue를 drain하고,
   (b) `ARTIFACT_ORPHAN_TTL_MS`(6시간)보다 오래된 접두사 객체 중 참조하는 행이
   없는 것을 지운다. (b)의 age 필터는 필수다 — 없으면 바이트를 저장하고 아직 행을
-  쓰지 않은 진행 중인 turn의 파일을 지운다.
+  쓰지 않은 진행 중인 turn의 파일을 지운다. (b)는 한 번에 접두사 객체를 키 순서로 한
+  쪽(500개)만 보고, 마지막으로 본 키를 `AppSetting`(`generated_artifact_orphan_sweep_cursor`)에
+  남겨 다음 run이 그 뒤를 보며, 끝까지 가면 처음부터 다시 돈다(2026-11-28: 전에는 매번 맨 앞의
+  오래된 객체 200개만 봐서, 행이 있는 오래된 파일 200개가 앞서면 그 뒤의 고아가 영원히
+  지워지지 않았다). 지우는 조건은 그대로다: 행이 없고 TTL보다 오래된 키뿐이다. 삭제가 실패한
+  run은 위치를 그 페이지 끝이 아니라 **처음 실패한 키 바로 앞**에 두어 다음 run이 그 키를 다시
+  시도한다. 같은 자리에서 연속 두 번 실패하면 이번 바퀴에서는 놓아 주어(한 객체가 sweep을 붙잡지
+  않게) 계속 간다.
 - sweep은 절대 throw하지 않는다. 저장소 장애가 유지보수 run 전체를 실패시키면
   안 된다.
 
@@ -487,14 +494,29 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
   - 내용은 `srcdoc`으로만 넣고 URL로 로드하지 않습니다. 문서 맨 앞에 CSP `<meta>`를 둡니다(page 안의
     `<head>`를 패턴으로 찾아 끼우면 주석 안에 들어갈 수 있으므로 앞에 붙입니다): `default-src 'none'`,
     `connect-src 'none'`, `form-action 'none'`, `base-uri 'none'`, `frame-src 'none'`, `object-src 'none'`,
-    script·style·글꼴은 inline과 cdnjs·jsdelivr·unpkg만, 이미지는 inline(`data:`·`blob:`)만, `'unsafe-eval'` 없음.
+    script·style·글꼴은 inline과 cdnjs·jsdelivr·unpkg만, 이미지는 inline(`data:`·`blob:`)만, `'unsafe-eval'` 없음,
+    `webrtc 'block'`(2026-11-28, 아직 집행하는 브라우저가 없어 아래 WebRTC 가드가 실제 차단이다 — §19.7).
+    CSP `<meta>` 바로 뒤, page보다 먼저 WebRTC 가드 script(`HTML_PREVIEW_GUARD_SCRIPT`)가 돈다. 채팅에서는 앱의 nonce 정책을
+    상속하므로 가드도 앱 문서의 nonce를 단다(`buildHtmlPreviewSrcdoc(..., { nonce })`).
     이미지 URL에 page의 글을 실어 어느 host로도 보낼 수 없습니다. React 미리보기 문서는 자기 `<head>` 맨 앞에
     더 좁은 정책(`reactPreviewCsp`)을 하나 더 둡니다. 두 정책이 함께 적용되어 고정한 세 파일과 inline script만 실행됩니다.
     그 세 파일은 **이 앱이 직접 제공합니다**(`public/vendor/artifact-preview/`, 아래). 그래서 React 미리보기에는 제3자 host가
     하나도 없고, script URL의 경로나 query에 글을 실어도 이 앱 서버에만 닿습니다. 공통 정책은 앱 origin 중
-    `/vendor/artifact-preview/` 경로만 더 허용합니다(`htmlPreviewCsp(origin)`; `srcdoc` frame의 origin은 opaque라 `'self'`로는 안 됩니다).
+    그 세 파일의 **정확한 URL**만 더 허용합니다(`htmlPreviewCsp(origin)`, `HTML_PREVIEW_VENDOR_FILES`; 디렉터리 전체가 아니므로 그 아래에
+    파일이 더해져도 모델의 page가 닿지 못합니다. `srcdoc` frame의 origin은 opaque라 `'self'`로는 안 됩니다. 무결성 hash는 `<script integrity>`에 두고
+    정책에는 hash source를 넣지 않습니다 — 넣으면 브라우저가 `'unsafe-inline'`을 무시해 page의 inline script가 막힙니다).
     한계: 모델이 쓴 HTML page(React가 아닌 것)는 차트·지도 라이브러리를 쓰려고 세 CDN의 script·style·글꼴을 계속 받을 수
     있으므로, 그 page가 CDN 주소에 글을 실어 요청하면 CDN 운영자 로그에는 남을 수 있습니다(다른 host로는 못 보냄).
+  - **resource hint는 알려진 잔여 위험입니다**(2026-11-28). `<link rel="dns-prefetch|preconnect|prefetch|prerender">`는 CSP가 막지 못하고
+    `href`의 host로 DNS 조회·연결을 시작하므로 host 이름에 글을 실어 보내는 통로가 됩니다. 이것을 지우려고 **부모 문서에서 모델의 HTML을
+    파싱하거나 고쳐 쓰지 않습니다**(`DOMParser`로 지우는 시도는 신뢰할 수 없는 HTML을 부모 문서가 다루게 해 철회했고, 정규식은 우회됩니다).
+    남는 방어는 안쪽 문서의 CSP(`connect-src 'none'`을 브라우저가 이 hint에 적용하는 만큼)와 그 다음에 둔
+    `x-dns-prefetch-control: off` meta뿐이며 Browser 창에서는 관찰하지 못했습니다. 부모 문서가 page를 파싱하는 곳은 앱 문서에 nonce가 있을 때
+    nonce를 붙이는 `withEmbedderNonce` 하나뿐이고, 이는 이번 변경 전부터 있던 것입니다(위 설명). page를 고쳐 쓰는 곳은 이것과
+    closed 선언형 shadow root 앞에 ` shadowrootmode=open `을 끼우는 `openDeclarativeShadowRoots`(§19.7) 둘입니다. 정규식이
+    우회된다는 위 판단은 쓰는 방법이 여러 가지인 resource hint를 지우는 일에 대한 것입니다. 이 변환은 아무것도 지우지 않고 글자를
+    끼우기만 하며, 글 안의 모든 `<template` 시작 태그를 tokenizer 방식으로 하나씩 읽으므로 브라우저가 파싱하는 태그를 빠뜨리지
+    않습니다(측정: 대문자·`/`·따옴표 안 `>`·문자 참조·script나 comment 뒤에 숨긴 경우 포함 UDP 0).
   - 미리보기는 **frame 안의 frame**입니다. 안쪽이 모델의 page(위 sandbox·CSP)이고 바깥쪽은 우리 문서로
     `frame-src 'none'`**만** 갖습니다(`srcdoc` 자식은 부모의 모든 정책을 상속하므로 다른 지시문을 더하면 page에
     닿습니다). script가 `location`을 바꿔 자기 frame을 임의 주소로 보내는 것은 page 정책으로 막을 수 없는
@@ -536,11 +558,68 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
     - **"이 화면 고치기"**: 패널 아래 입력란에 바꿀 내용을 적으면, 생성 파일은 기존 "수정본 만들기" 경로(원본 복사본 첨부와 표준
       요청문, 그 아래 입력한 내용)로, 답변 코드 블록은 입력창 맨 위에 "위 코드에서 다음을 고쳐 주세요: …"를 채워 넣고 패널을
       닫습니다. 보내지는 않으며 **새 서버 API가 없습니다**. 입력란은 그 경로가 실제로 있는 곳에만 나타납니다(생성 파일은 계정과 수정본 만들기가 켜진 대화, 코드 블록은 채팅 입력창이 있는 화면).
-    - 공개 URL 게시, 서버 저장, 여러 모델 나란히 미리보기는 하지 않습니다(§12).
+    - **패널 안에서 직접 고치기**(같은 스위치, 2026-11-28): 패널 위에 "미리보기 / 코드" 전환이 있고, 코드 보기는 위에 원문
+      textarea, 아래에 실시간 미리보기입니다(`components/chat/ArtifactPreviewWorkspace.tsx`). HTML 파일·React 파일·코드 블록
+      모두 같습니다. 미리보기는 마지막 입력 뒤 400ms가 지나야 다시 그립니다(`ARTIFACT_EDIT_RENDER_DELAY_MS`). 고친 글은
+      원문과 **같은 경로**(`buildCodePreviewDocument` → `HtmlArtifactPreviewFrame` → `buildHtmlPreviewSrcdoc`)로만 frame에
+      들어가므로 sandbox·CSP·중첩 frame·1,000,000바이트 한도가 그대로입니다. 고친 내용은 이 페이지의 메모리에만 있고
+      (`lib/artifactPreviewEditing.ts`, 저장소·서버·대화에 쓰지 않음, 새로고침하면 원래대로), 패널을 닫았다 열면 남아
+      있습니다. 파일은 artifact id로, 코드 블록은 답변의 `data-message-id`와 그 답변 안 미리보기 가능한 블록 사이의 위치(`previewableBlockIndex`)와 원문으로 구분하므로 다른
+      답변에 같은 코드가 있어도 편집이 섞이지 않습니다. 답변 id가 없는(저장 전) 블록은 편집을 남기지 않습니다. "원래대로", "복사", "내려받기"(파일은 원래 이름, React는 text/plain), 고쳤을 때만 "이 버전으로 계속"이
+      있고, 마지막은 고친 코드를 fenced block으로 감싼 요청문을 입력창에 채울 뿐 보내지 않습니다(50,000자 넘으면 내려받기
+      안내, `ARTIFACT_CONTINUE_MAX_CHARS`). 스위치가 꺼져 있으면 HTML 파일 패널은 예전처럼 frame만 보입니다.
+    - 서버 저장, 여러 모델 나란히 미리보기는 하지 않습니다(§12).
+  - **Python 코드 블록은 사용자 브라우저 안에서 실행합니다**(`TOMVERSE_CHAT_CODE_RUN_ENABLED`, 기본 꺼짐, 정확히 `true`일 때만 켬;
+    `lib/chatCodeRun.ts`·`lib/chatCodeRunFrame.ts`·`components/chat/CodeBlockRun.tsx`). 스위치는 위 작업 공간 스위치와 별개이며 같은 길(`ReviewWorkspaceShell` →
+    `ChatPageClient` → `ChatArtifactWorkspaceProvider`)로 내려갑니다. 꺼져 있으면 버튼도, 모델 안내도, 페이지 정책의 변화도 없습니다.
+    - 답변이 **끝난 뒤** ```` ```python ````·`py`·`python3` 블록에 "실행" 버튼이 붙고, 누르기 전에는 frame도 만들지 않습니다. 결과(표준 출력·오류,
+      마지막 식의 값, matplotlib 그림)는 **블록 바로 아래** 영역에 보이고, "중지"·"다시 실행"·"내 파일 추가"·"결과를 메시지 입력창에 넣기"가 있습니다.
+      입력창에는 요청문과 출력(3,000자까지)만 채우며 보내지 않습니다. **서버를 거치는 것이 없고 새 API도 없습니다.**
+    - **격리는 위와 같은 구조입니다**: `srcdoc` frame, `sandbox="allow-scripts"`**만**(`allow-same-origin` 없음 — 불투명 origin, 쿠키·저장소·DOM 없음),
+      `<head>` 맨 앞의 CSP `<meta>`. 기존 HTML·React 미리보기의 정책은 **한 글자도 넓히지 않았고**, Python 실행용 정책(`codeRunCsp`)을 따로 둡니다:
+      `default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval' <앱 origin>/vendor/pyodide/<버전>/; connect-src <같은 경로>; worker-src blob:;
+      form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'; manifest-src 'none'`. 즉 런타임이 내려받는 그 디렉터리 하나만 script와
+      네트워크로 열려 있어 `fetch`·XHR·WebSocket·`micropip`(PyPI)·CDN이 모두 막히고, `'unsafe-eval'`은 없으며 `'wasm-unsafe-eval'`은 WebAssembly
+      컴파일에만 필요한 최소입니다.
+    - **사용자 코드는 frame의 주 스레드가 아니라 Web Worker에서 돕니다.** frame의 script는 우리 고정 문서이고, 그것이 `blob:`으로 만든 worker(classic —
+      불투명 origin의 frame은 blob에서 module worker를 못 만듭니다)에서 Pyodide(WebAssembly Python)가 돕니다. worker에는 window·DOM·탐색이 없고 정책을
+      그대로 물려받으며, 시간 제한(코드 실행 30초; 런타임·패키지 내려받기는 별도 120초)·출력 제한(100,000자)·그림 제한(6장, 한 장 약 2MB, 16,000,000픽셀)
+      또는 "중지"에서 frame이 `terminate()`합니다. 중지는 frame 자체를 제거해 worker가 함께 끝납니다. 그래서 중첩 frame(탐색 차단용)은 두지 않았습니다.
+    - **사용자 코드가 돌기 전에 worker의 네트워크를 없앱니다**(`CODE_RUN_BLOCKED_GLOBALS`). CSP의 `connect-src`는 런타임 디렉터리를 열어 두는데, 정책은 경로만 맞추고
+      쿼리 문자열과 본문은 보지 못하므로, `fetch`를 부를 수 있다면 사용자가 넣은 파일 내용을 그 경로의 쿼리에 실어 이 서버로 보낼 수 있습니다("실행과 파일은 브라우저 안에만
+      머문다"는 계약 위반). 그래서 worker는 코드가 쓸 패키지를 모두 불러온 **뒤, 코드를 실행하기 전에** `fetch`·`Request`·`XMLHttpRequest`·`WebSocket`·`WebSocketStream`·
+      `EventSource`·`WebTransport`·`fetchLater`·`importScripts`·`Worker`·`SharedWorker`·`caches`·`CacheStorage`·`Cache`·`BroadcastChannel`·`FontFace`와 `navigator`의
+      `sendBeacon`·`serviceWorker`를 전역 객체와 그 위 모든 prototype에서 지우고(지워지지 않으면 `configurable:false`인 undefined로 막고), 하나라도 호출 가능하게 남으면
+      코드를 실행하지 않고 실패합니다. `Worker`를 남기면 새 worker가 깨끗한 `fetch`를 얻으므로 반드시 지웁니다. worker 스크립트는 함수로 감싸 `pyodide`·`CONFIG` 같은 내부
+      변수가 전역에 남지 않게 합니다. 동적 `import()`는 지울 수 없는 문법이지만, Python이 쓰려면 JS를 문자열로 실행해야 하고(`Function`·`eval`·`setTimeout(문자열)`·Pyodide
+      `run_js`) CSP에 `'unsafe-eval'`이 없어 브라우저가 거절합니다(Chromium에서 측정). 그 결과 **worker는 한 번만 씁니다**: 첫 실행이 시작되면 네트워크가 영구히 없으므로
+      다음 실행은 새 worker를 쓰고, frame은 실행이 끝나는 즉시 다음 worker의 런타임을 미리 띄워(`boot`) 다시 누르는 시간을 줄입니다. 이전 실행이 남긴 전역 변경도 함께 사라집니다.
+      새 패키지를 import하는 코드는 그 worker에서 ModuleNotFoundError입니다.
+    - **frame과 부모 문서는 `postMessage`로만** 말합니다. 부모는 `event.source`가 자기 frame의 window이고 `event.origin`이 `"null"`이며 이름공간·버전·frame마다
+      다른 token이 맞는 메시지만 받고(`parseCodeRunFrameMessage`), 필드마다 종류와 크기를 검사합니다. 메시지는 부모→frame `run` 하나, frame→부모
+      `ready`·`phase`·`output`·`image`·`done` 다섯 가지입니다. frame도 worker의 메시지를 믿지 않고(Python이 `js.self.postMessage`로 흉내 낼 수 있음) 검사해
+      한도를 건 뒤에야 넘깁니다. **출력은 신뢰하지 않는 데이터**입니다: 텍스트는 텍스트로, 그림은 `data:image/png;base64,`만 `<img>`로(SVG·URL은 거절), DataFrame은
+      `repr`의 텍스트 표로 보이고 HTML로 넣지 않습니다.
+    - 패키지는 numpy·pandas·matplotlib(와 그 의존 13개)이며 코드의 `import`를 보고 Pyodide `loadPackagesFromImports`가 필요한 것만 불러옵니다. 그 밖의 `import`는
+      ModuleNotFoundError입니다. 내 파일(CSV·TSV·JSON·텍스트, 5개·파일당 10MB·합계 20MB)은 브라우저에서 읽어 frame으로만 보내 worker의 현재 폴더에 두고,
+      다음 실행 때 지웁니다. 서버로 가지 않습니다. XLSX는 Pyodide 배포에 `openpyxl`이 없어 뺐습니다.
+    - **런타임은 이 앱이 직접 제공합니다**: `public/vendor/pyodide/314.0.8/`(Pyodide 314.0.8, Python 3.14; 약 30MB). 파일마다 sha256을 `CODE_RUN_FILES`에 고정하고
+      테스트가 디렉터리 전체를 해시합니다. wheel은 lock의 sha256과도 맞춥니다. frame의 origin이 `null`이라 `/vendor/pyodide/:path*`에만 `Access-Control-Allow-Origin: *`와
+      immutable 캐시를 둡니다(`next.config.ts`). **서버도 그 디렉터리의 쿼리 문자열이 있거나 GET·HEAD가 아닌 요청을 400으로 거절합니다**(`proxy.ts`, `codeRunVendorRequestRefused`; 런타임은 평범한 GET으로만 받습니다). 위 worker의 네트워크 제거가 본 대책이고 이것은 두 번째 잠금입니다. `.gitattributes`(`-text`)·`eslint.config.mjs`·`scripts/check-push-scope.mjs`·`scripts/check-protected-table-writers-core.mjs`가
+      React·Babel과 같은 방식으로 이 디렉터리를 제외합니다. 런타임에 제3자 CDN은 없습니다.
+    - **앱 자신의 CSP 한 군데가 바뀝니다.** `srcdoc` frame은 부모 문서의 정책을 물려받으므로, 부모의 `script-src`에 WebAssembly 허용이 없으면 frame이 wasm을 컴파일하지
+      못합니다(측정함). `createStrictCsp`는 **스위치가 켜져 있고 답변을 보여 주는 페이지**(`/chat`, `/chat/workspace`, `/review`, `/continuations/<id>`,
+      `/settings/imports/conversations/<id>`)에서만 `'wasm-unsafe-eval'`을 더하고, 스위치가 꺼져 있으면 정책은 바이트까지 그대로입니다. `'unsafe-eval'`은 더하지 않습니다.
+    - 모델에게는 켜져 있을 때만 짧은 안내가 갑니다(`lib/chatTurnSystemBlocks.ts`, `promptTokens`에 포함): 브라우저에서 실행할 수 있다, numpy·pandas·matplotlib,
+      네트워크·설치 없음, 30초, **모델은 결과를 보지 못하니 지어내지 말 것**. 모델이 스스로 실행하고 결과를 이어 쓰는 도구 루프는 하지 않습니다(§12).
+    - 검증: `tests/chatCodeRun.test.ts`(스위치·sandbox·정책 문자열·기존 미리보기 정책 불변·메시지 검증·한도·vendored sha256),
+      `tests/client/chatCodeRun.test.tsx`(버튼 조건, 8개 언어 문구).
   - 검증: `tests/htmlArtifactPreview.test.mjs`(sandbox·CSP 문자열 고정),
     `tests/chatArtifactPreview.test.mjs`(코드 블록 판정, React 문서의 자체 호스팅 경로·파일 해시·escape, bootstrap에 eval 없음, 모든 문서가 같은
     격리를 거침), `tests/client/htmlArtifactPreviewRender.test.tsx`(frame 속성·버튼 조건),
-    `tests/client/chatArtifactWorkspace.test.tsx`(스위치·스트리밍·언어별 버튼, 8개 언어 문구).
+    `tests/client/chatArtifactWorkspace.test.tsx`(스위치·스트리밍·언어별 버튼, 8개 언어 문구),
+    `tests/artifactPreviewEditing.test.mjs`·`tests/client/artifactPreviewWorkspaceRender.test.tsx`(편집: fence·길이 상한·
+    내려받기 이름, 스위치 꺼짐이면 frame만, 고친 frame도 같은 sandbox).
 - 버튼은 최소 44px 터치 영역과 `focus-visible` 링을 갖는다.
 - 스크린 리더는 하나의 accessible name으로 형식·파일명·크기·상태를 받는다.
 - 시각 role은 `accent-generated-artifact-*`(emerald)뿐이다. AI Review의
@@ -664,9 +743,12 @@ tool 호출 후의 두 번째 step은 출력 토큰이며, 둘 다 기존 reserv
 - 게스트 artifact(§7).
 - 사용자가 만든 파일을 대화 밖에서 다시 찾는 목록 화면.
 - 수식, 차트, 조건부 서식, 피벗.
-- artifact 공유 링크. 공유 대화 스냅샷은 artifact를 포함하지 않는다.
-- 미리보기 페이지의 공개 URL 게시(외부 게시라 별도 승인·도메인·moderation이 먼저다), 서버 저장, 여러 모델의 결과 나란히 미리보기.
+- 공유 대화 스냅샷은 artifact를 포함하지 않는다. 미리보기 화면 하나의 공유 링크는 §19(기본 꺼짐)다.
+- 문서 파일(docx·pptx 등)의 공유 링크, 공유 페이지에서 방문자가 이어서 고치기(remix), 별도 sandbox 도메인,
+  공유 페이지 방문 통계, 사이드바의 공유 목록, 공유 내용 moderation.
+- 패널에서 고친 내용의 서버 저장, 여러 모델의 결과 나란히 미리보기.
 - React 미리보기에서 React 밖의 패키지(차트·아이콘 라이브러리 등)와 Tailwind. 허용 CDN 목록을 넓히지 않고는 불가능하다.
+- 모델이 스스로 코드를 실행하고 그 결과를 이어 쓰는 도구 루프(서버 왕복이 필요하고 비용 문제가 다시 생긴다), 대화에 첨부한 파일을 Python 실행에 자동으로 넣는 것, 실행 결과를 대화에 저장하는 것, XLSX 읽기(`openpyxl` 없음).
 
 ## 13. 첨부된 템플릿에서 여러 문서 만들기
 
@@ -1050,7 +1132,10 @@ OpenDocument(`odt`·`odp`·`ods`), Office 97-2003(`doc`·`ppt`·`xls`), `rtf`,
 ## 16. 문서에 그림 넣기 (PDF → Office)
 
 운영자 결정: 2026-11-13. 파일을 만들 수 있는 모델(GPT 6 Luna, Claude, Gemini)은
-PDF를 원본 그대로 받아 스캔 페이지까지 읽는다. 그래서 "이 PDF를 Word로"는 모델이
+PDF를 읽는다. 텍스트 층이 있는 페이지는 추출한 텍스트로 읽고, 텍스트가 없는 스캔·그림
+페이지가 있으면 이번 메시지의 PDF를 원본 그대로 텍스트와 함께 받아 읽는다(2026-11-28
+정정: 전에는 텍스트가 조금이라도 있으면 원본을 받지 못해 스캔 페이지가 말없이 빠졌다.
+정본은 `chat-attachment-formats.md` §6). 그래서 "이 PDF를 Word로"는 모델이
 읽고 `create_document`로 다시 쓰는 일이고, 빠져 있던 것은 **그림**이었다.
 
 ### 16.1 image 블록
@@ -1233,7 +1318,7 @@ revision 기본값 변경은 기존 Native gate를 켜지 않는다. 새 device 
 파일 bytes는 여전히 포함하지 않으며, 일반 앱/공유 DTO에 이 내용을 노출하지 않는다.
 schema migration과 로컬 검증은 운영 migration·활성화·merge·deploy 승인과 별개다.
 
-## 19. Deep Research 작업 맡기기의 결과 파일 (2026-11-28, 기본 꺼짐)
+## 20. Deep Research 작업 맡기기의 결과 파일 (2026-11-28, 기본 꺼짐)
 
 `CHAT_TASK_AGENT_ENABLED`로 맡긴 작업(`docs/ops/research-engine-v2.md` §9)은 끝난 보고서를 이 문서의
 생성기로 docx·xlsx·pptx 하나로 만들어 그 답변 메시지의 `MessageArtifact`로 붙인다. 카드, `/api/artifacts/{id}`
@@ -1255,3 +1340,252 @@ schema migration과 로컬 검증은 운영 migration·활성화·merge·deploy 
   ready로 돌아가고, 실패하거나 끊긴 재생성은 새 철회가 없어도 다음 Research 읽기, 그 파일의 요청, maintenance가 다시 한다. 다운로드·수정 입력 복사·
   프로젝트 저장은 비공개 자료를 고른 Research run의 파일이면 그 run의 비공개 자료를 먼저 다시 확인한다
   (`researchTaskFileServable`, `lib/researchEngineTaskFiles.ts`). 두 실패 코드의 카드에는 재전송 버튼이 없다.
+
+## 19. 미리보기 화면 공유 링크 (2026-11-28, 기본 꺼짐)
+
+운영자 지시(2026-11-28)로 만든 기능이다. 미리보기 패널의 "공유"가 그 화면 하나만 보여 주는 공개 읽기 전용 페이지
+`/share/a/<token>`을 만든다. 대화 내용은 포함하지 않는다. 대상은 생성된 HTML 파일(`html`·`htm`)과 답변의 HTML·SVG·
+React(`jsx`·`tsx`) 코드 블록이고, 문서 파일은 대상이 아니다(§12).
+
+### 19.1 스위치
+
+- `AppSetting` `feature.artifactSharingEnabled`, 값이 정확히 `"true"`일 때만 켜짐, 행이 없으면 꺼짐. Admin › Platform
+  settings의 "미리보기 화면 공유" 토글이 쓴다(`lib/artifactShareSettings.ts`). `feature.publicSharingEnabled`가 꺼져 있으면
+  이것도 꺼진 것이다(`artifactSharingAvailable`, `lib/artifactShareAccess.ts`).
+- 공개 페이지는 요청마다 스위치를 읽는다. 끄면 이미 만든 링크도 모두 "열 수 없음" 404가 된다. 켜는 것은 외부 공개에 대한
+  운영자 승인이다(아래 19.5의 잔여 위험을 보고 결정한다).
+- 스위치가 꺼져 있어도 소유자는 이미 있는 링크를 보고 중지할 수 있다(공개를 줄이는 쪽이므로).
+
+### 19.2 무엇이 공개되는가
+
+- **브라우저가 보낸 글은 공개되지 않는다.** 서버가 소유자의 원본에서 읽는다(`lib/artifactShareService.ts`): 파일은
+  `findFirst({ id, userId, status: "ready" })` 뒤 다운로드와 같은 `readOwnR2ObjectBytes`로 미리보기 상한(행에 적힌 크기가 아님)까지
+  읽고, 상한을 넘으면 자르지 않고 크기 초과(413)로, 온전한 UTF-8이 아니면 대체 문자로 바꾸지 않고 거절한다. 코드 블록은 소유자의 assistant
+  메시지 본문이 그 코드를 포함할 때만(`answerContainsCode`, 줄바꿈은 LF로 맞춤). 그래서 패널에서 고친 내용(§9)은 구조상
+  공유되지 않고, 패널이 공유 카드에 그렇게 적는다.
+- 공유 시점의 내용을 `ArtifactShare` 행에 스냅샷으로 저장한다(migration `20261128150000_artifact_share`). 원본 답변을 고쳐도
+  공유 페이지는 스냅샷을 보인다. 크기는 미리보기와 같은 1,000,000바이트(CHECK `ArtifactShare_content_size_check`).
+- 출처 하나에 링크 하나(`sourceKey` unique: `artifact:<id>` 또는 `code:<messageId>:<블록 위치>:<language>:<sha256>`, 블록 위치는
+  답변 안 미리보기 가능한 블록 사이의 순서 `previewableBlockIndex`). 같은 글을 HTML과 JSX로 쓴 두 블록은 다른 링크다. 블록의
+  글이 바뀐 뒤 새 링크를 만들면 같은 위치의 이전 링크를 같은 트랜잭션에서 닫는다(`artifact.share.revoke`, 이유 `REPLACED`).
+  그래서 패널이 보거나 멈출 수 없는 링크가 그 블록에 남지 않는다. 같은 위치에 다른 글을 동시에 공유하면 두 트랜잭션이 서로의
+  아직 커밋되지 않은 행을 볼 수 없어 링크가 둘 남으므로, 만들기 트랜잭션은 맨 앞에서 위치별 advisory lock
+  (`pg_advisory_xact_lock(hashtext('artifact-share:' || 블록 위치 접두어))`, 파일은 `artifact:<id>`)을 잡아 한 번에 하나씩
+  만든다(검토 반영 2026-11-28, 실제 동시 트랜잭션 DB 테스트). 동시에 두 번 누른 경합(`ArtifactShare_sourceKey_key` unique
+  위반)일 때만 먼저 만든 링크를 돌려주고, 다른 실패는 그대로 오류다(`isSourceKeyConflict`). 다시 누르면 같은 링크를,
+  만료된 링크는 지우고 새 토큰으로 만든다. 토큰은 `lib/shareTokens.ts`(24바이트 난수), 수명은 대화 공유와 같은
+  `SHARE_LINK_TTL_DAYS`(1~365, 기본 30일).
+- 중지하면 행을 지운다. **만료된 행도 지운다**: 소유자 상태 조회·공개 읽기·새 공유 만들기에서 만나면 그 자리에서, 나머지는
+  매일 유지보수 sweep(`cleanupExpiredData`의 `expired_artifact_shares` 단계, 500행씩 최대 20번)이. 만료된 링크는 패널에
+  보이지 않아 소유자가 지울 수 없기 때문이다. 어느 경우든 같은 함수(`removeArtifactShares`)가 지우고 같은 방식으로
+  `artifact.share.revoke`(이유 `OWNER_STOPPED` 또는 `EXPIRED`)를 남긴다. 계정·대화·답변 메시지·생성 파일이 지워지면 FK cascade로 함께 지워진다. 계정 내보내기에는
+  `shared_pages`로 들어가고 토큰은 뺀다(공개 페이지의 열쇠다). 데이터 도메인 등록부 `artifactShare`.
+
+### 19.3 공유할 수 없는 경우
+
+`artifactShareRefusal`이 한 곳에서 정한다: 스위치 꺼짐(503), 요금제 `allowSharing` false(403), 원본 없음·남의 것·답변에 없는
+코드·공유 대상이 아닌 형식(404), 채팅이 아닌 대화, 임시 대화, 잠긴 대화(비밀번호가 있으면 지금 풀려 있어도 거절),
+가져온 대화를 이어 간 대화, 비공개 자료를 쓴 Research 답변(manifest에 URL이 아닌 항목이 있거나 현재 revision이
+`containsPrivate`), 크기(413), 빈 내용(400, `ARTIFACT_SHARE_EMPTY`; 파일은 행의 기록 크기가 아니라 읽은 바이트로 판정). 게스트는 로그인이 없어 401이다. 판정이 대화 행에서 읽은 사실(잠금, 임시, 종류,
+continuation bridge)은 쓰는 SQL 문 안에서 한 번 더 본다(`INSERT … SELECT … WHERE "password" IS NULL AND
+"temporaryExpiresAt" IS NULL AND kind가 chat AND NOT EXISTS bridge`). 요금제와 Research는 대화 행의 사실이 아니므로 공개 읽기가
+매번 다시 본다.
+
+**공개 읽기는 만들 때의 규칙 전부를 같은 함수로 다시 본다**(2026-11-28 검토 반영). 만들 때와 읽을 때 모두
+`shareRefusal`(`lib/artifactShareService.ts`) → `artifactShareRefusal`을 거치고, 사실은 링크 행에서 대화(종류·잠금·임시·
+continuation bridge)·답변의 Research run·소유자 요금제를 DB로 따라가 모은다(세션·쿠키는 읽지 않음). 그래서 링크를 만든 뒤에
+대화를 잠그거나, 가져온 대화의 이어가기가 되거나, Research run이 비공개 자료를 갖게 되거나(manifest 또는 현재 revision),
+소유자 요금제가 공유를 빼거나, 스위치가 꺼지면 다음 요청부터 "열 수 없음" 404다. 행은 지우지 않고 닫기만 하므로(잠금과 같음)
+조건이 돌아오면 만료 전까지 다시 열린다. 순서는 스위치(읽기 전) → 링크 행과 대화 사실 → 그것들이 통과할 때만 요금제(user·
+plan 두 번)와 Research(run·revision 최대 두 번) 조회이고, 이 모두가 공개 읽기 rate limit 뒤에 있다.
+
+rate limit: 만들기 분당 10·하루 100, 상태 조회 60·2,000, 중지 20·200, 공개 읽기 토큰당 120·5,000(IP 버킷 포함, 대화
+공유와 같음). 만들기·중지는 `logSecurityAuditEvent("artifact.share.create" | "artifact.share.revoke")`로 남긴다.
+소유자는 패널의 공유 버튼에서 링크·만료일·복사·중지를 본다(사이드바 목록은 없다, §12).
+
+### 19.4 공개 페이지의 격리
+
+route `app/(site)/(application)/share/a/[shareToken]/route.ts`, 문서와 헤더 `lib/artifactSharePage.ts`.
+
+- **정적 응답이다.** 경로의 토큰과 `Accept-Language`(또는 `?lang=`)만 읽고 세션·쿠키·인증 헤더를 읽지 않는다. 같은
+  페이지가 로그인한 방문자에게도 바이트 그대로 간다(server-contract 테스트가 세션 resolver·next-auth·`next/headers`를
+  호출되면 실패하게 바꿔 확인).
+- 구조: 우리 문서(공지 막대, 신고 링크, 처음 열 때 확인 화면, `<template>` 안의 frame 하나, 고정 script 하나 —
+  `ARTIFACT_SHARE_GATE_SCRIPT`, §19.7) → `iframe sandbox="allow-scripts" srcdoc=`
+  (`buildHtmlPreviewSrcdoc`의 바깥 문서, `frame-src 'none'`) → `iframe sandbox="allow-scripts" srcdoc=`(공유된 화면,
+  앞에 `htmlPreviewCsp`와 WebRTC 가드, React는 `reactPreviewCsp`도). 공유된 코드는 우리 문서에 들어가지 않고 escape된 `srcdoc` 안에만
+  있다. 문서는 `buildCodePreviewDocument`가 만들므로 채팅 미리보기와 같은 것이다.
+- 우리 문서의 CSP(HTTP header, 항상 enforce): `sandbox allow-scripts; ` + `htmlPreviewCsp(origin)` + `; frame-ancestors 'none'`.
+  `sandbox` 덕분에 **최상위 문서도 opaque origin**이라(측정: `self.origin === "null"`, `document.cookie`는 SecurityError) 이
+  템플릿에 escape 실수가 있어도 앱 origin으로 script가 돌지 않는다. `srcdoc` 아래 문서는 이 정책을 상속하므로, 화면이 쓸 수
+  있는 것은 미리보기 정책과의 교집합이고 그보다 넓지 않다. proxy는 이 경로에 CSP·Report-To를 붙이지 않는다
+  (`isArtifactSharePagePath`; 붙이면 route의 정책을 덮는다).
+- 헤더: `Cache-Control: private, no-store, max-age=0`, `CDN-Cache-Control`·`Cloudflare-CDN-Cache-Control: no-store`,
+  `X-Robots-Tag: noindex, nofollow, noarchive`(대화 공유와 같음), `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`,
+  `X-Content-Type-Options: nosniff`, 강력한 기능을 모두 끈 `Permissions-Policy`, `Cross-Origin-Opener-Policy: unsafe-none`.
+  마지막은 HTML이 sandbox flag와 `unsafe-none`이 아닌 COOP를 함께 받은 navigation을 network error로 정하기 때문이다(사이트
+  전체의 `same-origin-allow-popups`를 이 경로만 바꿈; Chromium 159는 둘을 함께 받아도 열었다). next.config.ts의 경로 규칙과
+  route가 같은 값을 둘 다 쓴다(`lib/artifactSharePageHeaders.ts`).
+- 공지 막대("사용자가 만든 콘텐츠이며 Tomverse가 만든 것이 아닙니다. 비밀번호나 결제 정보를 입력하지 마세요")와 신고
+  링크(`/support`)는 frame 밖 위에 있다. frame 안의 화면은 자기 상자 밖을 그릴 수 없으므로 가리지 못한다(흉내는 frame 안에서만).
+- 거절은 모두 같은 "열 수 없음" 404 페이지다(script·frame 없음, CSP `sandbox; default-src 'none'; …`).
+
+### 19.5 브라우저 측정과 잔여 위험
+
+2026-11-28, Playwright Chromium 159, 실제 `buildArtifactSharePage`와 헤더를 띄운 로컬 서버에 악의적 HTML을 넣고 다른
+포트의 "공격자" HTTP 서버와 UDP 소켓으로 관찰했다. 막힌 것(공격자 HTTP 요청 0건): `top.location` 대입(SecurityError),
+`target=_top`·`_blank` 링크 클릭, `window.open`(null), 폼 전송, `fetch`·XHR·`sendBeacon`·WebSocket·EventSource, 외부 `<script>`·
+`<img>`·stylesheet·CSS `url()`·`prefetch`, Worker, 자기 frame의 `location` 이동과 `<meta refresh>`(frame이 오류 페이지가 되고
+요청은 나가지 않음 — 바깥 문서의 `frame-src 'none'`), `alert`(대화상자 없음), 다운로드, clipboard·fullscreen, 쿠키·
+localStorage·부모와 최상위 DOM 접근(SecurityError). 공지 막대는 frame 위에 있고, 신고 링크는 최상위 문서를 `/support`로
+옮기며 Referer를 보내지 않았다. React 공유는 앱 origin의 고정 파일을 받아 실제로 그려졌다.
+
+남는 것:
+
+- **WebRTC(처음 측정, 2026-11-28 오전).** `RTCPeerConnection`의 STUN/TURN 요청이 sandbox frame에서 임의의 host·port로
+  나갔다. CSP `connect-src`는 WebRTC를 다루지 않고, CSP3의 `webrtc 'block'`은 Chromium 159가 적용하지 않았다. 운영자 결정으로
+  §19.7의 가드를 넣은 뒤에는 공개 페이지와 채팅 미리보기 모두 측정한 모든 경로에서 UDP 패킷이 0개다. 남는 위험은 §19.7 끝에 적었다.
+- 세 CDN의 script·style·글꼴은 계속 받을 수 있으므로 화면이 CDN 주소에 글을 실으면 CDN 운영자 로그에 남을 수 있다(§9와 같음).
+- 별도 sandbox 도메인이 없다. 최상위 문서까지 opaque origin이라 PR #4311에서 남긴 "navigation으로 내보내기는 `frame-src`에
+  의존"은 측정으로 막힘을 확인했지만, 그 한 겹이 브라우저의 `frame-src` 의미에 기댄다는 점은 같다. DNS prefetch
+  (`<link rel=dns-prefetch>`)는 측정하지 않았다.
+- 채팅과 달리 nonce가 없으므로 공유 페이지에서는 inline 이벤트 속성(`onclick="…"`)도 실행된다(`'unsafe-inline'`). 네트워크
+  통로를 더하지는 않는다.
+- 내용 moderation은 없다. 모델에게 피싱 화면을 만들게 한 뒤 공유할 수 있다. 신고 링크와 스위치가 대응 수단이다.
+
+### 19.6 테스트
+
+`tests/artifactShare.test.mjs`(스위치 조합, 거절 순서와 코드, 공유 가능 언어, 답변 포함 검사, 공개 페이지 CSP가 미리보기
+정책과 지시문별로 같고 `sandbox`·`frame-ancestors`만 더함, frame sandbox, 공유 코드가 우리 문서에 없음, React 문서, 크기,
+헤더, 확인 화면과 `<template>`, 가드가 frame 문서 맨 앞), `tests/htmlArtifactPreview.test.mjs`(`webrtc 'block'`, 가드 위치와
+nonce, 가드가 잠그는 이름, open root 추적, open으로 만드는 `attachShadow` wrapper와 파서 잠금, closed 선언형 root를 여는 변환의 태그 안·밖·따옴표 안 `>`·대소문자·선형 시간과 그리는 순간에만 적용), `tests/robotsRoute.test.mjs`(광고 크롤러), `tests/integration/artifact-share.db.test.ts`(migration
+스키마: 생성·재사용·만료·중지·남의 것 거절·잠금 경합·cascade·계정 삭제와 내보내기·CHECK·같은 블록 동시 공유가 링크 하나를 남김·closed 선언형 root가 든 스냅샷이 원문 그대로),
+`tests/server-contract/artifact-share-page-route.test.ts`(세션 미사용, 헤더, 같은 404, proxy 예외, 확인 화면이 먼저).
+
+### 19.7 스크립트를 허용하고 보강한다 (운영자 결정 2026-11-28)
+
+공유 페이지는 스크립트를 허용하는 방식을 유지하고 네 가지를 더한다. 참고: 타 플랫폼 중 WebRTC를 실제로 막는 곳은 없었고
+(Claude만 CSP에 `webrtc 'block'`을 선언), 실제 악용은 광고 크롤러를 통해 공유 페이지로 사람을 보내 다운로드나 명령 실행을
+유도한 것이었다.
+
+1. **CSP `webrtc 'block'`.** `htmlPreviewCsp`에 넣어 공개 페이지의 응답 CSP와 모든 frame 문서의 meta CSP(채팅 미리보기
+   포함)에 들어간다. Chromium 159는 "Unrecognized Content-Security-Policy directive 'webrtc'"라고 무시하고 나머지 지시문은
+   계속 집행한다(측정: 같은 정책 아래 fetch·XHR·beacon은 `connect-src 'none'`, 이미지는 `img-src`, Worker는 `worker-src`로
+   막혀 공격자 HTTP 요청 0건). 브라우저가 구현하는 날부터 적용된다.
+2. **WebRTC 가드**(`HTML_PREVIEW_GUARD_SCRIPT`, `lib/htmlArtifactPreview.ts`). frame 문서의 CSP meta 바로 뒤, page보다 먼저
+   돈다. 하는 일:
+   - `HTML_PREVIEW_WEBRTC_GLOBALS`와 이름이 RTC·webkitRTC·mozRTC로 시작하는 모든 전역을 window에서 쓰기·재정의·삭제가
+     안 되는 `undefined`로 고정한다.
+   - `navigator.mediaDevices`와 옛 `getUserMedia` 이름도 Navigator 프로토타입과 인스턴스에서 같은 방식으로 고정한다.
+   - 새 realm으로 가는 중첩 frame(`iframe,frame,frameset,object,embed,portal,fencedframe`)은 넣는 즉시 mutation observer가
+     지운다. observer는 page가 실행되기 전에 잡아 둔 함수만 쓰므로, page가 나중에 프로토타입을 바꿔도 무력화되지 않는다.
+   - `contentWindow`·`contentDocument`는 `undefined`로 고정한다.
+   - 다른 realm으로 가는 길은 이미 막혀 있다: popup은 sandbox, Worker는 `worker-src 'none'`, 다른 문서로의 이동(data:·blob:)은
+     바깥 문서의 `frame-src 'none'`이 막는다.
+   - 채팅 미리보기에도 같은 함수로 들어간다. 앱 CSP가 nonce 기반이라 가드는 앱 문서의 nonce를 단다.
+3. **광고 크롤러 차단.** `AdsBot-Google`·`AdsBot-Google-Mobile`·`adidxbot`은 `*` 그룹을 읽지 않으므로 이름을 단 그룹을 둔다
+   (`AD_LANDING_CRAWLERS`, `app/robots.ts`). 그룹은 `*`와 같은 비공개 경로를 받고, 거기에 `/share`가 있어 대화 공유(`/share/<token>`)와
+   공개 페이지(`/share/a/<token>`)가 모두 막힌다. 공개 페이지(`/`, `/pricing` 등)는 열려 있어 사이트의 광고는 그대로 랜딩한다.
+   정식 도메인이 아닌 배포(staging)는 기존대로 `*` 한 그룹만 둔다(광고 대상이 아님).
+4. **처음 열 때 확인 화면.** 공개 페이지는 frame을 바로 그리지 않고 "다른 사람이 만든 화면입니다. Tomverse가 만들거나 확인한 것이
+   아닙니다. 비밀번호·결제 정보·인증 코드를 입력하지 마세요"와 "화면 보기" 버튼을 보인다(8개 언어,
+   `locales/artifactWorkspace.ts` `page.gateNotice`·`gateOpen`). frame은 `<template>` 안에 있어 렌더·로드되지 않는다.
+   버튼을 누르면 같은 응답 안의 고정 script(`ARTIFACT_SHARE_GATE_SCRIPT`)가 frame을 페이지로 옮긴다. 확인 기록은 남기지 않고
+   매번 보이며, 응답은 여전히 세션을 읽지 않는 정적 응답이다. 상단 공지 막대와 신고 링크는 그대로다.
+
+**측정**(2026-11-28 오후, Playwright Chromium 159.0.8154.6). 우회 시도마다 다른 UDP 포트로 STUN을 보내게 해, 패킷이 어느
+시도에서 나왔는지 구분했다.
+
+| 시도 | 결과 | UDP 패킷 |
+|---|---|---|
+| 대조군: 가드 없는 sandbox frame, 같은 CSP(`webrtc 'block'` 포함) | STUN 전송 | 4 |
+| `new RTCPeerConnection` | TypeError | 0 |
+| `window["RTCPeer"+"Connection"]` | TypeError | 0 |
+| `webkitRTCPeerConnection` | TypeError | 0 |
+| `Reflect.construct(window.RTCPeerConnection, …)` | TypeError | 0 |
+| `Object.getPrototypeOf`로 window 프로토타입 사슬 탐색 | 없음 | 0 |
+| `delete` 후 `Object.defineProperty`로 재정의 | TypeError, 여전히 undefined | 0 |
+| `document.createElement("iframe")` 후 바로 `contentWindow` | `undefined` | 0 |
+| 같은 iframe을 `window[n]`으로 | SecurityError | 0 |
+| 정적 `<iframe srcdoc>`, 동적 srcdoc, `innerHTML` iframe, `javascript:` URL iframe, `<object data=data:…>` | 삽입 즉시 제거(남은 frame 0) | 0 |
+| iframe `onload` 뒤 `contentWindow` | TypeError | 0 |
+| `document.open()`/`write()`로 문서 교체 | 같은 window, 가드 유지 | 0 |
+| `location`을 data:·blob: URL로 | frame이 오류 페이지(`frame-src 'none'`) | 0 |
+| `window.open` | null(sandbox) | 0 |
+| blob Worker | `worker-src` 위반으로 생성 거부 | 0 |
+
+- 같은 실행에서 공격자 HTTP 요청은 0건이었다.
+- 확인 화면: 버튼을 누르기 전에는 frame 0개, UDP 0개. 누른 뒤에는 정상 HTML(inline script)·SVG·React 공유가 모두 그려졌다.
+- 채팅 미리보기(Next dev 서버, `CSP_MODE=enforce`): 가드가 nonce를 달고 실행됐고(`typeof RTCPeerConnection === "undefined"`),
+  정상 HTML이 그려졌으며 STUN 시도의 UDP 패킷은 0개였다.
+
+**그림자 DOM 보강**(검토 반영 2026-11-28, 5차 검토로 다시 고침). observer는 document의 tree만 보는데 shadow root는 그 tree에
+속하지 않아, shadow root 안에 넣은 frame은 지워지지 않고 새 realm에서 STUN을 보냈다(보강 전 측정: 16개 경로에서 패킷). 처음에는
+선언형 shadow DOM을 꺼 버렸으나(속성 이름 바꾸기) 그러면 스크립트·CSS의 낱말까지 바뀌고 정상 web component가 내용을 잃었다.
+지금의 원칙은 **frame 안의 shadow root를 모두 open으로 두고 가드가 따라 들어간다**이다.
+- observer는 추가된 요소와 그 하위 요소 가운데 `shadowRoot`가 있는 것을 찾아, 그 root를 같은 observer로 보고 안의 frame을 지운 뒤
+  root 안의 요소에도 같은 일을 한다. 중첩 root와, 처음 파싱 때 parser가 만든 root(host 요소가 추가되는 것을 보고 처리)가 여기서
+  잡힌다. `shadowRoot` getter와 순회 함수는 page보다 먼저 잡아 둔다(page가 getter를 바꿔도 측정상 0).
+- `Element.prototype.attachShadow`는 바꿀 수 없는(non-configurable) wrapper다. 옵션을 한 번만 읽어(`Object.assign`) mode를 open으로
+  바꾸고, 만든 root를 바로 따라간다(이미 문서에 있는 host에 붙이면 mutation이 생기지 않으므로). open으로 바꾸는 이유: clonable closed
+  root를 `cloneNode`·`importNode`로 복제하면 복제본의 closed root는 `attachShadow` 없이 생겨 닿을 수 없었다(측정: 바꾸기 전 가드
+  4, 바꾼 뒤 0). closed로 만든 컴포넌트도 받은 root 참조로 그대로 동작하고(측정), 달라지는 것은 `host.shadowRoot`가 null이 아니게
+  되는 것뿐이다.
+- page 자신의 markup은 어떤 script보다 먼저 파싱되므로, closed 선언형 root는 frame을 만들 때 글에서 open으로 바꾼다
+  (`openDeclarativeShadowRoots`). 글 안의 모든 `<template` 시작 태그를 하나씩, HTML tokenizer가 시작 태그를 읽는 방식(따옴표 안의
+  `>`는 태그를 끝내지 않음, 이름은 ASCII 대소문자 무시)으로 첫 `shadowrootmode` 속성까지 읽는다. 그 값이 `closed`이거나 `closed`를
+  쓸 수 있는 문자 참조(`&`)를 담으면 태그 이름 바로 뒤에 ` shadowrootmode=open `을 끼운다. 같은 이름의 속성은 첫 번째가 이기므로
+  root는 open이 되고 내용·스타일·다른 옵션은 그대로다. 지우거나 바꾸는 글자 없이 따옴표 없는 글자만 끼우므로 script 문법을 깨지
+  않는다. open root, 속성이 없는 template, 다른 태그, 스크립트·문자열·CSS 속의 낱말은 그대로다.
+  - script·comment 안의 `<template`도 읽는다. 그 구간을 건너뛰려면 브라우저가 그 구간을 어디서 끝내는지 알아야 하는데 그 판단은
+    어긋나게 만들 수 있다(`<!-->`는 그 자리에서 끝나는 comment이고, 문자열 안의 `<template title='`은 뒤의 진짜 태그를 값으로
+    삼키게 할 수 있다 — 둘 다 측정 0). 대가: 스크립트 문자열 안에 글자 그대로 쓴 closed template 태그에는 같은 글자가 끼워진다
+    (측정, 문법은 유지).
+  - 모든 읽기가 끝까지 가게 만든 page도 선형 시간에 끝난다. page 길이에 비례하는 예산을 넘기면 그 뒤로는 낱말이 뒤에 나오는
+    태그를 closed로 본다(1MB 병적 입력에서 62ms).
+  - 옛 이름 `shadowroot`는 다루지 않는다(Chromium 159는 이 이름으로 root를 만들지 않음, 측정).
+  - 저장된 스냅샷과 공개 읽기 응답은 원문 그대로이고(DB 테스트), 그리는 순간에만 바뀐다.
+- 실행 중에 문자열에서 root를 만드는 파서는 계속 `undefined`로 고정한다: `Element`·`ShadowRoot`의 `setHTMLUnsafe`·`setHTML`,
+  `Document.parseHTMLUnsafe`·`parseHTML`, `document.write`·`writeln`. 이들은 script가 만든 문자열로 closed 선언형 root를 만들 수
+  있고(측정), 그 문자열은 위의 글 변환이 보지 못한다(write는 속성 이름을 두 번에 나눠 넣을 수도 있다). open root를 따라가는
+  것으로는 closed root에 닿지 못하므로 잠금이 필요하다. 이 API를 부르는 page는 TypeError가 난다.
+- `MediaDevices.prototype`의 `getUserMedia`·`getDisplayMedia`·`enumerateDevices` 등도 같은 방식으로 고정한다.
+
+**부모가 model HTML을 고치지 않는다는 원칙의 두 번째 예외.** 부모는 model HTML을 해석하거나 다시 쓰지 않는다. 예외는 둘이다:
+채팅에서 앱 nonce를 다는 `withEmbedderNonce`(브라우저 파서 사용)와, closed 선언형 root 앞에 ` shadowrootmode=open `을 끼우는
+`openDeclarativeShadowRoots`다. 다른 방법이 없었다: 파서는 `attachShadow`를 부르지 않고 선언형 root를 붙이고, closed root는
+script로 닿을 수 없으며, 선언형 shadow DOM의 mode를 바꾸거나 끄는 CSP·Document-Policy 지시문이 없다(Chromium 159).
+
+| 시도 (Chromium 159.0.8154.6, 시도마다 다른 UDP 포트) | 대조군(가드·변환 없음) | 가드 |
+|---|---|---|
+| markup의 closed 선언형 root + iframe: `closed`, 대문자와 `/`, 따옴표 안 `>`, `&#99;losed`, closed가 첫 번째인 중복 속성 | 각 4 | 0 |
+| markup의 closed root를 script 문자열 뒤나 빈 comment(`<!-->`) 뒤에 둠 | 각 4 | 0 |
+| markup의 closed root 안 이미지 `onerror`가 root에 iframe 추가 | 4 | 0 |
+| markup의 closed clonable root를 `cloneNode` | 8 | 0 |
+| markup의 open root + iframe, open root에 나중 script가 iframe 추가, page가 `shadowRoot` getter를 null로 바꿈 | 각 4 | 0 |
+| 중첩: closed 안 closed, open 안 closed 안 open | 각 4 | 0 |
+| `attachShadow` open·closed·중첩 closed, custom element 생성자 안 closed | 각 4 | 0 |
+| `attachShadow` closed clonable 후 `cloneNode` / `importNode` / 읽을 때마다 바뀌는 mode getter | 8 / 4 / 8 | 0 |
+| `setHTMLUnsafe`·`Document.parseHTMLUnsafe`·`document.write`로 closed 선언형 root | 각 4 | 0 |
+| `insertAdjacentHTML`, template을 closed root에 복제 | 각 4 | 0 |
+| 옛 이름 `shadowroot` | 0(지원 안 함) | 0 |
+| `DOMParser`·`createContextualFragment`·`innerHTML`로 선언형 root(지난 측정) | 0(이 파서들은 root를 만들지 않음) | 0 |
+| 새 frame의 window를 같은 task 안에서 `window[0]`·`frames[0]`로(지난 측정) | 0(SecurityError) | 0 |
+| 기존 가드 시도 19개(직접 생성, 이름 조합, 중첩 frame, `location` 이동, Worker 등) | 4 | 0 |
+
+| 정상 내용 | 대조군 | 가드 |
+|---|---|---|
+| script `const shadowroot = 1`, 문자열 `"shadowrootmode closed"`, CSS `.shadowrootmode` | `1\|shadowrootmode closed`, rgb(1, 2, 3) | 같음 |
+| `<template shadowrootmode="open">` 컴포넌트(내용과 `<style>`) | `dsd-open-ok`, rgb(10, 20, 30) | 같음 |
+| `<template shadowrootmode="closed">` 컴포넌트 | 그려짐(높이 18), closed라 밖에서 읽히지 않음 | `dsd-closed-ok`, rgb(40, 50, 60), 높이 18 |
+| closed 선언형 root + custom element의 `attachInternals().shadowRoot` | `ce-closed` | `ce-closed`, rgb(5, 6, 7) |
+| `attachShadow` open·closed 컴포넌트 | 그려짐, closed는 자기 root 참조로 동작 | 같음(closed도 동작, 밖에서 open으로 보임) |
+| 속성 없는 `<template>` | template과 content `tpl` 유지 | 같음 |
+| 스크립트 문자열의 글자 그대로 closed template 태그 | 원문 | ` shadowrootmode=open `이 끼워짐(알려진 대가) |
+| 공유 HTML·SVG·React | — | `html-ok`·`svg-ok`·`react-ok`(React는 파일별 vendored 허용) |
+
+**남는 위험.**
+- 브라우저가 `webrtc 'block'`을 집행하지 않는 동안은 2번 가드가 WebRTC를 막는 유일한 수단이다.
+- 가드는 같은 realm 안의 JavaScript 방어라서, 측정하지 않은 새 realm 경로(브라우저에 새로 생기는 frame 종류, 아직 없는 API)가
+  생기면 뚫릴 수 있다. 그래서 전역 이름은 RTC 접두어로 넓게 잠그고, frame은 종류를 나열해 지우며, shadow root는 모두 open으로 두고 따라가고 문자열에서 root를 만드는 파서는 잠근다.
+- DNS prefetch(`<link rel=dns-prefetch>`)와 CDN 로그 경로는 §19.5 그대로다.

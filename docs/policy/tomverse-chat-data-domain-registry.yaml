@@ -425,6 +425,21 @@ domains:
       account deletes it; deleting its conversation only clears the link and
       the next run starts a new conversation.
 
+  - domain: savedPrompt
+    prismaModel: SavedPrompt
+    userLinkageRole: subject
+    owner: backend-ai
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included
+    note: >-
+      A prompt the account saved under a name to put back into the composer:
+      the name, the text, its place in the list and when it was saved and last
+      changed. Nothing is sent anywhere until the person sends it as a message.
+      Deleting the account deletes it.
+
   - domain: scheduledTaskRun
     prismaModel: ScheduledTaskRun
     userLinkageRole: subject
@@ -539,6 +554,22 @@ domains:
     retentionPolicy: immediate
     implementationStatus: implemented
     inUnifiedExport: included_filtered
+
+  - domain: artifactShare
+    prismaModel: ArtifactShare
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      A public read-only share link made from one previewed HTML page, SVG or
+      React component (docs/policy/generated-artifacts.md section 19), with a
+      snapshot of the page. Deleted by its owner stopping the share, and with
+      the account, the conversation, the answer or the generated file it came
+      from (every relation cascades). An expired row is never served.
 
   # The files a person attached to their own messages
   # (docs/policy/user-attachment-persistence.md). The row cascades from the

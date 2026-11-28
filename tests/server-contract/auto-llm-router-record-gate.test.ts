@@ -522,6 +522,26 @@ test("router failures preserve known usage and log content-free causes without r
       logger.mock.restore();
     }
   });
+  await t.test("a request that goes away stops the call, and is not counted as a timeout", async () => {
+    const logs: string[] = [];
+    const logger = mock.method(console, "warn", (line: string) => { logs.push(line); });
+    const request = new AbortController();
+    generateRouterResult = () => new Promise((_, reject) => {
+      const signal = routerRequests.at(-1)!.abortSignal as AbortSignal;
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      // The browser closes the tab while the router is thinking.
+      request.abort(new DOMException("client went away", "AbortError"));
+    });
+    try {
+      const result = await callAutoLlmRouter({ ...input, abortSignal: request.signal });
+      assert.equal(result.pick, null);
+      assert.notEqual(result.outcome, "timeout");
+      assert.notEqual(JSON.parse(logs[0]).failureKind, "timeout");
+    } finally {
+      generateRouterResult = undefined;
+      logger.mock.restore();
+    }
+  });
   for (const knownUsage of [true, false]) {
     await t.test(knownUsage ? "invalid output settles reported usage in both provider periods" : "unknown usage retains the full provider hold", async () => {
       const logger = mock.method(console, "warn", () => {});
@@ -1009,4 +1029,23 @@ test("history tool steps share one bounded hold and settle cumulative usage with
         assert.equal(settlementWrites[0][0], actual - holds[0]);
         assert.equal(created.length, 0);
     } finally { generateRouterResult = undefined; }
+});
+
+test("a request already gone takes no Router budget hold and makes no call; a live one is held and asked", async () => {
+  routerRequests.length = 0; holds.length = 0; created.length = 0;
+  const gone = new AbortController();
+  gone.abort(new DOMException("client went away", "AbortError"));
+  assert.equal(await pick(undefined, false, { abortSignal: gone.signal }), null);
+  assert.equal(holds.length, 0, "nothing held for a request nobody is waiting on");
+  assert.equal(routerRequests.length, 0);
+
+  const live = new AbortController();
+  assert.ok(await pick(undefined, false, { abortSignal: live.signal }));
+  assert.equal(holds.length, 2);
+  assert.equal(routerRequests.length, 1);
+  // The call listens to the request as well as to its deadline.
+  const signal = routerRequests[0].abortSignal as AbortSignal;
+  assert.equal(signal.aborted, false);
+  live.abort(new DOMException("client went away", "AbortError"));
+  assert.equal(signal.aborted, true);
 });

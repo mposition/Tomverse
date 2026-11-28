@@ -131,6 +131,8 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         // every device it signs in on, so an export without it would be
         // narrower than the screen.
         pinnedAt: true,
+        // Archiving is the same kind of arrangement as the pin.
+        archivedAt: true,
         // A temporary Chat is still held until it is deleted, so the account's
         // copy of its data includes it, with when it will be deleted. The
         // conversation's own export and the all-conversations download leave
@@ -148,6 +150,7 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
     })).map((conversation) => ({
       id: conversation.id, title: conversation.title, kind: conversation.kind,
       productKey: conversation.productKey, pinnedAt: conversation.pinnedAt,
+      archivedAt: conversation.archivedAt,
       temporaryExpiresAt: conversation.temporaryExpiresAt,
       createdAt: conversation.createdAt, updatedAt: conversation.updatedAt,
       messages: conversation.messages.map(toAccountExportMessage),
@@ -380,6 +383,14 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         createdAt: true,
         updatedAt: true,
       },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  savedPrompt: (userId) =>
+    prisma.savedPrompt.findMany({
+      where: { userId },
+      select: { id: true, title: true, body: true, sortOrder: true, createdAt: true, updatedAt: true },
       orderBy: { createdAt: "asc" },
       take: EXPORT_ROW_CAP,
     }),
@@ -1132,6 +1143,30 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         parentArtifactId: true,
         lineageId: true,
         createdAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  // Public share links made from previewed pages (generated-artifacts.md
+  // section 19): what was published, from which answer or file, and until
+  // when. The token is withheld: it is the link's whole secret, and a copy in
+  // an export file is a copy of the public page's key.
+  artifactShare: (userId) =>
+    prisma.artifactShare.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        conversationId: true,
+        messageId: true,
+        artifactId: true,
+        sourceKind: true,
+        previewKind: true,
+        language: true,
+        title: true,
+        content: true,
+        createdAt: true,
+        expiresAt: true,
       },
       orderBy: { createdAt: "asc" },
       take: EXPORT_ROW_CAP,

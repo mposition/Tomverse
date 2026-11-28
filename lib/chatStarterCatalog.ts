@@ -148,6 +148,8 @@ export type StarterSeed = {
   promptSeedKey: string;
   /** Turn the composer's web-search control on with the seed. */
   webSearch?: boolean;
+  /** Turn the composer's study mode on with the seed (Chat only; no cost of its own). */
+  studyMode?: boolean;
   /** The seeded question expects a file, so open the attachment affordance. */
   attachment?: boolean;
   /** Which product the seeded conversation belongs to, when it is created. */
@@ -434,6 +436,7 @@ export const CHAT_STARTER_CATALOG: readonly ChatStarterEntry[] = [
     requires: {},
     seed: {
       promptSeedKey: "chatStarter.cards.learnAConcept.seed",
+      studyMode: true,
       productKey: "chat",
     },
     accentRole: "neutral",

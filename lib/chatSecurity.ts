@@ -18,6 +18,7 @@ import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { usageBucketCount } from "@/lib/chatUsageBucketCount";
+import { databaseErrorMetadata, retrySelfCheckingDatabaseWork } from "@/lib/databaseError";
 import { hashChatSubject, userChatUsageKey } from "@/lib/chatUsageKey";
 import { findDeepResearchHandoff, researchPreviewSettlementForExpiry } from "@/lib/deepResearchSettlementHandoff";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
@@ -4794,7 +4795,7 @@ export const settleChatUsage = async (
             })
         );
     };
-    const settled = prisma.$transaction(async (tx) => {
+    const settleOnce = () => prisma.$transaction(async (tx) => {
         if (reservation.userId) {
             await lockCreditAccount(tx, reservation.userId);
         }
@@ -5594,11 +5595,43 @@ export const settleChatUsage = async (
         };
     });
 
-    let settlement: Awaited<typeof settled>;
+    /*
+      A transient database failure is tried again, at the delays every other
+      retried write here uses (docs/policy/credit-and-cost-limits.md, "정산
+      실패와 재시도"). Before this, one dropped connection ended the turn's
+      settlement: the caller logged it, its memo kept anything else from
+      settling, and the expiry sweep later closed the reservation as a refund.
+
+      Re-running is safe because of the transaction's own shape: it takes the
+      reservation lock and settles only a row that is still `reserved`. A try
+      whose COMMIT landed and whose answer was lost leaves the row terminal,
+      so the next try returns `applied: false` and moves no money -- the
+      unknown outcome cannot become a second charge or a second refund.
+    */
+    let settlement: Awaited<ReturnType<typeof settleOnce>>;
     try {
-        settlement = await settled;
+        settlement = await retrySelfCheckingDatabaseWork({
+            run: settleOnce,
+            onRetry: ({ attempt, error }) => {
+                const metadata = databaseErrorMetadata(error);
+                console.warn(
+                    JSON.stringify({
+                        event: "chat_usage_settlement_retry",
+                        reservationId: reservation.reservationId,
+                        attempt,
+                        errorName: metadata.errorName,
+                        errorCode: metadata.errorCode ?? null,
+                        driverKind: metadata.driverKind ?? null,
+                        driverCode: metadata.driverCode ?? null,
+                        timestamp: new Date().toISOString(),
+                    })
+                );
+            },
+        });
     } catch (error) {
-        // The settlement did not commit; the searches still ran.
+        // The settlement did not commit (or its last try's outcome is
+        // unknown, which the expiry sweep settles under the same lock); the
+        // searches still ran.
         await deliverSearchIncidents().catch(logIncidentDeliveryFailure);
         throw error;
     }
@@ -6125,6 +6158,36 @@ const isDeepResearchReservation = (modelId: string) => {
     return !model || model.usageClass === "deep-research";
 };
 
+/** A catalogue Deep Research model, as opposed to an id nobody knows any more. */
+const isKnownDeepResearchModel = (modelId: string) =>
+    AVAILABLE_MODELS.find((entry) => entry.id === modelId)?.usageClass === "deep-research";
+
+/**
+ * What an expired, never-settled reservation is settled as when its provider
+ * may have run: a failed turn (no credits) whose usage nobody reported.
+ *
+ * With no token counts, settlement takes the reservation's own input and
+ * output estimate for the provider-side buckets and the cost ledger, and with
+ * `searchQueriesObserved: false` a search authorization is kept at its
+ * ceiling. The credit buckets are refunded, because a failed turn earns none.
+ */
+const EXPIRED_UNOBSERVED_TURN_USAGE = {
+    outcome: "failed" as const,
+    usageFromProvider: false,
+    searchQueriesObserved: false,
+};
+
+/**
+ * The expiry sweep's answer for a reservation with no handoff: the
+ * unobserved-usage settlement for an ordinary Chat turn, nothing (a plain
+ * refund, as before) otherwise. Deep Research is decided by its handoff and
+ * Review keeps its old rule. Exported for its test.
+ */
+export const expiredChatReservationEstimate = (source: string, modelId: string) =>
+    source === "chat" && !isKnownDeepResearchModel(modelId)
+        ? { turnUsage: EXPIRED_UNOBSERVED_TURN_USAGE }
+        : null;
+
 export const reconcileExpiredChatCreditReservations = async (
     now = new Date(),
     maximum = 500
@@ -6198,16 +6261,31 @@ export const reconcileExpiredChatCreditReservations = async (
                               // web search) keeps that vendor's authorized ceiling.
                               // One without an authorization is unaffected.
                               if (reservation.source === "external_api") {
-                                  return { turnUsage: { outcome: "failed", usageFromProvider: false, searchQueriesObserved: false } };
+                                  return { turnUsage: EXPIRED_UNOBSERVED_TURN_USAGE };
                               }
                               const researchUsage = await researchPreviewSettlementForExpiry(tx, reservation.reservationId, now);
                               if (researchUsage) { researchHandoff = true; return { turnUsage: researchUsage }; }
-                              if (!isDeepResearchReservation(row.modelId)) return null;
+                              // An expired Chat turn is the same case as an
+                              // expired external API request: it was admitted,
+                              // may have reached its provider, and then nobody
+                              // settled it -- the process died mid-stream, or
+                              // the turn's own settlement failed past its
+                              // retries. The user is refunded as before; the
+                              // provider side keeps the reservation's estimate
+                              // rather than recording the turn as free
+                              // (docs/policy/credit-and-cost-limits.md, "정산
+                              // 실패와 재시도"). Deep Research keeps its own
+                              // handoff rule below, and Review its old one.
+                              const chatEstimate = expiredChatReservationEstimate(
+                                  reservation.source,
+                                  row.modelId
+                              );
+                              if (!isDeepResearchReservation(row.modelId)) return chatEstimate;
                               handoff = await findDeepResearchHandoff(
                                   reservation.reservationId,
                                   tx
                               );
-                              if (!handoff) return null;
+                              if (!handoff) return chatEstimate;
                               return {
                                   turnUsage: {
                                       inputTokens: handoff.usage.inputTokens,
@@ -6350,6 +6428,7 @@ export const validateChatPayload = (body: unknown) => {
         turnstileToken?: unknown;
         deepResearchDepth?: unknown;
         reasoningEffort?: unknown;
+        studyMode?: unknown;
         webSearchMode?: unknown;
         mcpConnectionId?: unknown;
         admissionToken?: unknown;
@@ -6492,6 +6571,9 @@ export const validateChatPayload = (body: unknown) => {
     }
     if (payload.reasoningEffort !== undefined && payload.reasoningEffort !== "low" && payload.reasoningEffort !== "medium" && payload.reasoningEffort !== "high") {
         throw new ChatAccessError(400, "INVALID_REASONING_EFFORT", "Invalid reasoning effort.");
+    }
+    if (payload.studyMode !== undefined && payload.studyMode !== true && payload.studyMode !== false) {
+        throw new ChatAccessError(400, "INVALID_STUDY_MODE", "Invalid study mode.");
     }
 
     if (
@@ -6697,6 +6779,7 @@ export const validateChatPayload = (body: unknown) => {
         turnstileToken?: string;
         deepResearchDepth?: "quick" | "standard" | "deep";
         reasoningEffort?: "low" | "medium" | "high";
+        studyMode?: boolean;
         webSearchMode?: WebSearchMode;
         mcpConnectionId?: string;
         admissionToken?: string;

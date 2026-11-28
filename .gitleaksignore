@@ -1946,3 +1946,8 @@ b6135529b17f4ef909c8b89a15b5924e38264f8b:apps/tomverse-vscode/tests/security.tes
 # Synthetic image request UUID in the receipt reconciliation test (#4272).
 # It identifies the request and grants no access. The test now generates it.
 110200bab86bf664daf45aca078ace7d34ce15c4:apps/desktop/tests/imageReceipt.test.ts:generic-api-key:10
+
+# Import line of the Z.ai worker test (#4331): the "secret" gitleaks matched is the
+# exported function name `readAmuxV22ZaiCodingPlanKey`, not a credential.
+# Suppress only the exact finding in the commit that added the line.
+3e69e3cf90feb041f290b8569cb2c4aa44dc31fd:tests/amuxV22Zai.test.mjs:generic-api-key:18

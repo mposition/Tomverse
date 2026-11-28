@@ -57,7 +57,7 @@ import {
     ChatAttachmentValidationError,
     validateChatAttachmentUpload,
 } from "@/lib/chatAttachmentValidation";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import {
@@ -243,7 +243,7 @@ import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";
 import { readPublicCompletedChatMessage } from "@/lib/publicChatMessage";
 import { prepareProviderMessages, splitProviderInstructions } from "@/lib/chatProviderPrompt";
 import { parseClientTimeZone } from "@/lib/chatCurrentDatePrompt";
-import { resolveChatCompletionOutcome } from "@tomverse/chat-core";
+import { chatTurnSettlement, resolveChatTurnCompletion } from "@/lib/chatTurnCompletion";
 import { ERROR_REPORT_TOKEN_HEADER } from "@/lib/errorReportContract";
 import { issueChatErrorReportGrant } from "@/lib/traceErrorEvidence";
 import { emptyResponseCause, streamFailureGrantInput } from "@/lib/chatStreamErrorReport";
@@ -271,6 +271,7 @@ import {
     CHAT_MAX_TOTAL_ATTACHMENT_BYTES,
     PAST_ATTACHMENT_OMITTED_KIND,
     PAST_ATTACHMENT_OMITTED_TEXT,
+    PAST_IMAGE_OMITTED_TEXT,
     PAST_ATTACHMENT_UNDELIVERABLE_TEXT,
     pastTurnAttachmentTokenBudget,
 } from "@/lib/chatAttachmentLimits";
@@ -280,11 +281,21 @@ import {
     readAttachmentTextCache,
     writeAttachmentTextCache,
 } from "@/lib/attachmentTextCache";
+import {
+    describeImagePayloadLimit,
+    claimInConversationOrder,
+    messageReadingOrder,
+    oldestAttachmentSlots,
+} from "@/lib/chatImageBudget";
 import { extractLegacyOfficeText, type LegacyOfficeFormatId } from "@/lib/legacyOfficeText";
 import { legacyOfficeValidationCode } from "@/lib/chatAttachmentValidation";
 import {
     AnimatedImageError,
-    extractPdfTextSafely,
+    describeUnreadPdfPages,
+    pdfReadingOutcome,
+    pdfTextCharacterBudget,
+    type PdfReadingOutcome,
+    extractPdfTextWithPagesSafely,
     normalizeImageSafely,
     validatePdfSafely,
     type NormalizableImageMediaType,
@@ -292,6 +303,7 @@ import {
 import {
     extractPdfTextWithMistralOcr,
     MISTRAL_OCR_COST_MICRO_USD_PER_PAGE,
+    type MistralOcrResult,
 } from "@/lib/mistralOcr";
 import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
 import {
@@ -387,6 +399,8 @@ import {
 import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
 import { buildRoutingRetryChunk } from "@/lib/routingRetrySignal";
 import { buildStreamKeepaliveChunk } from "@/lib/chatStreamKeepalive";
+import { CHAT_REASONING_DISPLAY_HEADER, withStoredReasoning } from "@/lib/chatReasoningDisplay";
+import { chatReasoningDisplayEnabled, createChatReasoningRelay } from "@/lib/chatReasoningRelay";
 import { resolveChatStreamKeepalivePlan } from "@/lib/chatStreamKeepalivePlan";
 import { buildArtifactProgressChunk } from "@/lib/generatedArtifactProgressSignal";
 import {
@@ -421,6 +435,7 @@ import { sanitizeWebSearchCitations } from "@/lib/webSearchCitations";
 import {
     apiSecurityResponse,
     assertMessageCapacity,
+    checkMessageCapacity,
     consumeApiRateLimit,
     readLimitedJson,
     reserveDailyUploadBytes,
@@ -530,6 +545,7 @@ import {
     ChatAttemptIdentityConflictError,
     ChatAttemptScopeError,
     claimChatResponseAttempt,
+    peekChatResponseAttempt,
     terminalChatResponseAttempt,
 } from "@/lib/chatResponseAttemptPersistence";
 import { markMessagesSuperseded, readSupersedesMessageIds, withoutSupersededChatMessages } from "@/lib/chatSupersededMessages";
@@ -617,6 +633,14 @@ const providerCallUsage = async (stream: {
         return undefined;
     }
 };
+
+/**
+ * Paid OCR calls under way in this process, keyed by account, file content and
+ * page selection. Review sends one request per panel with the same files; a
+ * panel that arrives while another is reading the file waits for that result
+ * instead of paying for the pages again. Never shared between accounts.
+ */
+const pdfOcrInFlight = new Map<string, Promise<MistralOcrResult | null>>();
 
 const MAX_ATTACHMENTS = CHAT_MAX_ATTACHMENTS_PER_MESSAGE;
 // Every request resends the full conversation history, so this bounds how many
@@ -1618,6 +1642,7 @@ async function handleChatPost(
             turnstileToken,
             deepResearchDepth,
             reasoningEffort,
+            studyMode,
             webSearchMode,
             mcpConnectionId,
             admissionToken,
@@ -2813,6 +2838,70 @@ async function handleChatPost(
                 earlyContextRefusal = response;
                 return false;
             } : undefined;
+        /*
+          Whether a response attempt is already bound to this assistant id in
+          this conversation. One owner-scoped primary-key read, for the
+          storage check below only: such a POST ends at the durable claim -- a
+          reattach to that attempt, or the generic 409 for a different request
+          under the same id -- and never writes an answer. It is still routed
+          as any turn is, so the turn reaches the claim with the model it would
+          have had. Only a Chat conversation can hold one: Review, continuation
+          and Deep Research turns never claim an attempt.
+        */
+        // A failed read is not evidence that no attempt exists: the early
+        // storage check is skipped and the durable claim and the write decide.
+        let attemptAlreadyBound = false;
+        let attemptPeekFailed = false;
+        if (session?.user?.id && conversationId && assistantMessageId && conversationRouting?.productKey === "chat") {
+            try {
+                attemptAlreadyBound =
+                    (await peekChatResponseAttempt(session.user.id, assistantMessageId))?.conversationId === conversationId;
+            } catch (error) {
+                attemptPeekFailed = true;
+                logRequestError("chat_attempt_peek_failed", traceId, error, requestedModelId);
+            }
+        }
+        /*
+          A turn whose answer certainly could not be stored is refused before
+          anything is paid for -- the Auto Router, the image classification
+          beside it, the credit reservation, the provider -- instead of being
+          routed, charged, streamed and then lost at the Message write
+          (docs/policy/credit-and-cost-limits.md, "완료 분기의 정산").
+          "Certainly" and nothing more: the message count is already at its
+          limit, or the account's bytes are already over theirs. The answer
+          row is counted as zero bytes -- a file-only answer or a failed
+          artifact card is stored with an empty body -- and this turn's own
+          message is already stored and counted, so it is not added again. No answer size is assumed -- the
+          model is not chosen yet, and an image turn stores one line -- so a
+          long answer that overflows is still the Message write's own locked
+          check to refuse, as it always was. The conversation's own count only
+          for one the owner-scoped read above found; otherwise the account's
+          limits alone. Not for a POST that reattaches to an answer already
+          there. Only the storage refusal stops the turn, and if the check
+          itself fails, the write decides as it always has. Not for a Deep
+          Research turn either: a refused desktop submission retries by
+          updating its existing answer row, so it may need no new row at all.
+        */
+        const deepResearchTurn = modelId === DEEP_RESEARCH_MODEL_ID || Boolean(deepResearchDepth) || isResearchPreview;
+        if (session?.user?.id && conversationId && assistantMessageId && !attemptAlreadyBound && !attemptPeekFailed && !deepResearchTurn) {
+            try {
+                await checkMessageCapacity(
+                    prisma,
+                    session.user.id,
+                    conversationRouting ? conversationId : null,
+                    1,
+                    0
+                );
+            } catch (error) {
+                if (apiSecurityResponse(error)) throw error;
+                logRequestError(
+                    "chat_message_capacity_precheck_failed",
+                    traceId,
+                    error,
+                    requestedModelId
+                );
+            }
+        }
         let fusion: { key: RouterLocationClaim; userId: string; requestDigest: string; expiresAt: number; searchUtcDate: string; resume: RouterLocationContinuation | null } | null = null;
         if (wantsFusion && conversationId && sourceUserMessageId && assistantMessageId && session?.user?.id) {
             const userId = session.user.id;
@@ -2931,6 +3020,8 @@ async function handleChatPost(
         const imageHedge = imageHedgeMs ? setTimeout(() => imageRouting.hedge(), imageHedgeMs) : null;
         let llmPick = deterministicAutoSelection.routed
             ? await pickAutoModelWithLlm({
+                      // A client that goes away stops the paid call with it.
+                      abortSignal: req.signal,
                       importedSource,
                       ...(importedSource ? { verifyImportedSource } : {}),
                       ...(historySearchActive ? { historySearch: {
@@ -3588,12 +3679,16 @@ async function handleChatPost(
             message.role !== "assistant" && Array.isArray(message.attachments)
                 ? message.attachments.length
                 : 0;
-        let olderAttachmentsToOmit = Math.max(
+        const olderAttachmentsToOmit = Math.max(
             0,
             executionMessages.reduce(
                 (count, message) => count + readAttachmentCount(message),
                 0
             ) - MAX_CONVERSATION_ATTACHMENTS
+        );
+        const countOmittedSlots = oldestAttachmentSlots(
+            executionMessages.map(readAttachmentCount),
+            olderAttachmentsToOmit
         );
         /*
           The files that count leaves out are still asked about: a lost file is
@@ -4197,6 +4292,9 @@ async function handleChatPost(
         });
         const turnSystemBlocks = buildChatTurnSystemBlocks({
             currentLocation,
+            // Study mode is the reader's own opt-in for this turn; a research
+            // preview carries none of the capability blocks.
+            studyMode: studyMode === true && !isResearchPreview,
             omittedEarlierMessages,
             clientTimeZone,
             urlReadAvailable,
@@ -4326,19 +4424,37 @@ async function handleChatPost(
         // User files (images, native PDFs) the provider is sent as file parts.
         let nativeFilePartCount = 0;
 
-        for (const [messageIndex, msg] of executionMessages.entries()) {
+        // The message being sent is read FIRST, whatever its files are made of
+        // (an archive's images and a guest's unsized images included), then the
+        // earlier messages from the nearest to the oldest. Every shared
+        // allowance -- images, text, OCR -- is spent in that order, so what is
+        // left out is the oldest, and only the message's own overflow is an
+        // error (lib/chatImageBudget.ts).
+        // The stored reasoning and tool context of an answer belongs to the n-th
+        // answer with that text, in conversation order -- claimed here, not in the
+        // loop below, which reads the messages in another order.
+        const preservedContexts = claimInConversationOrder(
+            executionMessages.map((message) =>
+                message.role === "assistant" ? String(message.content ?? "") : null
+            ),
+            providerContextQueues
+        );
+        // Messages are built in that order but sent in conversation order.
+        const builtMessages: ModelMessage[][] = executionMessages.map(() => []);
+        for (const messageIndex of messageReadingOrder(executionMessages.length)) {
+            const msg = executionMessages[messageIndex];
             if (msg.role === "assistant") {
                 const content = String(msg.content ?? "");
-                const preserved = providerContextQueues.get(content)?.shift();
+                const preserved = preservedContexts.get(messageIndex);
                 if (preserved) {
                     estimatedInputTokens += estimateTextTokens(
                         providerContextText(preserved)
                     );
-                    formattedMessages.push(...preserved);
+                    builtMessages[messageIndex].push(...preserved);
                     continue;
                 }
                 estimatedInputTokens += estimateTextTokens(content);
-                formattedMessages.push({ role: "assistant", content });
+                builtMessages[messageIndex].push({ role: "assistant", content });
                 continue;
             }
 
@@ -4347,6 +4463,9 @@ async function handleChatPost(
             ) as IncomingAttachment[];
             const textAttachments: ExtractedAttachment[] = [];
             const fileParts: FilePart[] = [];
+            // Set by a reader whose text must not be stored for the next turn
+            // or the next panel: it stands in for pages that were not read.
+            let textCacheBlocked = false;
             // One entry per image in `fileParts`, from the bytes sent.
             const imageInputTokenEstimates: number[] = [];
             /*
@@ -4399,6 +4518,31 @@ async function handleChatPost(
                             `${modelConfig.name} does not support image input. Choose an image-capable model or retry without attachments.`
                         );
                     }
+                    const imageCapabilities = modelConfig.inputCapabilities;
+                    // Named to the model and left out; an earlier image never
+                    // fails the turn for the allowance the new one needs.
+                    const leaveOutEarlierImage = () => {
+                        // Counted against the earlier files' share like any other
+                        // line that goes to the model.
+                        totalExtractedCharacters += PAST_IMAGE_OMITTED_TEXT.length;
+                        pastAttachmentTokens += estimatePromptTokens(PAST_IMAGE_OMITTED_TEXT);
+                        textAttachments.push({
+                            name,
+                            kind: PAST_ATTACHMENT_OMITTED_KIND,
+                            text: PAST_IMAGE_OMITTED_TEXT,
+                        });
+                        return "ok" as const;
+                    };
+                    if (!isLatestMessage) {
+                        // The message being sent, and the messages after this one,
+                        // have already taken their share.
+                        if (
+                            imageCapabilities?.maxImages &&
+                            totalImageCount + 1 > imageCapabilities.maxImages
+                        ) {
+                            return leaveOutEarlierImage();
+                        }
+                    }
                     let normalized: Buffer;
                     try {
                         normalized = await normalizeImageSafely(
@@ -4423,9 +4567,17 @@ async function handleChatPost(
                     }
 
                     const encoded = normalized.toString("base64");
+                    const encodedBytes = Buffer.byteLength(encoded, "utf8");
+                    if (
+                        !isLatestMessage &&
+                        imageCapabilities?.maxBase64ImagePayloadBytes &&
+                        totalBase64ImagePayloadBytes + encodedBytes >
+                            imageCapabilities.maxBase64ImagePayloadBytes
+                    ) {
+                        return leaveOutEarlierImage();
+                    }
                     totalImageCount += 1;
-                    totalBase64ImagePayloadBytes += Buffer.byteLength(encoded, "utf8");
-                    const imageCapabilities = modelConfig.inputCapabilities;
+                    totalBase64ImagePayloadBytes += encodedBytes;
                     if (
                         imageCapabilities?.maxImages &&
                         totalImageCount > imageCapabilities.maxImages
@@ -4444,7 +4596,9 @@ async function handleChatPost(
                         throw new ChatAccessError(
                             413,
                             "ATTACHMENT_MODEL_IMAGE_PAYLOAD_TOO_LARGE",
-                            `${modelConfig.name} accepts up to 4 MB of base64 image data per request. Use a smaller image.`
+                            `${modelConfig.name} accepts up to ${describeImagePayloadLimit(
+                                imageCapabilities.maxBase64ImagePayloadBytes
+                            )} of base64 image data per request. Use a smaller image.`
                         );
                     }
 
@@ -4484,7 +4638,11 @@ async function handleChatPost(
                     CHAT_ATTACHMENT_PARSE_CHARACTERS - totalExtractedCharacters;
                 const strictLatestText = isLatestMessage &&
                     (format.category === "office" || format.category === "text");
-                if (remainingCharacters <= (strictLatestText ? 0 : 64)) {
+                if (
+                    format.category === "pdf"
+                        ? pdfTextCharacterBudget(remainingCharacters) <= 0
+                        : remainingCharacters <= (strictLatestText ? 0 : 64)
+                ) {
                     if (!isLatestMessage) return omitPastAttachment();
                     throw new ChatAccessError(
                         413,
@@ -4493,12 +4651,14 @@ async function handleChatPost(
                     );
                 }
 
-                const addExtractedText = (kind: string, text: string) => {
+                // False when an earlier file's text did not fit its share and
+                // was named as omitted instead.
+                const addExtractedText = (kind: string, text: string): boolean => {
                     if (!isLatestMessage) {
                         const tokens = estimatePromptTokens(text);
                         if (pastAttachmentTokens + tokens > pastAttachmentTokenBudget) {
                             omitPastAttachment();
-                            return;
+                            return false;
                         }
                         pastAttachmentTokens += tokens;
                     }
@@ -4513,6 +4673,7 @@ async function handleChatPost(
                         );
                     }
                     textAttachments.push({ name, kind, text });
+                    return true;
                 };
 
                 if (format.category === "audio") {
@@ -4581,12 +4742,51 @@ async function handleChatPost(
 
                 if (format.category === "pdf") {
                     let extractedPdfText = "";
+                    // Pages the text layer gave nothing for: scans and pictures.
+                    let textlessPdfPages: number[] = [];
+                    // 0 when the text pass failed and the count is not known.
+                    let pdfPageCount = 0;
+                    // What came of OCR for a wholly scanned file (pdfReadingOutcome).
+                    let ocrOutcome: PdfReadingOutcome | null = null;
+                    // One place decides what the model did not get of this file and
+                    // whether its text may be stored: the notice for the pages not
+                    // read (or read in part) and the cache block follow from it.
+                    const settlePdfReading = (outcome: PdfReadingOutcome) => {
+                        if (!outcome.cacheable) textCacheBlocked = true;
+                        if (
+                            outcome.unreadPages.length > 0 ||
+                            outcome.partialPages.length > 0 ||
+                            outcome.budgetUnreadPages.length > 0 ||
+                            outcome.pageCountUnknown ||
+                            outcome.ocrUnmatched
+                        ) {
+                            // Not put through addExtractedText: the notice is what tells
+                            // the model what the text beside it lacks, so it is never
+                            // turned down for an earlier file's share (which would also
+                            // leave a general "not included" line beside text that was
+                            // included). Its room was set aside from the character limit
+                            // before the text was read (pdfTextCharacterBudget), and it
+                            // is counted against the share here, so it is bounded.
+                            const notice = describeUnreadPdfPages(outcome);
+                            totalExtractedCharacters += notice.length;
+                            if (!isLatestMessage) pastAttachmentTokens += estimatePromptTokens(notice);
+                            textAttachments.push({ name, kind: "PDF page notice", text: notice });
+                        }
+                    };
+                    // Pages the text pass never reached, because it ran into the limit.
+                    let budgetUnreadPages: number[] = [];
+                    let budgetPartialPage: number | null = null;
                     let pdfValidated = false;
                     try {
-                        extractedPdfText = await extractPdfTextSafely(
+                        const extraction = await extractPdfTextWithPagesSafely(
                             buffer,
-                            remainingCharacters - 64
+                            pdfTextCharacterBudget(remainingCharacters)
                         );
+                        extractedPdfText = extraction.text;
+                        textlessPdfPages = extraction.textlessPages;
+                        pdfPageCount = extraction.pageCount;
+                        budgetUnreadPages = extraction.budgetUnreadPages;
+                        budgetPartialPage = extraction.budgetPartialPage;
                     } catch (error) {
                         logRequestError(
                             "pdf_text_extraction_failed",
@@ -4595,7 +4795,7 @@ async function handleChatPost(
                             requestedModelId
                         );
                         try {
-                            await validatePdfSafely(buffer);
+                            pdfPageCount = (await validatePdfSafely(buffer)).pageCount;
                             pdfValidated = true;
                         } catch {
                             if (fromArchive) return "unreadable";
@@ -4607,49 +4807,30 @@ async function handleChatPost(
                         }
                     }
 
-                    // Scanned or image-only PDFs have no local text layer.
-                    // Validate them before leaving the process, then use OCR 4
-                    // as a backend conversion model. It is never exposed in
-                    // the Tomverse Review model picker and never consumes user model
-                    // credits; its page cost is recorded as internal usage.
-                    //
-                    // An archived PDF only reaches OCR while the archive's own
-                    // allowance lasts (`maxOcrPdfs`): one PDF dragged in is a
-                    // deliberate act, twenty arriving inside a container the
-                    // person did not enumerate is a bill nothing in the
-                    // request asked about.
-                    if (!extractedPdfText) {
-                        if (!pdfValidated) {
-                            try {
-                                await validatePdfSafely(buffer);
-                                pdfValidated = true;
-                            } catch {
-                                if (fromArchive) return "unreadable";
-                                throw new ChatAccessError(
-                                    400,
-                                    "INVALID_PDF_ATTACHMENT",
-                                    "The attached PDF is invalid or unsupported."
-                                );
-                            }
-                        }
-
-                        const ocrAllowance = fromArchive
-                            ? archiveOcrBudget > archiveOcrUsed
-                            : true;
-                        if (!ocrAllowance) return "no-text";
-                        if (fromArchive) archiveOcrUsed += 1;
-
-                        // Paid per page, and a scanned file on the message being
-                        // sent is not cached: a resend would be billed again.
+                    // One paid OCR read of this file, or of some of its pages.
+                    // The usage is recorded by the request that pays; a request
+                    // that arrives while the same account is reading the same
+                    // file and pages shares that result (`pdfOcrInFlight`).
+                    const runPdfOcr = async (
+                        maxCharacters: number,
+                        pages?: number[]
+                    ): Promise<MistralOcrResult | null> => {
+                        const flightKey = access.userId
+                            ? `${access.userId}:${createHash("sha256").update(buffer).digest("hex")}:${pages?.join(",") ?? "all"}:${maxCharacters}`
+                            : null;
+                        // The character budget is part of the key: a result cut
+                        // for a smaller budget is not the answer for a larger
+                        // one, which runs by itself.
+                        const shared = flightKey ? pdfOcrInFlight.get(flightKey) : undefined;
+                        if (shared) return shared;
+                        // Only the request that starts the paid call has started paid work.
                         paidExternalWorkStarted = true;
-                        try {
+                        const call = (async () => {
                             const ocrResult = await extractPdfTextWithMistralOcr(
                                 buffer,
-                                remainingCharacters - 64
+                                maxCharacters,
+                                { pages }
                             );
-                            if (ocrResult?.text) {
-                                extractedPdfText = ocrResult.text;
-                            }
                             if (ocrResult) {
                                 const ocrCostMicroUsd =
                                     ocrResult.pageCount *
@@ -4679,11 +4860,78 @@ async function handleChatPost(
                                         traceId,
                                         backendModelId: ocrResult.modelId,
                                         pageCount: ocrResult.pageCount,
+                                        partial: Boolean(pages),
                                         attachmentBytes: buffer.byteLength,
                                         fromArchive,
                                         timestamp: new Date().toISOString(),
                                     })
                                 );
+                            }
+                            return ocrResult;
+                        })();
+                        if (flightKey) {
+                            pdfOcrInFlight.set(flightKey, call);
+                            const release = () => {
+                                if (pdfOcrInFlight.get(flightKey) === call) {
+                                    pdfOcrInFlight.delete(flightKey);
+                                }
+                            };
+                            call.then(release, release);
+                        }
+                        return call;
+                    };
+
+                    // Scanned or image-only PDFs have no local text layer.
+                    // Validate them before leaving the process, then use OCR 4
+                    // as a backend conversion model. It is never exposed in
+                    // the Tomverse Review model picker and never consumes user model
+                    // credits; its page cost is recorded as internal usage.
+                    //
+                    // An archived PDF only reaches OCR while the archive's own
+                    // allowance lasts (`maxOcrPdfs`): one PDF dragged in is a
+                    // deliberate act, twenty arriving inside a container the
+                    // person did not enumerate is a bill nothing in the
+                    // request asked about.
+                    if (!extractedPdfText) {
+                        if (!pdfValidated) {
+                            try {
+                                pdfPageCount = (await validatePdfSafely(buffer)).pageCount;
+                                pdfValidated = true;
+                            } catch {
+                                if (fromArchive) return "unreadable";
+                                throw new ChatAccessError(
+                                    400,
+                                    "INVALID_PDF_ATTACHMENT",
+                                    "The attached PDF is invalid or unsupported."
+                                );
+                            }
+                        }
+
+                        const ocrAllowance = fromArchive
+                            ? archiveOcrBudget > archiveOcrUsed
+                            : true;
+                        if (!ocrAllowance) return "no-text";
+                        if (fromArchive) archiveOcrUsed += 1;
+
+                        // Paid per page; the result is stored with the file's
+                        // other text once the file is bound to a message, so a
+                        // resend, another panel or the next turn reads it.
+                        try {
+                            const ocrResult = await runPdfOcr(pdfTextCharacterBudget(remainingCharacters));
+                            if (ocrResult?.text) {
+                                extractedPdfText = ocrResult.text;
+                                // Text for some pages is not text for all: every page
+                                // of the file is checked against the ones answered, and
+                                // a cut at the budget is named, by the one rule the
+                                // partly scanned file below uses too.
+                                // A page count that neither the text pass nor the
+                                // validation gave means a skipped page cannot be told:
+                                // that is named, and the text is never stored.
+                                ocrOutcome = pdfReadingOutcome({
+                                    expectedPages: Array.from({ length: pdfPageCount }, (_, index) => index + 1),
+                                    ocr: ocrResult,
+                                    pageCountUnknown: pdfPageCount === 0,
+                                });
                             }
                         } catch (error) {
                             logRequestError(
@@ -4701,10 +4949,126 @@ async function handleChatPost(
                                 );
                             }
                         }
+                    } else if (textlessPdfPages.length > 0 || budgetUnreadPages.length > 0 || budgetPartialPage !== null) {
+                        /*
+                          Text on some pages and none on others: a report with
+                          a scanned appendix, a form with a pasted screenshot.
+                          The text layer used to stand for the whole file and
+                          the other pages went missing without a word. They are
+                          read here, or the model is told they were not:
+                          - a model that reads PDFs natively gets the original
+                            beside the text (the turn's own file only -- an
+                            earlier one is not sent again on every turn);
+                          - otherwise the pages are read by OCR, under the same
+                            allowance and ledger as a wholly scanned file;
+                          - otherwise the pages are named as unread.
+                        */
+                        if (!addExtractedText(format.promptKind, extractedPdfText)) {
+                            return "ok";
+                        }
+                        // Scanned pages are read (OCR, or the original) when there are
+                        // any. Pages the text limit stopped short of are not scans:
+                        // they are named, below, and nothing is spent on them.
+                        const hasScans = textlessPdfPages.length > 0;
+                        if (
+                            hasScans &&
+                            isLatestMessage &&
+                            !fromArchive &&
+                            modelSupportsNativePdfInput(modelConfig)
+                        ) {
+                            fileParts.push({
+                                type: "file",
+                                data: { type: "data", data: new Uint8Array(buffer) },
+                                mediaType: format.mediaType,
+                                filename: name,
+                            });
+                            // The text layer alone is not this file: never stored as it.
+                            settlePdfReading(
+                                pdfReadingOutcome({
+                                    expectedPages: textlessPdfPages,
+                                    ocr: null,
+                                    budgetUnreadPages,
+                                    budgetPartialPage,
+                                    originalSentToModel: true,
+                                })
+                            );
+                            return "ok";
+                        }
+                        let scanned: MistralOcrResult | null = null;
+                        const ocrRoom = pdfTextCharacterBudget(
+                            CHAT_ATTACHMENT_PARSE_CHARACTERS - totalExtractedCharacters
+                        );
+                        const ocrAllowance =
+                            hasScans &&
+                            ocrRoom > 0 &&
+                            (fromArchive ? archiveOcrBudget > archiveOcrUsed : true);
+                        if (ocrAllowance) {
+                            try {
+                                if (!pdfValidated) {
+                                    await validatePdfSafely(buffer);
+                                    pdfValidated = true;
+                                }
+                                if (fromArchive) archiveOcrUsed += 1;
+                                scanned = await runPdfOcr(ocrRoom, textlessPdfPages);
+                            } catch (error) {
+                                logRequestError(
+                                    "mistral_ocr_failed",
+                                    traceId,
+                                    error,
+                                    requestedModelId
+                                );
+                            }
+                        }
+                        // Text coming back is not proof the pages were read: the
+                        // provider may skip a page, return it empty, or be cut by
+                        // the budget. Each page asked for is checked against the
+                        // pages it answered.
+                        const outcome = pdfReadingOutcome({
+                            expectedPages: textlessPdfPages,
+                            ocr: scanned,
+                            budgetUnreadPages,
+                            budgetPartialPage,
+                        });
+                        if (
+                            scanned?.text &&
+                            !addExtractedText(`${format.promptKind} (scanned pages)`, scanned.text)
+                        ) {
+                            // An earlier file's scanned text did not fit its share
+                            // and was named as left out: say which pages, too, and
+                            // do not store the file's text as if it were whole.
+                            settlePdfReading({
+                                unreadPages: textlessPdfPages,
+                                partialPages: budgetPartialPage === null ? [] : [budgetPartialPage],
+                                budgetUnreadPages,
+                                pageCountUnknown: false,
+                                ocrUnmatched: false,
+                                cacheable: false,
+                            });
+                            return "ok";
+                        }
+                        settlePdfReading(outcome);
+                        return "ok";
                     }
 
                     if (extractedPdfText) {
-                        addExtractedText(format.promptKind, extractedPdfText);
+                        const added = addExtractedText(format.promptKind, extractedPdfText);
+                        if (ocrOutcome) {
+                            // An earlier file's OCR text that did not fit its share is
+                            // named as left out; the pages and the cache block follow
+                            // the same path as when it was included.
+                            settlePdfReading(
+                                added
+                                    ? ocrOutcome
+                                    : {
+                                          unreadPages: Array.from({ length: pdfPageCount }, (_, index) => index + 1),
+                                          partialPages: [],
+                                          budgetUnreadPages: [],
+                                          pageCountUnknown: pdfPageCount === 0,
+                                          ocrUnmatched: false,
+                                          cacheable: false,
+                                      }
+                            );
+                        }
                         return "ok";
                     }
                     if (fromArchive) return "no-text";
@@ -5018,9 +5382,9 @@ async function handleChatPost(
                 }
 
                 // One of the oldest earlier files past the conversation's count:
-                // decided here, in the same order the probe above counted them.
-                const countOmitted = !isLatestMessage && olderAttachmentsToOmit > 0;
-                if (countOmitted) olderAttachmentsToOmit -= 1;
+                // decided by position, in the order the probe above counted them
+                // (the messages are not read in that order).
+                const countOmitted = countOmittedSlots.has(`${messageIndex}:${attachmentIndex}`);
 
                 const attachmentScope: "current_turn" | "past_turn" =
                     isLatestMessage ? "current_turn" : "past_turn";
@@ -5072,13 +5436,23 @@ async function handleChatPost(
                   transcription waits on the audio switch (the audio branch).
                 */
                 const textCacheEligible =
-                    !isLatestMessage &&
                     !isGuestObject &&
                     Boolean(resolved?.attachmentId) &&
                     ATTACHMENT_TEXT_CACHE_CATEGORIES.has(format.category) &&
                     !(revisionEnabled && format.id === "xlsx" && resolved?.sourceLineageId) &&
-                    (attachmentTextCacheEnabled() || format.category === "audio");
-                if (textCacheEligible) {
+                    // The message being sent is stored too, once its text is
+                    // read: a scanned PDF went through paid OCR again for the
+                    // next turn, the resend and every Review panel. Its
+                    // recording is claimed on its own row, not here.
+                    (isLatestMessage
+                        ? format.category !== "audio" && attachmentTextCacheEnabled()
+                        : attachmentTextCacheEnabled() || format.category === "audio");
+                // Read for an earlier message only. The turn's own file is always
+                // read from storage: this turn's tools (file creation, conversion,
+                // spreadsheet revision) work on its bytes and lineage, which are
+                // registered below, and a cache hit would skip that. Its text is
+                // still stored once read, for the next turn.
+                if (textCacheEligible && !isLatestMessage) {
                     const cached = await readAttachmentTextCache(resolved!.attachmentId!);
                     // The cache stands in for reading the file, not for
                     // knowing it exists: storage is still asked, and a file it
@@ -5090,22 +5464,32 @@ async function handleChatPost(
                         cached !== null &&
                         (await probeR2Object(attachment.objectKey)).state === "missing";
                     if (cached && !originalGone) {
+                        // All of the file or none of it: a file whose text came in
+                        // two parts (its own and its scanned pages) is not half
+                        // included, and is named once, not once per part.
+                        const cachedTokens = cached.reduce(
+                            (sum, entry) => sum + estimatePromptTokens(entry.text),
+                            0
+                        );
+                        const cachedCharacters = cached.reduce(
+                            (sum, entry) => sum + entry.text.length,
+                            0
+                        );
+                        if (
+                            pastAttachmentTokens + cachedTokens > pastAttachmentTokenBudget ||
+                            totalExtractedCharacters + cachedCharacters >
+                                CHAT_ATTACHMENT_PARSE_CHARACTERS
+                        ) {
+                            textAttachments.push({
+                                name: attachment.name,
+                                kind: PAST_ATTACHMENT_OMITTED_KIND,
+                                text: PAST_ATTACHMENT_OMITTED_TEXT,
+                            });
+                            continue;
+                        }
+                        pastAttachmentTokens += cachedTokens;
+                        totalExtractedCharacters += cachedCharacters;
                         for (const entry of cached) {
-                            const tokens = estimatePromptTokens(entry.text);
-                            if (
-                                pastAttachmentTokens + tokens > pastAttachmentTokenBudget ||
-                                totalExtractedCharacters + entry.text.length >
-                                    CHAT_ATTACHMENT_PARSE_CHARACTERS
-                            ) {
-                                textAttachments.push({
-                                    name: attachment.name,
-                                    kind: PAST_ATTACHMENT_OMITTED_KIND,
-                                    text: PAST_ATTACHMENT_OMITTED_TEXT,
-                                });
-                                continue;
-                            }
-                            pastAttachmentTokens += tokens;
-                            totalExtractedCharacters += entry.text.length;
                             textAttachments.push({
                                 name: attachment.name,
                                 kind: entry.kind,
@@ -5355,6 +5739,7 @@ async function handleChatPost(
                                   objectKey: attachment.objectKey,
                               })
                             : null;
+                    textCacheBlocked = false;
                     await deliverAttachment(attachmentName, () =>
                         ingestAttachmentFile({
                             format,
@@ -5364,7 +5749,7 @@ async function handleChatPost(
                             transcriptAttachmentId: recordingAttachmentId,
                         })
                     );
-                    if (textCacheEligible && format.category !== "audio") {
+                    if (textCacheEligible && !textCacheBlocked && format.category !== "audio") {
                         // Stored only when the extraction is whole: text and
                         // nothing else, not omitted, and not stopped by the
                         // parse budget (the extractors stop 64 short of it).
@@ -5491,7 +5876,7 @@ async function handleChatPost(
             if (textAttachments.length === 0 && fileParts.length === 0) {
                 const content = String(msg.content ?? "");
                 estimatedInputTokens += estimateTextTokens(content);
-                formattedMessages.push({ role: "user", content });
+                builtMessages[messageIndex].push({ role: "user", content });
                 continue;
             }
 
@@ -5524,7 +5909,7 @@ async function handleChatPost(
                 estimateTextTokens(text) + nativeAttachmentTokens;
 
             nativeFilePartCount += fileParts.length;
-            formattedMessages.push({
+            builtMessages[messageIndex].push({
                 role: "user",
                 content: [
                     { type: "text", text: text || "Please analyze the attached file." },
@@ -5532,6 +5917,7 @@ async function handleChatPost(
                 ],
             });
         }
+        for (const built of builtMessages) formattedMessages.push(...built);
         if (isResearchPreview) {
             // Replace every ordinary Chat prelude with the same one-shot
             // payload the offer and reservation helpers measured.
@@ -6462,7 +6848,22 @@ async function handleChatPost(
         // authorized are the same number by construction. Merged into
         // `providerOptions.openai` beside `reasoningEffort` rather than over
         // it -- see `getModelGenerationSettings`.
+        // Default OFF (CHAT_REASONING_DISPLAY_ENABLED). When on, the provider
+        // is asked for a summary of the reasoning it already does and the
+        // relay carries it to the browser (lib/chatReasoningRelay.ts); when
+        // off, neither the request nor the response differs from before.
+        // Only for a client that says it draws the summary
+        // (CHAT_REASONING_DISPLAY_HEADER): an installed app that does not
+        // would read the new marker as the start of an unknown control and
+        // hide the answer after it.
+        const reasoningRelay =
+            chatReasoningDisplayEnabled() &&
+            req.headers.get(CHAT_REASONING_DISPLAY_HEADER) === "1" &&
+            !isResearchPreview
+                ? createChatReasoningRelay()
+                : null;
         const generationSettings = getModelGenerationSettings(modelConfig, {
+            reasoningSummary: reasoningRelay !== null,
             openAiMaxToolCalls: openAiNativeSearchToolCallCeiling({
                 capability: webSearchCapability,
                 nativeSearchEnabled,
@@ -6737,6 +7138,19 @@ async function handleChatPost(
                 providerPartsObserved += 1;
                 return forward?.(event);
             };
+        // The reasoning relay listens to the same parts as the activity count.
+        // `attempt()` is a fresh observer each time, so a displaced attempt's
+        // late parts never reach the answer that replaced it.
+        const withReasoningRelay = (
+            forward: ProviderPartObserver | null
+        ): ProviderPartObserver | null => {
+            const relayed = reasoningRelay?.attempt();
+            if (!relayed) return forward;
+            return (event) => {
+                relayed(event);
+                return forward?.(event);
+            };
+        };
         const forwardedOnChunk = (config: unknown) => {
             const candidate = (config as { onChunk?: unknown } | null | undefined)
                 ?.onChunk;
@@ -6782,6 +7196,34 @@ async function handleChatPost(
                       callCap: toolLoopStepCap,
                       contextWindowTokens: modelConfig.contextWindowTokens!,
                   })
+                : null;
+        /*
+          An application-managed search turn ends on an answer. Its last
+          allowed step may not call the search again -- the rule the project,
+          MCP and long-context loops already apply to theirs -- or a model still
+          searching when the step budget ran out ended on `tool-calls` with no
+          answer written. Only where nothing else shapes the steps: an artifact
+          tool's last-step call stores a file, which is an answer
+          (docs/policy/generated-artifacts.md section 8), and the other loops
+          carry this rule themselves. A one-step budget is left alone, because
+          its only step is the one that could search.
+        */
+        const appManagedSearchStepCap = Math.min(
+            APP_MANAGED_SEARCH_MAX_STEPS,
+            toolLoopStepCap
+        );
+        const appManagedSearchFinalStep =
+            appManagedSearchTool &&
+            !artifactToolConfig &&
+            !projectTools &&
+            !mcpConnector &&
+            !longContextLoopStep &&
+            !researchPreviewExecution &&
+            appManagedSearchStepCap > 1
+                ? ({ steps }: { steps: readonly unknown[] }) =>
+                      steps.length === appManagedSearchStepCap - 1
+                          ? { toolChoice: "none" as const }
+                          : {}
                 : null;
         await recordDispatchStarted(dispatchRecord);
         if (hasContinuation) void recordContinuationSeedOutcome(finalContinuation.outcome);
@@ -6842,9 +7284,20 @@ async function handleChatPost(
                                   longContextLoopStep.outputSpent,
                               ],
                           }
-                        : lookupStep
-                          ? { prepareStep: lookupStep }
-                          : {}),
+                        : appManagedSearchFinalStep
+                          ? {
+                                prepareStep: (options: {
+                                    stepNumber: number;
+                                    steps: Array<StepResult<ToolSet>>;
+                                    messages: ModelMessage[];
+                                }) => ({
+                                    ...(lookupStep?.(options) ?? {}),
+                                    ...appManagedSearchFinalStep(options),
+                                }),
+                            }
+                          : lookupStep
+                            ? { prepareStep: lookupStep }
+                            : {}),
                     ...(mcpConnector ? {
                         maxRetries: 0,
                         stopWhen: stepCountIs(MCP_CHAT_MAX_STEPS),
@@ -6869,7 +7322,7 @@ async function handleChatPost(
                     onChunk: observeProviderParts(
                         researchPreviewExecution
                             ? null
-                            : forwardedOnChunk(combinedToolConfig)
+                            : withReasoningRelay(forwardedOnChunk(combinedToolConfig))
                     ),
                     onError: observeStreamError({
                         traceId,
@@ -7239,12 +7692,20 @@ async function handleChatPost(
                                 provider: dispatched.provider,
                                 finishReason:
                                     outcome === "cancelled" ? "cancelled" : "error",
+                                // A provider that never produced a token --
+                                // the first-token deadline, or a stream that
+                                // failed before its first chunk -- did not
+                                // interrupt anything. The attempt says so with
+                                // a code the row's CHECK already allows.
                                 failureCode:
                                     outcome === "cancelled"
                                         ? null
                                         : outcome === "empty"
                                           ? "internal_error"
-                                          : "stream_interrupted",
+                                          : instrumentation?.outcome === "failed_pre_token" &&
+                                              instrumentation.failureLayer === "provider"
+                                            ? "provider_unavailable"
+                                            : "stream_interrupted",
                             });
                             durableAttempt = null;
                             durableCheckpointWriter = null;
@@ -7764,6 +8225,9 @@ async function handleChatPost(
             }
         };
         stopFirstTokenWatch = () => {
+            // Every ending that stops the watch ends the reasoning relay with
+            // it, so no timer outlives the response stream.
+            reasoningRelay?.dispose();
             if (keepaliveWriter) {
                 clearInterval(keepaliveWriter);
                 keepaliveWriter = null;
@@ -8018,6 +8482,7 @@ async function handleChatPost(
                 accessKind: access.kind,
                 inputBreakdown: inputEstimate.breakdown(),
                 reservationOnlyInputTokens,
+                reasoningSummary: reasoningRelay !== null,
                 webSearchMode: webSearchMode ?? null,
                 // The same map the primary resolved. A fallback that resolved
                 // its own could disagree with the primary only by reading a
@@ -8215,7 +8680,7 @@ async function handleChatPost(
                         nextAttemptAbortController.signal,
                     ]),
                     ...attemptDispatchOptions(plan),
-                    onChunk: observeProviderParts(null),
+                    onChunk: observeProviderParts(withReasoningRelay(null)),
                     onError: observeStreamError({
                         traceId,
                         modelId: plan.modelId,
@@ -8527,6 +8992,9 @@ async function handleChatPost(
         const protectedStream = new ReadableStream<string>({
             start(controller) {
                 streamController = controller;
+                // Reasoning the provider sent before this stream existed has
+                // been waiting in the relay; it goes out now.
+                reasoningRelay?.setSink((chunk) => enqueueSafely(controller, chunk));
                 if (streamState !== "open") controller.close();
             },
             async pull(controller) {
@@ -8566,6 +9034,9 @@ async function handleChatPost(
                         // The provider finished. Whatever it produced, it is
                         // no longer being waited for.
                         providerStreamFinished = true;
+                        // The last summary text and the final time, written
+                        // before the trailer so the browser has them first.
+                        reasoningRelay?.finish();
                         stopFirstTokenWatch();
                         const completionResults = await Promise.allSettled([
                             dispatched.stream.response,
@@ -8739,16 +9210,25 @@ async function handleChatPost(
                           Research Preview answer is its accepted report,
                           checked above, not what the stream did after it.
                         */
-                        const resolvedCompletionOutcome = resolveChatCompletionOutcome({
-                            finishReason,
+                        /*
+                          Only the finish reason's own rejection is a broken
+                          stream: a `stop` whose `response`, `content` or
+                          `providerMetadata` could not be read is a finished
+                          answer, and a missing `usage` is settled on the
+                          estimate below. A `tool-calls` finish with no file is
+                          a turn its step budget stopped (lib/chatTurnCompletion.ts).
+                        */
+                        const completionOutcome = resolveChatTurnCompletion({
+                            finishReason:
+                                finishReasonResult.status === "fulfilled"
+                                    ? finishReasonResult.value
+                                    : undefined,
                             rawFinishReason,
-                            streamFailed: Boolean(completionError),
+                            isResearchPreview,
+                            filesDelivered:
+                                Boolean(conversationId && assistantMessageId) &&
+                                (artifactCollector?.stored.length ?? 0) > 0,
                         });
-                        const completionOutcome =
-                            isResearchPreview &&
-                            resolvedCompletionOutcome.incompleteReason === "interrupted"
-                                ? { status: "normal" as const }
-                                : resolvedCompletionOutcome;
                         if (completionOutcome.status === "incomplete") {
                             console.warn(
                                 JSON.stringify({
@@ -8813,8 +9293,17 @@ async function handleChatPost(
                                 : {}),
                             // The normalizer read the finished response, so an
                             // absent count here means the search really did not
-                            // run -- not that nobody looked.
-                            searchQueriesObserved: true,
+                            // run -- not that nobody looked. Unless the content
+                            // it reads could not be read: a native search is
+                            // counted from that content, and a finished answer
+                            // whose content rejected is now settled as finished,
+                            // so its searches are settled as nobody counted
+                            // them (at the authorized ceiling). An application-
+                            // managed search is counted in this process and is
+                            // observed either way.
+                            searchQueriesObserved:
+                                contentResult.status === "fulfilled" ||
+                                appManagedSearchSnapshot !== null,
                         };
 
                         const durableFinalCheckpoint = durableCheckpointWriter
@@ -8894,9 +9383,16 @@ async function handleChatPost(
                           attempt record says what it was, a post-token
                           provider failure, rather than a cancellation.
                         */
-                        const providerInterrupted =
-                            answerDelivered &&
-                            completionOutcome.incompleteReason === "interrupted";
+                        /*
+                          A turn its own step budget stopped (`tool-calls`,
+                          no file) is settled the same way, but it is not a
+                          provider failure: the provider answered every call
+                          it was sent.
+                        */
+                        const { settledAs, providerInterrupted } = chatTurnSettlement({
+                            completion: completionOutcome,
+                            answerDelivered,
+                        });
                         const interruptionCause = observedStreamError ?? completionError;
                         const interruption = providerInterrupted
                             ? classifyStreamFailure({
@@ -8906,11 +9402,6 @@ async function handleChatPost(
                                   downstreamOpen: true,
                               })
                             : null;
-                        const settledAs = providerInterrupted
-                            ? "cancelled"
-                            : answerDelivered
-                              ? "completed"
-                              : "empty";
                         const interruptionInstrumentation = interruption
                             ? {
                                   outcome: interruption.observedOutcome,
@@ -9107,9 +9598,18 @@ async function handleChatPost(
                                             content: storedContent,
                                             status: completionOutcome.status,
                                             modelId: dispatched.modelId,
-                                            searchMetadata: reasoningEffort
-                                                ? { ...webSearchExecution, reasoningEffort: { requested: reasoningEffort, applied: appliedEffort ?? "default" } }
-                                                : webSearchExecution,
+                                            // The reasoning summary rides in the
+                                            // answer's own JSON metadata so a
+                                            // reload still shows "Thought for N
+                                            // seconds"; no migration, and no
+                                            // reader of this column sends it on
+                                            // (lib/chatReasoningDisplay.ts).
+                                            searchMetadata: withStoredReasoning(
+                                                reasoningEffort
+                                                    ? { ...webSearchExecution, reasoningEffort: { requested: reasoningEffort, applied: appliedEffort ?? "default" } }
+                                                    : webSearchExecution,
+                                                reasoningRelay?.snapshot() ?? null
+                                            ),
                                             // Spread, so an answer with no
                                             // bundle writes neither column
                                             // and both stay NULL (§22).
@@ -9762,11 +10262,21 @@ async function handleChatPost(
                       application's, and was being filed as a provider and a
                       model failure (always `phase: "read"`).
                     */
+                    /*
+                      A storage refusal at the Message write
+                      (`MESSAGE_STORAGE_QUOTA_EXCEEDED`) is this application's
+                      too: the provider finished and was paid, and only the
+                      save was refused (chat-durable-draft-and-attempt-recovery.md
+                      section 7: a local persistence refusal is never provider
+                      evidence). `apiSecurityResponse` is the module's own test
+                      for its error class.
+                    */
                     const completionFailureIsLocal =
                         providerStreamFinished &&
                         (error instanceof ChatAttemptCasError ||
                             error instanceof DatabaseWriteOutcomeUnknownError ||
-                            isDatabaseError(error));
+                            isDatabaseError(error) ||
+                            apiSecurityResponse(error) !== null);
                     const streamFailureIsLocal =
                         isStorageError(error) ||
                         isChatLocalFailure(error) ||

@@ -8,7 +8,7 @@ import { STUDIO_RUN_CONVERSATION } from "../../lib/conversationProduct.ts";
 const mod = path => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
 const date = new Date("2026-10-27T00:00:00.000Z");
 const row = (id, productKey, continued = false) => ({
-  id, productKey, title: id, updatedAt: date, pinnedAt: null, pinSeq: 0,
+  id, productKey, title: id, updatedAt: date, pinnedAt: null, pinSeq: 0, archivedAt: null,
   kind: productKey === "studio" ? "image" : "chat", projectId: null,
   selectedModels: ["fixture-model"], disabledPanels: [], webSearchMode: "off",
   shareEnabled: false, shareExpiresAt: null, password: null, _count: { messages: 0 },
@@ -30,8 +30,9 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   userSettings: { findUnique: async () => null },
   conversation: { findMany: async ({ where, select }) => {
     // The account's own rows, without Studio tool runs (one-off, not history)
-    // and without temporary Chats, which are never listed.
-    assert.deepEqual(where, { userId: "fixture-owner", NOT: STUDIO_RUN_CONVERSATION, temporaryExpiresAt: null });
+    // and without temporary Chats, which are never listed. A web request's
+    // default list also leaves archived rows out (lib/conversationArchive.ts).
+    assert.deepEqual(where, { userId: "fixture-owner", NOT: STUDIO_RUN_CONVERSATION, temporaryExpiresAt: null, archivedAt: null });
     assert.equal(select.productKey, true);
     listQueries++;
     return rows;

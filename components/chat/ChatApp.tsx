@@ -92,6 +92,7 @@ import {
 import type { ChatContentState } from "@/lib/chatContentState";
 import type { ModelRuntimeStatus } from "@/lib/chatRuntimeStatus";
 import { consumeChatStream } from "@/lib/chatStreamConsumer";
+import { CHAT_REASONING_DISPLAY_HEADER } from "@/lib/chatReasoningDisplay";
 import {
   decideChatStreamReattach,
   handOffInterruptedChatAttempt,
@@ -104,7 +105,7 @@ import {
   watchInterruptedChatAttempts,
   type ChatStreamInterruption,
 } from "@/lib/chatStreamReattach";
-import { readChatImageTurnRef, readChatImageTurnRequest } from "@/lib/chatImageTurnCore";
+import { imageEditSourceRefusalCode, readChatImageTurnRef, readChatImageTurnRequest } from "@/lib/chatImageTurnCore";
 import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
 import type { ReviewImageTurns } from "@/lib/reviewImageTurn";
 import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
@@ -339,6 +340,8 @@ type ChatAppProps = {
     researchDurable?: boolean;
     researchMode?: "preview";
     reasoningEffort?: import("@/lib/reasoningEffort").ExplicitReasoningEffort;
+    /** Study mode was on when this question was sent (lib/chatStudyPrompt.ts). */
+    studyMode?: boolean;
     deepResearchDepth?: "quick" | "standard" | "deep";
     /**
      * Web search for this send only, when the send was made by the web-search
@@ -1856,6 +1859,7 @@ function ChatAppComponent({
     requestOptions?: {
       webSearchMode?: WebSearchToggleMode;
       reasoningEffort?: ExplicitReasoningEffort;
+      studyMode?: boolean;
       /** Project search-hit refs the user attached to this one question. */
       projectReferences?: readonly string[];
     },
@@ -1970,6 +1974,7 @@ function ChatAppComponent({
     replacement = beginReplacement(targetChatId, takeArmedSupersede(targetChatId, text), !isGuestMode);
     const replacedIds = replacement.excludedIds();
     const { webSearchMode: webSearchModeOverride, reasoningEffort, projectReferences } = requestOptions ?? {};
+    const studyMode = requestOptions?.studyMode === true && !researchMode;
     const effectiveWebSearchMode: WebSearchMode | undefined =
       researchMode ? "always" : webSearchModeOverride ?? webSearchMode;
     const mcpConnectionId = !researchMode && currentProduct === "chat" ? selectedMcpConnection(initialConversationId) : undefined;
@@ -1985,6 +1990,7 @@ function ChatAppComponent({
       // and its retry reads the conversation's mode exactly as before.
       ...(webSearchModeOverride ? { webSearchMode: webSearchModeOverride } : {}),
       ...(reasoningEffort ? { reasoningEffort } : {}),
+      ...(studyMode ? { studyMode } : {}),
       // A Guest Auto authority and logical turn are one-shot. Keeping this
       // content-free marker with the retry source lets a remounted panel hide
       // and reject the generic manual retry rather than silently sending the
@@ -2385,9 +2391,16 @@ function ChatAppComponent({
         if (!imageTurnRef) {
           const errorCode =
             typeof body.code === "string" ? body.code : "CHAT_IMAGE_TURN_FAILED";
+          // A photo the edit refuses before reserving anything is explained in
+          // the person's language, not by the server's English sentence.
+          const editSourceCopyKey = imageEditSourceRefusalCode(errorCode)
+            ? chatAttachmentErrorCopyKey(errorCode)
+            : null;
           setAssistantMessage(
             assistantMessageId,
-            typeof body.error === "string" ? body.error : t("chat.responseError"),
+            editSourceCopyKey
+              ? t(editSourceCopyKey)
+              : typeof body.error === "string" ? body.error : t("chat.responseError"),
             "error",
             { errorCode }
           );
@@ -2534,6 +2547,7 @@ function ChatAppComponent({
           ...(researchMode ? { researchMode } : {}),
           ...(deepResearchDepth ? { deepResearchDepth } : {}),
           ...(reasoningEffort ? { reasoningEffort } : {}),
+          ...(studyMode ? { studyMode } : {}),
           ...(mcpConnectionId ? { mcpConnectionId } : {}),
           ...(admissionToken ? { admissionToken } : {}),
           ...(activeContextBundle ? { contextBundle: activeContextBundle } : {}),
@@ -2556,7 +2570,7 @@ function ChatAppComponent({
           controller.signal.throwIfAborted();
           if (!isGuestMode && !researchMode) observeJourneyDispatch(panelIdentityKey, targetChatId, sourceUserMessageId);
           return fetch(path, {
-          method: "POST", headers: { "Content-Type": "application/json", ...(researchMode ? { "Accept-Language": lang } : {}), ...(turnPassages ? {[PASSAGE_HEADER]:turnPassages} : {}) },
+          method: "POST", headers: { "Content-Type": "application/json", ...(researchMode ? { "Accept-Language": lang } : {}), ...(turnPassages ? {[PASSAGE_HEADER]:turnPassages} : {}), ...(transcriptScope === "conversation" ? { [CHAT_REASONING_DISPLAY_HEADER]: "1" } : {}) },
           body,
           signal: controller.signal,
         });
@@ -3047,6 +3061,7 @@ function ChatAppComponent({
                     ? autoRewrite : undefined,
                   isGeneratingArtifact: progress.isGeneratingArtifact,
                   mcpProgress: progress.mcpProgress,
+                  ...(progress.reasoning ? { reasoning: progress.reasoning } : {}),
                   ...(progress.generatingArtifactFormat
                     ? {
                         generatingArtifactFormat:
@@ -3160,6 +3175,8 @@ function ChatAppComponent({
           undefined,
           {
             searchMetadata,
+            // The summary streamed beside the answer, folded once it ends.
+            ...(streamed.reasoning ? { reasoning: { ...streamed.reasoning, done: true } } : {}),
             // `medium` is a Desktop-only step; the web composer has no label for it.
             appliedReasoningEffort: trailer?.appliedReasoningEffort === "medium" ? undefined : trailer?.appliedReasoningEffort,
             // Always written, so a retry that produces no file clears the
@@ -3724,7 +3741,7 @@ function ChatAppComponent({
             null,
             null,
             "single",
-            { reasoningEffort: lastPrompt.reasoningEffort },
+            { reasoningEffort: lastPrompt.reasoningEffort, studyMode: lastPrompt.studyMode },
             attachmentIds,
             lastPrompt.sourceUserMessageId
           );

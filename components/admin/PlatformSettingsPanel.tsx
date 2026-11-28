@@ -82,6 +82,8 @@ type AdminAppSettingsResponse = {
   chatStarterEnabled?: boolean;
   helpAssistantEnabled?: boolean;
   scheduledTasksEnabled?: boolean;
+  artifactSharingEnabled?: boolean;
+  temporaryChatEnabled?: boolean;
   memoryExtractionEnabled?: boolean;
   memoryInjectionEnabled?: boolean;
   memoryApprovedPairCount?: number;
@@ -148,6 +150,14 @@ type Props = {
    * of the other switches writes back the stored value, never a placeholder.
    */
   scheduledTasksEnabled?: boolean;
+  /** Temporary Chat (lib/temporaryChatAccess.ts): new ones may be started. Default-off; read on the server. */
+  temporaryChatEnabled?: boolean;
+  /**
+   * Share links for previewed pages (lib/artifactShareAccess.ts): public pages
+   * made from people's previews. Default-off; read on the server like the
+   * scheduled-tasks switch.
+   */
+  artifactSharingEnabled?: boolean;
   /**
    * Release B (account memory), reported and never edited here. Enabling
    * either one is the import/memory policy §12.4 human procedure, so this
@@ -189,6 +199,8 @@ export function PlatformSettingsPanel({
   chatStarterEnabled: initialChatStarterEnabled,
   helpAssistantEnabled: initialHelpAssistantEnabled = false,
   scheduledTasksEnabled: initialScheduledTasksEnabled,
+  artifactSharingEnabled: initialArtifactSharingEnabled,
+  temporaryChatEnabled: initialTemporaryChatEnabled,
   memoryExtractionEnabled: initialMemoryExtractionEnabled,
   memoryInjectionEnabled: initialMemoryInjectionEnabled,
   memoryApprovedPairCount: initialMemoryApprovedPairCount,
@@ -371,6 +383,14 @@ export function PlatformSettingsPanel({
   const [scheduledTasksEnabled, setScheduledTasksEnabled] = useState<boolean | undefined>(
     initialScheduledTasksEnabled
   );
+  // Share links for previewed pages. Undefined until the stored value is known, as above.
+  const [artifactSharingEnabled, setArtifactSharingEnabled] = useState<boolean | undefined>(
+    initialArtifactSharingEnabled
+  );
+  // Temporary Chat (lib/temporaryChatAccess.ts), on the same terms.
+  const [temporaryChatEnabled, setTemporaryChatEnabled] = useState<boolean | undefined>(
+    initialTemporaryChatEnabled
+  );
   // One state object rather than three: they are read together and are only
   // ever meaningful together, and no control writes any of them.
   const [memoryStatus, setMemoryStatus] = useState<MemoryReleaseStatus>({
@@ -508,6 +528,8 @@ export function PlatformSettingsPanel({
       );
       if (typeof data.helpAssistantEnabled === "boolean") setHelpAssistantEnabled(data.helpAssistantEnabled);
       if (typeof data.scheduledTasksEnabled === "boolean") setScheduledTasksEnabled(data.scheduledTasksEnabled);
+      if (typeof data.artifactSharingEnabled === "boolean") setArtifactSharingEnabled(data.artifactSharingEnabled);
+      if (typeof data.temporaryChatEnabled === "boolean") setTemporaryChatEnabled(data.temporaryChatEnabled);
       applyMemoryStatus(data);
       if (data.guestLead) setStoredGuestLead(data.guestLead.stored);
       dispatchAppToast(m.toast.reloaded, "success");
@@ -564,6 +586,8 @@ export function PlatformSettingsPanel({
             chatStarterEnabled,
             helpAssistantEnabled,
             scheduledTasksEnabled,
+            artifactSharingEnabled,
+            temporaryChatEnabled,
           }
         : {
             imageGenerationEnabled: current.imageGenerationEnabled,
@@ -574,6 +598,8 @@ export function PlatformSettingsPanel({
             chatStarterEnabled: current.chatStarterEnabled,
             helpAssistantEnabled: current.helpAssistantEnabled,
             scheduledTasksEnabled: current.scheduledTasksEnabled,
+            artifactSharingEnabled: current.artifactSharingEnabled,
+            temporaryChatEnabled: current.temporaryChatEnabled,
           };
       const response = await adminFetch("/api/admin/app-settings", {
         method: "PATCH",
@@ -630,6 +656,8 @@ export function PlatformSettingsPanel({
       );
       if (typeof data.helpAssistantEnabled === "boolean") setHelpAssistantEnabled(data.helpAssistantEnabled);
       if (typeof data.scheduledTasksEnabled === "boolean") setScheduledTasksEnabled(data.scheduledTasksEnabled);
+      if (typeof data.artifactSharingEnabled === "boolean") setArtifactSharingEnabled(data.artifactSharingEnabled);
+      if (typeof data.temporaryChatEnabled === "boolean") setTemporaryChatEnabled(data.temporaryChatEnabled);
       applyMemoryStatus(data);
       dispatchAppToast(m.toast.saved, "success");
     } catch {
@@ -927,6 +955,8 @@ export function PlatformSettingsPanel({
     { testId: "admin-chat-starter-flag", copy: m.switches.items.chatStarter, enabled: chatStarterEnabled, set: setChatStarterEnabled, waiting: false },
     { testId: "admin-help-assistant-flag", copy: m.switches.items.helpAssistant, enabled: helpAssistantEnabled, set: setHelpAssistantEnabled, waiting: false },
     { testId: "admin-scheduled-tasks-flag", copy: m.switches.items.scheduledTasks, enabled: scheduledTasksEnabled === true, set: setScheduledTasksEnabled, waiting: false },
+    { testId: "admin-artifact-sharing-flag", copy: m.switches.items.artifactSharing, enabled: artifactSharingEnabled === true, set: setArtifactSharingEnabled, waiting: false },
+    { testId: "admin-temporary-chat-flag", copy: m.switches.items.temporaryChat, enabled: temporaryChatEnabled === true, set: setTemporaryChatEnabled, waiting: false },
     { testId: "admin-image-generation-flag", copy: m.switches.items.imageGeneration, enabled: imageGenerationEnabled, set: setImageGenerationEnabled, waiting: false },
     { testId: "admin-external-import-flag", copy: m.switches.items.externalImport, enabled: externalImportEnabled, set: setExternalImportEnabled, waiting: false },
     { testId: "admin-external-continuation-flag", copy: m.switches.items.externalContinuation, enabled: externalContinuationEnabled, set: setExternalContinuationEnabled, waiting: false },

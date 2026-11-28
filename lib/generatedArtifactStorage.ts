@@ -31,7 +31,7 @@ import {
   type SupportedArtifactFormat,
 } from "@/lib/generatedArtifactCore";
 import { prisma } from "@/lib/prisma";
-import { deleteR2Object, listExpiredR2Objects, writeR2Object } from "@/lib/r2";
+import { deleteR2Object, listR2ObjectsPage, writeR2Object } from "@/lib/r2";
 import { parseCanonicalWorkbookSpec, type CanonicalWorkbookSpec } from "@/lib/generatedArtifactWorkbookRevision";
 import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
 
@@ -52,7 +52,10 @@ export const ARTIFACT_OBJECT_PREFIX = "message-artifacts/";
  */
 export const ARTIFACT_ORPHAN_TTL_MS = 6 * 60 * 60 * 1000;
 
-const ARTIFACT_ORPHAN_SWEEP_BATCH = 200;
+/** Objects one sweep run lists; the next run continues after the last one. */
+const ARTIFACT_ORPHAN_SWEEP_BATCH = 500;
+/** Where the sweep stopped: the last key of the page it read last. */
+export const ARTIFACT_ORPHAN_SWEEP_CURSOR_KEY = "generated_artifact_orphan_sweep_cursor";
 const ARTIFACT_CLEANUP_MAX_ATTEMPTS = 5;
 
 export const ARTIFACT_CLEANUP_REASONS = [
@@ -475,6 +478,14 @@ export const drainArtifactCleanupQueue = async (
  * bytes and not yet written its row, and delete the file out from under an
  * answer that was about to succeed.
  *
+ * One run lists one page of the prefix, in key order, after the key the last
+ * run stopped at (kept in `AppSetting`), and starts over when the listing ends.
+ * It used to take "the first 200 old objects" every time, so once 200 old files
+ * that had rows sat first in key order, no run ever looked past them and an
+ * orphan beyond them was never reclaimed. Only a key with no row is deleted,
+ * exactly as before; the position changes which keys are looked at, not which
+ * are deleted. A lost or unreadable position starts from the first key.
+ *
  * Never throws -- a storage outage must not take the maintenance run with it.
  */
 export const sweepOrphanedArtifactObjects = async (
@@ -485,37 +496,79 @@ export const sweepOrphanedArtifactObjects = async (
   let deleted = 0;
   let failed = 0;
   try {
-    const keys = await listExpiredR2Objects(
-      ARTIFACT_OBJECT_PREFIX,
-      cutoff,
-      ARTIFACT_ORPHAN_SWEEP_BATCH
-    );
-    examined = keys.length;
-    if (keys.length === 0) return { examined, deleted, failed };
-
-    const referenced = new Set(
-      (
-        await prisma.messageArtifact.findMany({
-          where: { objectKey: { in: keys } },
-          select: { objectKey: true },
-        })
+    const startAfter = await prisma.appSetting
+      .findUnique({
+        where: { key: ARTIFACT_ORPHAN_SWEEP_CURSOR_KEY },
+        select: { value: true },
+      })
+      .then((row) =>
+        row?.value && row.value.startsWith(ARTIFACT_OBJECT_PREFIX) ? row.value : null
       )
-        .map((artifact) => artifact.objectKey)
-        .filter((key): key is string => Boolean(key))
-    );
+      .catch(() => null);
 
-    for (const key of keys) {
-      if (referenced.has(key)) continue;
-      try {
-        await deleteR2Object(key);
-        deleted += 1;
-      } catch (error) {
-        failed += 1;
-        console.error("Orphaned artifact cleanup failed for one object:", {
-          key,
-          error,
+    let firstFailedKey: string | null = null;
+    const page = await listR2ObjectsPage(ARTIFACT_OBJECT_PREFIX, {
+      startAfter,
+      maxKeys: ARTIFACT_ORPHAN_SWEEP_BATCH,
+    });
+    const keys = page.objects
+      .filter((object) => object.lastModified.getTime() <= cutoff.getTime())
+      .map((object) => object.key);
+    examined = keys.length;
+
+    if (keys.length > 0) {
+      const referenced = new Set(
+        (
+          await prisma.messageArtifact.findMany({
+            where: { objectKey: { in: keys } },
+            select: { objectKey: true },
+          })
+        )
+          .map((artifact) => artifact.objectKey)
+          .filter((key): key is string => Boolean(key))
+      );
+
+      for (const key of keys) {
+        if (referenced.has(key)) continue;
+        try {
+          await deleteR2Object(key);
+          deleted += 1;
+        } catch (error) {
+          failed += 1;
+          firstFailedKey ??= key;
+          console.error("Orphaned artifact cleanup failed for one object:", {
+            key,
+            error,
+          });
+        }
+      }
+    }
+
+    // Where the next run continues. Past the page -- unless a delete failed:
+    // then it continues from just before the first key that failed, so that
+    // key is tried again next run rather than after a whole lap of the listing.
+    // A key that fails twice in a row, at the same place, is let go for this
+    // lap, so one object that cannot be deleted does not hold the sweep still.
+    let resumeAfter = page.nextStartAfter;
+    if (firstFailedKey) {
+      const at = page.objects.findIndex((object) => object.key === firstFailedKey);
+      const holdAt = at > 0 ? page.objects[at - 1].key : (startAfter ?? ARTIFACT_OBJECT_PREFIX);
+      if (holdAt !== startAfter) resumeAfter = holdAt;
+    }
+    try {
+      if (resumeAfter) {
+        await prisma.appSetting.upsert({
+          where: { key: ARTIFACT_ORPHAN_SWEEP_CURSOR_KEY },
+          create: { key: ARTIFACT_ORPHAN_SWEEP_CURSOR_KEY, value: resumeAfter },
+          update: { value: resumeAfter },
+        });
+      } else if (startAfter) {
+        await prisma.appSetting.deleteMany({
+          where: { key: ARTIFACT_ORPHAN_SWEEP_CURSOR_KEY },
         });
       }
+    } catch (error) {
+      console.error("Orphaned artifact sweep could not save its position:", error);
     }
   } catch (error) {
     console.error("Orphaned artifact sweep could not list objects:", error);

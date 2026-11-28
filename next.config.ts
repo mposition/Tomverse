@@ -4,6 +4,7 @@ import { withSentryConfig } from "@sentry/nextjs/config";
 // loader rather than by the app's module graph, so tsconfig paths do not
 // apply here.
 import { robotsDecision } from "./lib/robotsPolicyCore";
+import { ARTIFACT_SHARE_OVERRIDE_HEADERS, ARTIFACT_SHARE_PAGE_PREFIX } from "./lib/artifactSharePageHeaders";
 
 const securityHeaders = [
   {
@@ -141,9 +142,26 @@ const nextConfig: NextConfig = {
           { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
         ],
       },
+      // The Python runner's files (lib/chatCodeRunFrame.ts): Pyodide's loader, wasm, standard library and the
+      // numpy/pandas/matplotlib wheels, in a versioned directory. Same reason as above: the runner frame's origin is
+      // opaque, so its worker reads them in CORS mode. Public files that never change at a given path.
+      {
+        source: "/vendor/pyodide/:path*",
+        headers: [
+          { key: "Access-Control-Allow-Origin", value: "*" },
+          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+        ],
+      },
       {
         source: "/:path*",
         headers: securityHeaders,
+      },
+      // A public share page (docs/policy/generated-artifacts.md section 19). After the site-wide rule so these win
+      // for the same keys: its CSP `sandbox` cannot travel with a COOP other than unsafe-none, it sends no
+      // referrer, and every powerful feature is off. The route sets the same values itself.
+      {
+        source: `${ARTIFACT_SHARE_PAGE_PREFIX}:shareToken`,
+        headers: [...ARTIFACT_SHARE_OVERRIDE_HEADERS],
       },
       // Belt to app/robots.ts's braces, on every response a non-canonical
       // deployment serves.

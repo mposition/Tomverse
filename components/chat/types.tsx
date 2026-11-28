@@ -151,6 +151,14 @@ export type Message = {
   searchMetadata?: WebSearchExecution | null;
   appliedReasoningEffort?: import("@/lib/reasoningEffort").ReasoningEffort;
   /**
+   * The provider's summary of the reasoning behind this answer, streamed in
+   * beside it (lib/chatReasoningDisplay.ts). Runtime-only: the allowlists in
+   * lib/chatMessageSerialization.ts do not name it, so it never reaches a
+   * request transcript or storage. A reloaded answer carries its saved copy in
+   * `searchMetadata.reasoning` instead.
+   */
+  reasoning?: import("@/lib/chatReasoningDisplay").ChatReasoningView;
+  /**
    * How many account memories this answer was given (§13.4). Server-computed
    * and read from the response header -- never counted here, and never sent
    * back: the serializers in lib/chatMessageSerialization.ts are allowlists,
@@ -349,6 +357,12 @@ export type Conversation = {
      * alone cannot do once a pin has been changed and changed back.
      */
     pinSeq?: number;
+    /**
+     * Archived by the owner (`Conversation.archivedAt`): kept out of the
+     * sidebar's default list and shown under its "Archived" filter. Absent on a
+     * guest row, which cannot be archived.
+     */
+    archived?: boolean;
     /**
      * Last activity, which is what the sidebar's date headers group by and
      * what the server already orders the list by.

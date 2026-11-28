@@ -41,6 +41,9 @@ import { prepareMathMarkdown } from "@/lib/chatMathDelimiters";
 import { isMathPre, mermaidSourceFromPre } from "@/lib/chatMermaidBlock";
 import { chartSpecFromPre } from "@/lib/chatChart";
 import { ChatChart } from "@/components/chat/ChatChart";
+import { flashcardSpecFromPre, quizSpecFromPre } from "@/lib/chatStudy";
+import { ChatQuiz } from "@/components/chat/ChatQuiz";
+import { ChatFlashcards } from "@/components/chat/ChatFlashcards";
 import {
   ArrowDown,
   Bot,
@@ -64,6 +67,7 @@ import { Message, type ChatAttachment } from "@/components/chat/types";
 import { providerLabel } from "@/components/imports/importFormatting";
 import { externalProviderBrand } from "@/lib/externalProviderBranding";
 import { AutoRoutedByBadge } from "@/components/chat/AutoRoutedByBadge";
+import { ChatReasoningPanel, chatMessageReasoning } from "@/components/chat/ChatReasoningPanel";
 import { AutoRewriteDisclosure } from "@/components/chat/AutoRewriteDisclosure";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { CodeBlockPreview } from "@/components/chat/CodeBlockPreview";
@@ -531,6 +535,11 @@ function MarkdownCodeBlock({ children, node }: MarkdownPreProps) {
   // A `chart` block whose JSON spec validates; anything else stays code.
   const chartSpec = answerRender ? chartSpecFromPre(node) : null;
   if (chartSpec) return <ChatChart spec={chartSpec} fallback={codeBlock} />;
+  // `quiz` and `flashcards` blocks, the same way: valid and final, or code.
+  const quizSpec = answerRender ? quizSpecFromPre(node) : null;
+  if (quizSpec) return <ChatQuiz spec={quizSpec} fallback={codeBlock} />;
+  const flashcardSpec = answerRender ? flashcardSpecFromPre(node) : null;
+  if (flashcardSpec) return <ChatFlashcards spec={flashcardSpec} fallback={codeBlock} />;
   return codeBlock;
 }
 
@@ -1313,6 +1322,9 @@ export function ChatMessageList({
                 : messages[idx - 1]?.attachments?.length
                   ? t("chat.readingFileStatus")
                   : t("chat.connectingStatus");
+            // The provider's reasoning summary, streamed or saved; null for the
+            // many answers that have none (components/chat/ChatReasoningPanel.tsx).
+            const reasoningView = chatMessageReasoning(msg);
 
               // Technical detail lines (trace IDs, internal cost figures) are
             // appended to msg.content after a newline -- the first line is
@@ -1548,6 +1560,9 @@ export function ChatMessageList({
                 )}
                 {isUser && !imported && <span className="sr-only">{t("chat.you")}</span>}
 
+                {reasoningView && !imported && (
+                  <ChatReasoningPanel reasoning={reasoningView} generating={isActivelyGenerating} />
+                )}
                 <div
                   role={!isUser && msg.status === "error" ? "alert" : undefined}
                   data-imported={imported ? "true" : undefined}
@@ -1666,9 +1681,11 @@ export function ChatMessageList({
                     isActivelyGenerating ? (
                       <div className="flex items-center gap-2">
                         <TypingIndicator />
-                        <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                          {connectingStatusText}
-                        </span>
+                        {!reasoningView && (
+                          <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                            {connectingStatusText}
+                          </span>
+                        )}
                       </div>
                     ) : (
                       <TypingIndicator label={t("chat.responseGenerating")} />

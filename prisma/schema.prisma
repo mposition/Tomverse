@@ -95,6 +95,7 @@ model User {
   researchPreviewRuns                  ResearchPreviewRun[]
   imageGenerations                     ImageGeneration[]
   messageArtifacts                     MessageArtifact[]
+  artifactShares                       ArtifactShare[]
   messageAttachments                   MessageAttachment[]
   messageAttachmentUploads             MessageAttachmentUpload[]
   chatComposerDrafts                   ChatComposerDraft[]
@@ -152,6 +153,7 @@ model User {
   routingCandidateVerdicts             RoutingCandidateVerdict[]
   scheduledTasks                       ScheduledTask[]
   scheduledTaskRuns                    ScheduledTaskRun[]
+  savedPrompts                         SavedPrompt[]
 
   @@index([plan, id])
   @@index([createdAt])
@@ -519,6 +521,7 @@ model Conversation {
   routingRuns           RoutingRun[]
   autoRouterDecisions   AutoRouterDecision[]
   messageArtifacts      MessageArtifact[]
+  artifactShares        ArtifactShare[]
   messageAttachments    MessageAttachment[]
   composerDrafts        ChatComposerDraft[]
   promptRefinerScopes   PromptRefinerChatScope[]
@@ -599,6 +602,18 @@ model Conversation {
   /// project and its memory off.
   temporaryExpiresAt DateTime?
   answerRatings      ChatAnswerRating[]
+
+  /// When the owner archived this conversation, or NULL. An archived
+  /// conversation leaves the default list, its date groups and the pinned
+  /// section, and is listed only under the "Archived" filter
+  /// (lib/conversationArchive.ts). Nothing else changes: sharing, the lock,
+  /// export and deletion behave as before. A new message clears it.
+  ///
+  /// Written with raw SQL, like `pinnedAt`, so archiving does not move
+  /// `updatedAt` and the conversation keeps its date when it comes back.
+  /// No index: every read is per account (`userId` leads the existing indexes)
+  /// and this is a residual filter over that account's rows.
+  archivedAt DateTime?
 
   @@unique([userId, importedGuestKey])
   @@index([userId, projectId])
@@ -689,6 +704,8 @@ model Message {
   /// addition to an answer, never a replacement for one, so a message with
   /// none is a complete message.
   artifacts MessageArtifact[]
+  /// Public share links made from this answer's previewed pages (ArtifactShare).
+  artifactShares ArtifactShare[]
 
   /// Files the *user* attached to this message
   /// (docs/policy/user-attachment-persistence.md). Empty for every message
@@ -798,6 +815,7 @@ model MessageArtifact {
   lineageId String?
   copiedAttachments MessageAttachment[] @relation("GeneratedArtifactAttachmentSource")
   copiedUploads MessageAttachmentUpload[] @relation("GeneratedArtifactUploadSource")
+  shares ArtifactShare[]
 
   createdAt DateTime @default(now())
 
@@ -806,6 +824,59 @@ model MessageArtifact {
   @@index([parentArtifactId])
   @@index([conversationId, createdAt])
   @@index([userId, createdAt])
+}
+
+/// A public, read-only page made from one previewed HTML page, SVG or React
+/// component (docs/policy/generated-artifacts.md section 19). The page is a
+/// snapshot taken when the link was made. It goes away when its owner stops
+/// sharing (the row is deleted), and with the account, conversation, answer or
+/// generated file it was made from (every relation cascades). An expired row
+/// is never served (the public read filters on `expiresAt`).
+model ArtifactShare {
+  id String @id @default(cuid())
+
+  /// The unguessable public link (lib/shareTokens.ts). Nothing else holds it.
+  token String @unique
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  /// The answer the page came from: a code block's message, or a file's.
+  messageId String
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  /// The generated file, when the page is one. NULL for a code block in the
+  /// answer text (ArtifactShare_source_shape_check).
+  artifactId String?
+  artifact   MessageArtifact? @relation(fields: [artifactId], references: [id], onDelete: Cascade)
+
+  /// One link per source: `artifact:<id>` or `code:<messageId>:<sha256>`
+  /// (artifactShareSourceKey in lib/artifactShareAccess.ts).
+  sourceKey String @unique
+
+  /// artifact | code_block (ARTIFACT_SHARE_SOURCE_KINDS)
+  sourceKind String
+  /// html | svg | react (ARTIFACT_SHARE_PREVIEW_KINDS)
+  previewKind String
+  /// html | htm | svg | jsx | tsx (ARTIFACT_SHARE_LANGUAGES)
+  language String
+
+  /// A generated file's name; NULL for a code block.
+  title String?
+
+  /// The page as shared, at most 1,000,000 bytes of UTF-8 (HTML_PREVIEW_MAX_BYTES).
+  content String
+
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([userId, createdAt])
+  @@index([conversationId])
+  @@index([messageId])
+  @@index([artifactId])
 }
 
 /// DB-first deletion tombstone for generated artifacts, mirroring
@@ -1833,6 +1904,26 @@ model ScheduledTaskRun {
   @@unique([taskId, scheduledFor])
   @@index([userId, startedAt])
   @@index([status, leaseExpiresAt])
+}
+
+/// A prompt the account saved under a name, to put back into the composer
+/// (lib/savedPrompts.ts). Text only: never sent anywhere until the person sends
+/// it themselves, never shared. Deleting the account deletes it (cascade).
+/// Bounds: SAVED_PROMPT_LIMITS, repeated by the migration's CHECK.
+model SavedPrompt {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  body      String
+  /// Higher first. A new prompt takes the account's highest value plus one,
+  /// so the newest is on top without a second write to any other row.
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, sortOrder])
 }
 
 /// One Router call per fresh saved question while its location decision can be resumed.

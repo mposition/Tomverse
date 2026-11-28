@@ -80,6 +80,8 @@ let providerAbortReason: unknown = null;
 let providerCancelled = false;
 /** Whether the last `readToEnd()` ended on a stream error rather than a close. */
 let lastReadErrored = false;
+/** The account message totals the storage check reads; null reads as an empty store. */
+let storedMessageTotals: { count: bigint; bytes: bigint } | null = null;
 
 mock.module("ai", {
   namedExports: {
@@ -378,7 +380,7 @@ const prismaProxy: unknown = new Proxy(prismaFake, {
     }
     if (property === "$connect" || property === "$disconnect") return async () => undefined;
     if (property === "$executeRaw" || property === "$executeRawUnsafe") return async () => 0;
-    if (property === "$queryRaw" || property === "$queryRawUnsafe") return async () => [];
+    if (property === "$queryRaw" || property === "$queryRawUnsafe") return async () => (storedMessageTotals ? [storedMessageTotals] : []);
     if (!(property in target)) {
       (target as Record<string, unknown>)[property] = modelProxy(property);
     }
@@ -695,6 +697,77 @@ test("a Message write that keeps failing is not filed as a provider or model fai
     assert.deepEqual(terminals.map((t) => t.status), ["failed"]);
     assert.deepEqual(health.providerFailures, []);
     assert.deepEqual(health.modelFailures, []);
+  } finally {
+    world.createFailures = [];
+  }
+});
+
+/*
+  A full message store. The answer used to be charged, streamed and then
+  refused at the Message write -- and that refusal was filed as the provider's
+  and the model's failure. It is now refused before anything is reserved, and
+  a refusal that still reaches the write (a concurrent turn took the last
+  slot) is this application's, not the provider's.
+*/
+const { ApiSecurityError } = realApiSecurity as {
+  ApiSecurityError: new (status: number, code: string, message: string) => Error;
+};
+
+test("an account at its message storage limit is refused before the turn is reserved or sent", async () => {
+  const prior = process.env.API_MAX_MESSAGE_BYTES_PER_USER;
+  // The store is over its bytes already: nothing more can be written.
+  process.env.API_MAX_MESSAGE_BYTES_PER_USER = "1";
+  storedMessageTotals = { count: BigInt(1), bytes: BigInt(2) };
+  // A fresh turn, as `start` makes one: no attempt left from the last test for
+  // the pre-Router peek to find.
+  row = null;
+  terminals.length = 0;
+  ledger.settlements = [];
+  world.messages = [];
+  try {
+    const { POST } = await loadRoute();
+    const response = await POST(
+      new Request("http://127.0.0.1:3100/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [{ role: "user", content: "긴 답을 써 줘", id: SOURCE_MESSAGE_ID }],
+          modelId: MODEL_ID,
+          conversationId: CONVERSATION_ID,
+          assistantMessageId: ASSISTANT_MESSAGE_ID,
+          sourceUserMessageId: SOURCE_MESSAGE_ID,
+        }),
+      })
+    );
+    assert.equal(response.status, 409);
+    assert.equal((await response.json() as { code?: string }).code, "MESSAGE_STORAGE_QUOTA_EXCEEDED");
+    // Refused before the claim and the reservation: nothing settles, and no
+    // attempt row is written for a turn that could never answer.
+    assert.deepEqual(ledger.settlements, []);
+    assert.deepEqual(world.messages, []);
+    assert.equal(row, null, "no attempt was claimed");
+    assert.deepEqual(terminals, []);
+  } finally {
+    storedMessageTotals = null;
+    if (prior === undefined) delete process.env.API_MAX_MESSAGE_BYTES_PER_USER;
+    else process.env.API_MAX_MESSAGE_BYTES_PER_USER = prior;
+  }
+});
+
+test("a storage refusal at the Message write is not filed as a provider or model failure", async () => {
+  health.providerFailures = [];
+  health.modelFailures = [];
+  world.createFailures = [new ApiSecurityError(409, "MESSAGE_STORAGE_QUOTA_EXCEEDED", "Message storage quota exceeded.")];
+  try {
+    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." });
+    releaseRest();
+    await readToEnd();
+    await until("the lease release", () => ledger.releases.length > 0);
+    assert.deepEqual(terminals.map((t) => t.status), ["failed"]);
+    assert.deepEqual(health.providerFailures, []);
+    assert.deepEqual(health.modelFailures, []);
+    // Settled before the write, as the policy says: the answer was shown.
+    assert.deepEqual(ledger.settlements.map((s) => s.outcome), ["completed"]);
   } finally {
     world.createFailures = [];
   }
