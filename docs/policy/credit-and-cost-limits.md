@@ -1279,7 +1279,7 @@ docs/policy/external-conversation-continuation.md §4.4, §5.1입니다.
 
 Chat 답변 아래에 그 답변에 실제로 차감된 크레딧을 보여 줍니다(운영자 지시). 새 가격이나
 새 정산은 없고, 예약 행에 열 하나(`ChatCreditReservation.assistantMessageId`, nullable,
-`20261128110000_chat_reservation_assistant_message`)가 늘었을 뿐입니다.
+`20261128130000_chat_reservation_assistant_message`)가 늘었을 뿐입니다.
 
 - **쓰는 곳은 한 곳입니다.** Chat route가 저장되는 turn(로그인 사용자, 저장된 대화,
   `assistantMessageId` 있음)에 `acquireChatAccess`를 부를 때 넘기고, 예약 insert가 그
