@@ -3803,7 +3803,7 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
   const capability = state.capabilities?.review;
   if (!capability || input.choices.length > capability.modelLimit || (input.mode === "easy" && !capability.easy) ||
       (input.tools && !state.capabilities?.reviewTools) || (input.deepResearchDepth && !state.capabilities?.reviewDeepResearch) ||
-      (input.onlyModelId === DEEP_RESEARCH_MODEL_ID && !input.deepResearchDepth) || (input.mcpConnectionId && !state.capabilities?.reviewPlugin)) {
+      (input.onlyModelId === DEEP_RESEARCH_MODEL_ID && !input.deepResearchDepth)) {
     throw new Error("The selected Review options are unavailable.");
   }
   const currentLocation = chatLocationAllowed() ? input.currentLocation : undefined;
@@ -3894,7 +3894,6 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
           responses.set(modelId, assistant);
           let lastProgressAt = 0;
           const result = await api.stream(saved, { modelId, selectionMode: "manual", effort: input.effort, review: true, admission, reviewContext,
-            ...(input.mcpConnectionId ? { mcpConnectionId: input.mcpConnectionId } : {}),
             currentLocation: input.deepResearchDepth ? undefined : currentLocation, deepResearchDepth: input.deepResearchDepth },
             sourceId, assistant.id, signal, (text) => {
               assistant.text = text;

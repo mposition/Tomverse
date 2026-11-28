@@ -440,7 +440,7 @@ export type Snapshot = {
     /** Code tasks on a Tomverse runner (cloud-execution-contract.ts): the server names it only when its switch is on. */
     cloudExecution?: boolean;
     /** What the server accepts in a turn: the device position, a chosen plugin in Chat, a Review turn's own context, the "+" menu's choices for a Review. */
-    turnLocation?: boolean; chatPlugin?: boolean; reviewPlugin?: boolean; reviewContext?: boolean; reviewTools?: boolean;
+    turnLocation?: boolean; chatPlugin?: boolean; reviewContext?: boolean; reviewTools?: boolean;
     /** Deep Research from the Review "+" menu: the server accepts it for a Review and polls its result. */
     reviewDeepResearch?: boolean;
     /** Dictation in every composer, and the two-way voice conversation in Chat. */

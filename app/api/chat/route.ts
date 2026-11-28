@@ -4,7 +4,7 @@ import { createGroundedCitationStream } from "@/lib/groundedCitationLinks";
 import { createChatSearchObservation, type ChatSearchObservation } from "@/lib/chatSearchObservation";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { scheduledTaskReservationGuard, scheduledTaskSubjectSlotsKeptFree } from "@/lib/scheduledTaskReservationGuard";
-import { desktopChatTurnField, desktopDeepResearchEnabled, desktopDriveEnabled, desktopReviewDeepResearchEnabled, desktopReviewPluginEnabled } from "@/lib/nativeBearerGate";
+import { desktopChatTurnField, desktopDeepResearchEnabled, desktopDriveEnabled, desktopReviewDeepResearchEnabled } from "@/lib/nativeBearerGate";
 import { readGooglePickerConfig } from "@/lib/googleDrivePickerConfig";
 import { desktopResearchAnswerId } from "@/lib/desktopResearchAnswerId";
 import { DEEP_RESEARCH_MODEL_ID } from "@/lib/deepResearchModel";
@@ -1670,8 +1670,7 @@ async function handleChatPost(
                 })
                 : null;
             const desktopProduct = desktopConversationWriteProduct(desktopConversation);
-            if (!desktopProduct || (desktopProduct === "chat" && admissionToken) ||
-                (mcpConnectionId && desktopProduct !== "chat" && !(desktopProduct === "review" && desktopReviewPluginEnabled()))) {
+            if (!desktopProduct || (desktopProduct === "chat" && admissionToken) || (desktopProduct !== "chat" && mcpConnectionId)) {
                 return tracedJsonError("This conversation belongs to another workspace.", "CONVERSATION_ACCESS_DENIED", 403, traceId);
             }
             if (desktopConversation?.password != null) return conversationLockedResponse();
@@ -4328,7 +4327,7 @@ async function handleChatPost(
             ? null
             : turnSystemBlocks.artifactPlan;
         if (mcpConnectionId) {
-            if ((conversationProductKey !== "chat" && !(conversationProductKey === "review" && desktopReviewPluginEnabled())) || isDeepResearchTurn) throw new ChatAccessError(400, "MCP_CHAT_REQUIRED", "Plugins are available in Chat with a model that supports tools.");
+            if (conversationProductKey !== "chat" || isDeepResearchTurn) throw new ChatAccessError(400, "MCP_CHAT_REQUIRED", "Plugins are available in Chat with a model that supports tools.");
             try {
                 mcpConnector = await buildMcpChatTools({ userId: session!.user.id,
                     connectionId: mcpConnectionId, model: modelConfig, nativeSearch: nativeSearchEnabled,

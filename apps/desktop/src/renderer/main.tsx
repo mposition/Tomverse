@@ -1258,7 +1258,6 @@ ${text}` : text;
           attachments={reviewAttachments} online={online} dictation={snapshot?.dictationAvailable === true}
           composerTools={snapshot?.capabilities?.reviewTools} deviceLocation={snapshot?.chatLocationAvailable === true}
           deepResearch={snapshot?.capabilities?.reviewDeepResearch}
-          connectors={snapshot?.capabilities?.reviewPlugin === true} onManageConnectors={() => select("plugins")}
           onImageStarter={imageCapability ? openImageStarter : undefined}
           onImages={(offer) => { images.offerImages(offer); setImagesOpen(true); }} />
         : <div className="scroll"><div className="content">

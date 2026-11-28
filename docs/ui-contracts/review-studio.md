@@ -265,12 +265,10 @@ plan is taken. Coverage: `apps/desktop/tests/reviewColumns.e2e.ts`.
 
 ## Desktop composer order (owner direction, 2026-11-28)
 
-Desktop Review's composer row follows Desktop Chat's: `+`, the plugin control, a spacer, the providers (Easy) or the
+Desktop Review's composer row follows Desktop Chat's: `+`, a spacer, the providers (Easy) or the
 model picker (Professional), the microphone, then Send. The Easy / Professional switch stays above the text box.
-An image waiting to be sent shows as a thumbnail in Chat and Review. The plugin control appears only where the server
-names `desktopReviewPlugin` (`TOMVERSE_DESKTOP_REVIEW_PLUGIN_ENABLED`, default off, on top of the Desktop plugin
-switches); each model of the Review may then use the chosen connection, and every outbound action still waits for
-the person's approval. Coverage: `apps/desktop/tests/reviewComposer.e2e.ts`, `apps/desktop/tests/reviewColumns.e2e.ts`, `apps/desktop/tests/attachment-fixture.ts`.
+An image waiting to be sent shows as a thumbnail in Chat and Review. Review has no plugin control yet: a plugin turn
+needs its tools counted in the Review's shared admission first. Coverage: `apps/desktop/tests/reviewComposer.e2e.ts`, `apps/desktop/tests/reviewColumns.e2e.ts`, `apps/desktop/tests/attachment-fixture.ts`.
 
 ## Credit presentation (owner direction, 2026-10-20)
 

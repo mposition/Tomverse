@@ -27,29 +27,18 @@ const rowOrder = (page: Page, form: string) => page.locator(`${form} .composer-a
       : node.classList.contains("desktop-dictation") && !node.classList.contains("desktop-dictation--command") ? "microphone"
       : node.classList.contains("send") || node.classList.contains("desktop-dictation--command") ? "send" : "other:" + node.className));
 
-test("Desktop Review's composer row is Chat's: +, plugin, then the providers or models, the microphone and Send", { timeout: 150_000, skip: !columnsOrigin }, async () => {
+test("Desktop Review's composer row is Chat's: +, then the providers or models, the microphone and Send", { timeout: 150_000, skip: !columnsOrigin }, async () => {
   const session = await launchReviewColumns({ width: 1400, height: 950,
-    capabilities: { desktopAttachments: true, desktopPlugins: true, desktopReviewPlugin: true } });
-  const { app, desktop } = session;
+    capabilities: { desktopAttachments: true } });
+  const { desktop } = session;
   try {
-    // The connection list comes from the account's plugins; the fixture answers it with the feature on and nothing connected.
-    await app.evaluate(({ ipcMain }) => {
-      ipcMain.removeHandler("desktop:connector-inventory");
-      ipcMain.handle("desktop:connector-inventory", () => ({ enabled: true, servers: [], connections: [], invocations: [] }));
-    });
-    assert.equal((await desktop.evaluate(() => window.desktop.state())).capabilities?.reviewPlugin, true);
-    // The composer reads the list when it opens: open the Review again.
-    const rail = desktop.getByRole("navigation", { name: "Workspaces" });
-    await rail.getByRole("button", { name: "Chat", exact: true }).click();
-    await rail.getByRole("button", { name: "Review", exact: true }).click();
     const form = 'form[aria-label="Review composer"]';
     const composer = desktop.locator(form);
-    await expect(composer.getByTestId("desktop-chat-connector")).toBeVisible();
 
     // Easy: the providers stand where Chat keeps its model picker, left of the microphone and Send.
     await composer.getByRole("button", { name: "Easy", exact: true }).click();
     await expect(composer.locator(".composer-actions .review-participants")).toBeVisible();
-    assert.deepEqual(await rowOrder(desktop, form), ["tools", "plugin", "spacer", "models", "microphone", "send"]);
+    assert.deepEqual(await rowOrder(desktop, form), ["tools", "spacer", "models", "microphone", "send"]);
     // The mode switch stays above the text box.
     assert.equal(await composer.locator(".review-setup .review-mode-toggle").count(), 1);
 
@@ -63,7 +52,7 @@ test("Desktop Review's composer row is Chat's: +, plugin, then the providers or 
     // Professional: the model picker takes the same place.
     await composer.getByRole("button", { name: "Professional", exact: true }).click();
     await expect(composer.locator(".composer-actions .desktop-model-trigger")).toBeVisible();
-    assert.deepEqual(await rowOrder(desktop, form), ["tools", "plugin", "spacer", "models", "microphone", "send"]);
+    assert.deepEqual(await rowOrder(desktop, form), ["tools", "spacer", "models", "microphone", "send"]);
     await picture(desktop, form, "review-professional");
 
     // Chat, for comparison: the same order.

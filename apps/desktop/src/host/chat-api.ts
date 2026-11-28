@@ -431,7 +431,7 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
         }
       };
       // A chosen plugin turn is never a signed-context (location fusion) turn, as on the web.
-      const mcpConnectionId = input.mcpConnectionId;
+      const mcpConnectionId = input.review ? undefined : input.mcpConnectionId;
       // Memory, the assistant and the project reach the model through this context. A Review of several models carries the one its admission was priced with.
       const ownContext = !input.admission && !mcpConnectionId && (!input.review || input.reviewContext === true);
       const contextBundle = input.admission ? input.admission.contextBundle : ownContext ? await prepare() : null;
