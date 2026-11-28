@@ -473,6 +473,61 @@ export function classifyPackageEntry(
     return { disposition: "skip", reason: "unsupported_extension" };
 }
 
+const FINDER_METADATA_PREFIX = "__MACOSX/";
+
+const isFinderMetadata = (entry: PackageZipEntry): boolean =>
+    entry.path.startsWith(FINDER_METADATA_PREFIX) &&
+    !isTraversal(entry.path) &&
+    !entry.symlink &&
+    !entry.encrypted;
+
+/**
+ * An Agent Skills archive is a folder: the specification's layout is
+ * `skill-name/SKILL.md`, and zipping that folder produces entries under
+ * `skill-name/`. This reads such an archive as if the folder were the root.
+ *
+ * Applied only when the whole archive agrees -- every real entry sits under
+ * one folder and that folder holds `SKILL.md` or `assistant.json` -- so an
+ * archive whose top level already has a document, or one with two folders, is
+ * read exactly as before. The prefix is removed from `path` and nothing else
+ * changes: the offsets inflation uses are untouched, and every name check
+ * (traversal, absolute, duplicate, case) still runs on what is left, so a
+ * `folder/../x` entry is refused as `../x` would have been.
+ */
+function stripSingleRootFolder(
+    entries: readonly PackageZipEntry[]
+): readonly PackageZipEntry[] {
+    const real = entries.filter(
+        (entry) => !entry.directory && !isFinderMetadata(entry)
+    );
+    const root = real[0]?.path.split("/")[0];
+    if (
+        !root ||
+        root === "." ||
+        root === ".." ||
+        root.includes("\\") ||
+        /^[A-Za-z]:/.test(root)
+    ) {
+        return entries;
+    }
+    const prefix = `${root}/`;
+    if (!real.every((entry) => entry.path.startsWith(prefix))) return entries;
+    const markers = new Set([
+        `${prefix}SKILL.md`,
+        `${prefix}${ASSISTANT_PACKAGE_MANIFEST_FILENAME}`,
+    ]);
+    if (!real.some((entry) => markers.has(entry.path))) return entries;
+    return entries.map((entry) => {
+        if (isFinderMetadata(entry)) return entry;
+        if (entry.path.startsWith(prefix)) {
+            return { ...entry, path: entry.path.slice(prefix.length) };
+        }
+        // The folder's own directory entry (`skill-name/`), which has no
+        // name left once the folder is the root.
+        return entry;
+    });
+}
+
 /**
  * The whole read, decided before a byte is inflated.
  *
@@ -481,7 +536,7 @@ export function classifyPackageEntry(
  * because of a 40MB video it merely contains would be a refusal the owner has
  * no way to act on -- the file was never going to be used.
  */
-export function planPackageRead(entries: readonly PackageZipEntry[]): PackagePlan {
+export function planPackageRead(rawEntries: readonly PackageZipEntry[]): PackagePlan {
     const seen = { paths: new Set<string>(), lowered: new Set<string>() };
     const plan: PackagePlan = {
         reads: [],
@@ -491,7 +546,15 @@ export function planPackageRead(entries: readonly PackageZipEntry[]): PackagePla
         packageRefusal: null,
     };
 
+    const entries = stripSingleRootFolder(rawEntries);
     for (const entry of entries) {
+        // Finder adds a `__MACOSX/` mirror of resource forks to every archive it
+        // makes. Skipped by name when nothing else is wrong with the entry, so
+        // a zip made by dragging a skill folder onto "Compress" still opens.
+        if (isFinderMetadata(entry)) {
+            plan.skips.push({ path: entry.path, reason: "unsupported_extension" });
+            continue;
+        }
         const verdict = classifyPackageEntry(entry, seen);
         seen.paths.add(entry.path);
         seen.lowered.add(entry.path.toLowerCase());

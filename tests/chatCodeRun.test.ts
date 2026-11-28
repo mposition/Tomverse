@@ -160,6 +160,7 @@ test("the HTML and React previews keep exactly the policy they had", () => {
       "object-src 'none'",
       "worker-src 'none'",
       "manifest-src 'none'",
+      "webrtc 'block'",
     ].join("; ")
   );
   assert.equal(HTML_PREVIEW_OUTER_CSP, "frame-src 'none'");

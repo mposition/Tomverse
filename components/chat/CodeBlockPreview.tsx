@@ -4,13 +4,14 @@ import { Eye } from "lucide-react";
 import { Children, isValidElement, useCallback, useMemo, useState, type ReactNode, type RefObject } from "react";
 
 import { ArtifactPreviewPanelShell } from "@/components/chat/ArtifactPreviewPanelShell";
+import { ArtifactPreviewWorkspace } from "@/components/chat/ArtifactPreviewWorkspace";
+import { ArtifactShareControl } from "@/components/chat/ArtifactShareControl";
 import { useChatArtifactWorkspace, useCodeBlockStreaming } from "@/components/chat/ChatArtifactWorkspaceContext";
 import { CodeBlockRun } from "@/components/chat/CodeBlockRun";
-import { HtmlArtifactPreviewFrame, usePreviewDocumentLabels } from "@/components/chat/HtmlArtifactPreviewPanel";
 import { useLanguage } from "@/components/LanguageProvider";
+import { previewableBlockIndex } from "@/lib/artifactPreviewEditing";
 import { isPythonCodeLanguage } from "@/lib/chatCodeRun";
 import {
-  buildCodePreviewDocument,
   codeLanguageFromClassName,
   codePreviewKindForLanguage,
   type CodePreviewKind,
@@ -43,23 +44,25 @@ const languageOfCode = (children: ReactNode): string | null => {
   return null;
 };
 
-type Opened = { kind: CodePreviewKind; language: string; code: string };
+type Opened = {
+  kind: CodePreviewKind;
+  language: string;
+  code: string;
+  /** The answer the block is in, from the message element around it (`data-message-id`); null for an unsaved one. */
+  messageId: string | null;
+  /** The block's position among that answer's previewable blocks, -1 when there is no answer element. */
+  blockIndex: number;
+};
 
 export function CodeBlockPreview({ children, preRef }: { children: ReactNode; preRef: RefObject<HTMLPreElement | null> }) {
   const { t } = useLanguage();
   const workspace = useChatArtifactWorkspace();
   const streaming = useCodeBlockStreaming();
-  const labels = usePreviewDocumentLabels();
   const [opened, setOpened] = useState<Opened | null>(null);
   const close = useCallback(() => setOpened(null), []);
 
   const language = languageOfCode(children);
   const kind = codePreviewKindForLanguage(language);
-
-  const built = useMemo(
-    () => (opened ? buildCodePreviewDocument(opened.kind, opened.code, { language: opened.language, labels, assetOrigin: window.location.origin }) : null),
-    [opened, labels]
-  );
 
   const { fillComposer } = workspace;
   const revise = useMemo(
@@ -79,7 +82,14 @@ export function CodeBlockPreview({ children, preRef }: { children: ReactNode; pr
   const open = () => {
     // The rendered text, as the copy button reads it. mdast ends every block with the one newline that closes it.
     const code = (preRef.current?.textContent ?? "").replace(/\r?\n$/, "");
-    setOpened({ kind, language, code });
+    const answer = preRef.current?.closest("[data-message-id]") ?? null;
+    const messageId = answer?.getAttribute("data-message-id") || null;
+    // Counted among the answer's previewable blocks only, so other code above it does not move its edit.
+    const blocks = answer ? Array.from(answer.querySelectorAll("pre")) : [];
+    const blockIndex = preRef.current
+      ? previewableBlockIndex(blocks.map((pre) => pre.querySelector("code")?.className), blocks.indexOf(preRef.current))
+      : -1;
+    setOpened({ kind, language, code, messageId, blockIndex });
   };
 
   const title = t("chat.artifactWorkspaceCodeTitle").replaceAll("{language}", language.toUpperCase());
@@ -97,15 +107,36 @@ export function CodeBlockPreview({ children, preRef }: { children: ReactNode; pr
         <Eye className="h-3.5 w-3.5" aria-hidden="true" />
         {t("chat.artifactPreviewOpen")}
       </button>
-      {opened && built && (
+      {opened && (
         <ArtifactPreviewPanelShell title={title} heading={title} onClose={close} onRevise={revise}>
-          {built.ok ? (
-            <HtmlArtifactPreviewFrame html={built.html} title={title} />
-          ) : (
-            <p role="alert" data-testid="html-artifact-preview-notice" className="p-4 text-sm text-zinc-600 dark:text-zinc-300">
-              {t(built.reason === "too_large" ? "chat.artifactWorkspaceCodeTooLarge" : "chat.artifactWorkspaceCodeEmpty")}
-            </p>
-          )}
+          <ArtifactPreviewWorkspace
+            source={{
+              kind: opened.kind,
+              language: opened.language,
+              original: opened.code,
+              messageId: opened.messageId,
+              blockIndex: opened.blockIndex,
+            }}
+            title={title}
+            editable
+            fillComposer={fillComposer}
+            onClose={close}
+            // A public link to this block's page (generated-artifacts.md section 19); the control asks the server whether it applies.
+            renderShare={opened.messageId && opened.blockIndex >= 0
+              ? ({ edited }) => (
+                  <ArtifactShareControl
+                    source={{
+                      kind: "code_block",
+                      messageId: opened.messageId ?? "",
+                      blockIndex: opened.blockIndex,
+                      language: opened.language,
+                      code: opened.code,
+                    }}
+                    edited={edited}
+                  />
+                )
+              : undefined}
+          />
         </ArtifactPreviewPanelShell>
       )}
     </>

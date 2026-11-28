@@ -25,6 +25,9 @@ export type SecurityAuditEvent =
     | "auth.login_method.remove"
     | "conversation.share.create"
     | "conversation.share.revoke"
+    // A public page made from one previewed artifact (generated-artifacts.md §19).
+    | "artifact.share.create"
+    | "artifact.share.revoke"
     | "conversation.lock.set"
     | "conversation.lock.change"
     | "conversation.lock.remove"
