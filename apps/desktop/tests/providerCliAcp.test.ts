@@ -438,7 +438,7 @@ async function withProject<T>(body: (directory: string) => Promise<T>) {
   } finally { await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 }
 
-type Session = { modes?: { current: string; available: string[] } | null; config?: Record<string, string>; modeOption?: boolean; setMode?: string; setConfig?: string; flipTo?: string };
+type Session = { modes?: { current: string; available: string[] } | null; config?: Record<string, string>; modeOption?: boolean; setMode?: string; setConfig?: string; flipTo?: string; sneakTo?: string };
 const modesOf = (provider: LiveAcpProvider, current: string) => ({ current, available: [...acpSafety[provider].known] });
 /** What each CLI reports when it starts in a mode that asks, and in the mode it really starts in (Vibe: accept-edits; MiniMax Code: permissionMode auto). */
 const safeSession: Record<LiveAcpProvider, Session> = {
@@ -626,6 +626,11 @@ test("A mode that cannot be confirmed as one that asks ends the run before any t
       assert.equal(quiet.result.status, "completed", provider);
       assert.deepEqual(quiet.seen.modeSets, [target], provider);
     }
+    // A mode the CLI reports while it answers a switch is the mode it is in: the empty answer does not stand for the switch.
+    await fails({ ...unsafeSession.mistral, setMode: "sneak", sneakTo: "auto-approve" }, "mistral", /did not confirm permission mode "ask"/);
+    await fails({ ...unsafeSession.google, setMode: "sneak", sneakTo: "accept-edits" }, "google", /did not confirm permission mode "default"/);
+    // A mode the CLI moves to while an option is being set fails the check made after every switch.
+    await fails({ ...unsafeSession.minimax, setConfig: "sneak", sneakTo: "plan" }, "minimax", /permission mode or options changed while Desktop set them/);
     // MiniMax Code's own option: missing, unknown, refused, or unconfirmed.
     await fails({ modes: modesOf("minimax", "default") }, "minimax", /did not report its "permissionMode" option/);
     await fails({ modes: modesOf("minimax", "default"), config: { permissionMode: "turbo" } }, "minimax", /not one Desktop knows/);

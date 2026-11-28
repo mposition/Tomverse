@@ -574,6 +574,8 @@ export function createAcpClient(options: AcpClientOptions) {
   /** What the CLI last reported of its modes and options, from the session, its answers and its notifications. */
   const observed: { mode?: string; modeOption?: string; config: Map<string, string>; overflow?: boolean } = { config: new Map() };
   let enforced = false;
+  /** How many times the CLI has reported its mode; a switch answer stands for the switch only when no report came in between. */
+  let modeReports = 0;
   const rule = acpSafety[options.provider];
   const accepted = options.plan.grants === "read_only" ? rule.readOnly : rule.interactive;
 
@@ -612,12 +614,12 @@ export function createAcpClient(options: AcpClientOptions) {
     const mode = text(source.currentModeId, 80) ?? text(modes?.currentModeId, 80);
     // The mode option of the session repeats the mode: a new mode makes the old option stale until the CLI reports it again.
     if (mode !== undefined && mode !== observed.mode) observed.modeOption = undefined;
-    if (mode !== undefined) observed.mode = mode;
+    if (mode !== undefined) { observed.mode = mode; modeReports++; }
     // More options than are read means the mode may be among those not read: it is not confirmed.
     if (Array.isArray(source.configOptions) && source.configOptions.length > MAX_PLACES) observed.overflow = true;
     for (const option of Array.isArray(source.configOptions) ? source.configOptions.slice(0, MAX_PLACES) : []) {
       if (!isRecord(option) || typeof option.id !== "string" || typeof option.currentValue !== "string") continue;
-      if (option.id === "mode") observed.modeOption = option.currentValue;
+      if (option.id === "mode") { observed.modeOption = option.currentValue; modeReports++; }
       else observed.config.set(option.id.slice(0, 80), option.currentValue.slice(0, 80));
     }
     for (const watcher of [...watchers]) watcher();
@@ -655,11 +657,12 @@ export function createAcpClient(options: AcpClientOptions) {
     if (!modeOk()) {
       const target = accepted[0]!;
       if (!available.includes(target)) throw fail(`The CLI is in permission mode "${observed.mode}" and cannot switch to "${target}".`);
+      const reportsBefore = modeReports;
       const switched = await request("session/set_mode", { sessionId, modeId: target });
       if (switched.error) throw fail(`The CLI refused to switch to permission mode "${target}".`);
       // ACP's set_mode answer is empty by definition: a success is the switch (Vibe, Kimi and Antigravity answer `{}`, checked
-      // against the real CLIs 2026-11-28). A mode the answer or a later notification reports still wins over it.
-      if (observed.mode !== target) { observed.mode = target; observed.modeOption = undefined; }
+      // against the real CLIs 2026-11-28). A mode the CLI reported while switching, in the answer or after it, wins over it.
+      if (modeReports === reportsBefore && observed.mode !== target) { observed.mode = target; observed.modeOption = undefined; }
       observe(switched.result);
       if (!await confirmed(modeOk)) throw fail(`The CLI did not confirm permission mode "${target}".`);
     }
@@ -674,6 +677,8 @@ export function createAcpClient(options: AcpClientOptions) {
         if (!await confirmed(configOk)) throw fail(`The CLI did not confirm its "${id}" option as "${values[0]}".`);
       }
     }
+    // The mode and every option together, after all the switches: a mode the CLI moved to while an option was set counts too.
+    if (!modeOk() || !configOk()) throw fail("The CLI's permission mode or options changed while Desktop set them.");
     enforced = true;
   }
 
