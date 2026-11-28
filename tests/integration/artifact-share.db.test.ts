@@ -5,6 +5,7 @@ import { after, beforeEach, test } from "node:test";
 import { buildAccountDataExport } from "@/lib/accountDataExport";
 import { ARTIFACT_SHARING_FLAG_KEY } from "@/lib/artifactShareAccess";
 import {
+  deleteExpiredArtifactShares,
   findArtifactShare,
   prepareArtifactShare,
   publishArtifactShare,
@@ -399,4 +400,70 @@ test("with the switch off the read refuses before it reads the link", async () =
   const published = await share(seeded.user.id, seeded.answer.id);
   assert.equal(await readPublicArtifactShare(published.share.token, { sharingAvailable: false }), null);
   assert.ok(await readPublicArtifactShare(published.share.token, LIVE));
+});
+
+/* ---------- expired links are removed, and the write re-checks the conversation ---------- */
+
+const expire = (shareId: string) =>
+  prisma.artifactShare.update({
+    where: { id: shareId },
+    data: { createdAt: new Date(Date.now() - 3 * 60 * 60 * 1000), expiresAt: new Date(Date.now() - 60 * 1000) },
+  });
+
+test("an expired link is removed where it is met: the owner's status, the public read and a new share", async () => {
+  const { user, answer } = await seed();
+
+  const byStatus = await share(user.id, answer.id);
+  await expire(byStatus.share.id);
+  assert.equal(await findArtifactShare(user.id, byStatus.prepared.sourceKey), null);
+  assert.equal(await prisma.artifactShare.count(), 0, "the owner's status check removed it");
+
+  const byRead = await share(user.id, answer.id);
+  await expire(byRead.share.id);
+  assert.equal(await readPublicArtifactShare(byRead.share.token, LIVE), null);
+  assert.equal(await prisma.artifactShare.count(), 0, "the public read removed it");
+
+  const byNewShare = await share(user.id, answer.id);
+  await expire(byNewShare.share.id);
+  const renewed = await share(user.id, answer.id);
+  assert.equal(renewed.created, true);
+  assert.notEqual(renewed.share.id, byNewShare.share.id);
+  assert.equal(await prisma.artifactShare.findUnique({ where: { id: byNewShare.share.id } }), null);
+  assert.equal(await prisma.artifactShare.count(), 1, "the new share replaced it");
+});
+
+test("the maintenance sweep removes every expired link and leaves the live ones", async () => {
+  const first = await seed();
+  const second = await seed();
+  const expiredA = await share(first.user.id, first.answer.id);
+  const expiredB = await share(second.user.id, second.answer.id);
+  const thirdAnswer = await prisma.message.create({
+    data: { conversationId: first.chat.id, role: "assistant", content: ANSWER, modelId: "gpt-6-luna" },
+  });
+  const live = await share(first.user.id, thirdAnswer.id);
+  await expire(expiredA.share.id);
+  await expire(expiredB.share.id);
+
+  assert.deepEqual(await deleteExpiredArtifactShares(), { count: 2 });
+  const left = await prisma.artifactShare.findMany({ select: { id: true } });
+  assert.deepEqual(left.map((row) => row.id), [live.share.id]);
+  assert.deepEqual(await deleteExpiredArtifactShares(), { count: 0 });
+});
+
+test("a continuation or a non-chat kind that lands between the check and the write publishes nothing", async () => {
+  const continued = await seed();
+  const beforeBridge = await prepareArtifactShare(continued.user.id, codeSource(continued.answer.id), OPEN);
+  assert.ok(beforeBridge.ok);
+  if (!beforeBridge.ok) return;
+  await continueImport(continued.user.id, continued.chat.id);
+  assert.equal(await publishArtifactShare(continued.user.id, beforeBridge.prepared), null);
+
+  const changedKind = await seed();
+  const beforeKind = await prepareArtifactShare(changedKind.user.id, codeSource(changedKind.answer.id), OPEN);
+  assert.ok(beforeKind.ok);
+  if (!beforeKind.ok) return;
+  await prisma.conversation.update({ where: { id: changedKind.chat.id }, data: { kind: "image" } });
+  assert.equal(await publishArtifactShare(changedKind.user.id, beforeKind.prepared), null);
+
+  assert.equal(await prisma.artifactShare.count(), 0);
 });

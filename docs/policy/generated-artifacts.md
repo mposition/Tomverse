@@ -542,7 +542,7 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
       원문과 **같은 경로**(`buildCodePreviewDocument` → `HtmlArtifactPreviewFrame` → `buildHtmlPreviewSrcdoc`)로만 frame에
       들어가므로 sandbox·CSP·중첩 frame·1,000,000바이트 한도가 그대로입니다. 고친 내용은 이 페이지의 메모리에만 있고
       (`lib/artifactPreviewEditing.ts`, 저장소·서버·대화에 쓰지 않음, 새로고침하면 원래대로), 패널을 닫았다 열면 남아
-      있습니다. 파일은 artifact id로, 코드 블록은 답변의 `data-message-id`와 그 답변 안 블록 위치와 원문으로 구분하므로 다른
+      있습니다. 파일은 artifact id로, 코드 블록은 답변의 `data-message-id`와 그 답변 안 미리보기 가능한 블록 사이의 위치(`previewableBlockIndex`)와 원문으로 구분하므로 다른
       답변에 같은 코드가 있어도 편집이 섞이지 않습니다. 답변 id가 없는(저장 전) 블록은 편집을 남기지 않습니다. "원래대로", "복사", "내려받기"(파일은 원래 이름, React는 text/plain), 고쳤을 때만 "이 버전으로 계속"이
       있고, 마지막은 고친 코드를 fenced block으로 감싼 요청문을 입력창에 채울 뿐 보내지 않습니다(50,000자 넘으면 내려받기
       안내, `ARTIFACT_CONTINUE_MAX_CHARS`). 스위치가 꺼져 있으면 HTML 파일 패널은 예전처럼 frame만 보입니다.
@@ -1265,15 +1265,19 @@ React(`jsx`·`tsx`) 코드 블록이고, 문서 파일은 대상이 아니다(§
 ### 19.2 무엇이 공개되는가
 
 - **브라우저가 보낸 글은 공개되지 않는다.** 서버가 소유자의 원본에서 읽는다(`lib/artifactShareService.ts`): 파일은
-  `findFirst({ id, userId, status: "ready" })` 뒤 다운로드와 같은 `readOwnR2ObjectBytes`로, 코드 블록은 소유자의 assistant
+  `findFirst({ id, userId, status: "ready" })` 뒤 다운로드와 같은 `readOwnR2ObjectBytes`로 미리보기 상한(행에 적힌 크기가 아님)까지
+  읽고, 상한을 넘으면 자르지 않고 크기 초과(413)로, 온전한 UTF-8이 아니면 대체 문자로 바꾸지 않고 거절한다. 코드 블록은 소유자의 assistant
   메시지 본문이 그 코드를 포함할 때만(`answerContainsCode`, 줄바꿈은 LF로 맞춤). 그래서 패널에서 고친 내용(§9)은 구조상
   공유되지 않고, 패널이 공유 카드에 그렇게 적는다.
 - 공유 시점의 내용을 `ArtifactShare` 행에 스냅샷으로 저장한다(migration `20261128150000_artifact_share`). 원본 답변을 고쳐도
   공유 페이지는 스냅샷을 보인다. 크기는 미리보기와 같은 1,000,000바이트(CHECK `ArtifactShare_content_size_check`).
 - 출처 하나에 링크 하나(`sourceKey` unique: `artifact:<id>` 또는 `code:<messageId>:<sha256>`). 다시 누르면 같은 링크를,
-  만료된 링크는 같은 트랜잭션에서 새 토큰으로 바꾼다. 토큰은 `lib/shareTokens.ts`(24바이트 난수), 수명은 대화 공유와 같은
+  만료된 링크는 지우고 새 토큰으로 만든다. 토큰은 `lib/shareTokens.ts`(24바이트 난수), 수명은 대화 공유와 같은
   `SHARE_LINK_TTL_DAYS`(1~365, 기본 30일).
-- 중지하면 행을 지운다. 계정·대화·답변 메시지·생성 파일이 지워지면 FK cascade로 함께 지워진다. 계정 내보내기에는
+- 중지하면 행을 지운다. **만료된 행도 지운다**: 소유자 상태 조회·공개 읽기·새 공유 만들기에서 만나면 그 자리에서, 나머지는
+  매일 유지보수 sweep(`cleanupExpiredData`의 `expired_artifact_shares` 단계, 500행씩 최대 20번)이. 만료된 링크는 패널에
+  보이지 않아 소유자가 지울 수 없기 때문이다. 어느 경우든 같은 함수(`removeArtifactShares`)가 지우고 같은 방식으로
+  `artifact.share.revoke`(이유 `OWNER_STOPPED` 또는 `EXPIRED`)를 남긴다. 계정·대화·답변 메시지·생성 파일이 지워지면 FK cascade로 함께 지워진다. 계정 내보내기에는
   `shared_pages`로 들어가고 토큰은 뺀다(공개 페이지의 열쇠다). 데이터 도메인 등록부 `artifactShare`.
 
 ### 19.3 공유할 수 없는 경우
@@ -1281,8 +1285,10 @@ React(`jsx`·`tsx`) 코드 블록이고, 문서 파일은 대상이 아니다(§
 `artifactShareRefusal`이 한 곳에서 정한다: 스위치 꺼짐(503), 요금제 `allowSharing` false(403), 원본 없음·남의 것·답변에 없는
 코드·공유 대상이 아닌 형식(404), 채팅이 아닌 대화, 임시 대화, 잠긴 대화(비밀번호가 있으면 지금 풀려 있어도 거절),
 가져온 대화를 이어 간 대화, 비공개 자료를 쓴 Research 답변(manifest에 URL이 아닌 항목이 있거나 현재 revision이
-`containsPrivate`), 크기(413). 게스트는 로그인이 없어 401이다. 잠금과 임시 여부는 쓰는 SQL 문 안에서 한 번 더 본다
-(`INSERT … SELECT … WHERE "password" IS NULL AND "temporaryExpiresAt" IS NULL`).
+`containsPrivate`), 크기(413). 게스트는 로그인이 없어 401이다. 판정이 대화 행에서 읽은 사실(잠금, 임시, 종류,
+continuation bridge)은 쓰는 SQL 문 안에서 한 번 더 본다(`INSERT … SELECT … WHERE "password" IS NULL AND
+"temporaryExpiresAt" IS NULL AND kind가 chat AND NOT EXISTS bridge`). 요금제와 Research는 대화 행의 사실이 아니므로 공개 읽기가
+매번 다시 본다.
 
 **공개 읽기는 만들 때의 규칙 전부를 같은 함수로 다시 본다**(2026-11-28 검토 반영). 만들 때와 읽을 때 모두
 `shareRefusal`(`lib/artifactShareService.ts`) → `artifactShareRefusal`을 거치고, 사실은 링크 행에서 대화(종류·잠금·임시·

@@ -15,11 +15,13 @@ import {
   type ArtifactShareRefusalCode,
 } from "@/lib/artifactShareAccess";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
+import { BoundedBufferError } from "@/lib/boundedBuffer";
 import type { CodePreviewKind } from "@/lib/chatArtifactPreview";
 import { isChatConversationKind } from "@/lib/conversationKindGuard";
 import { HTML_PREVIEW_MAX_BYTES } from "@/lib/htmlArtifactPreview";
 import { prisma } from "@/lib/prisma";
 import { readOwnR2ObjectBytes } from "@/lib/r2";
+import { logSecurityAuditEvent } from "@/lib/securityAudit";
 import { createShareToken, isStrongShareToken } from "@/lib/shareTokens";
 
 /**
@@ -208,12 +210,24 @@ export async function prepareArtifactShare(
     });
     if (before) return { ok: false, ...before };
     if (!artifact?.objectKey) return { ok: false, code: "ARTIFACT_SHARE_SOURCE_NOT_FOUND", status: 404 };
-    // The same non-destructive read as the download route, bounded by the preview's own limit.
-    const bytes = await readOwnR2ObjectBytes(artifact.objectKey, {
-      maxBytes: Math.max(1, Math.min(artifact.byteSize, HTML_PREVIEW_MAX_BYTES)),
-    });
-    const content = new TextDecoder("utf-8").decode(bytes);
-    const after = sizeRefusal(Buffer.byteLength(content, "utf8"));
+    // The same non-destructive read as the download route, bounded by the preview's own limit -- not by the size
+    // the row recorded. An object larger than the limit is refused as too large rather than cut short, and bytes
+    // that are not whole UTF-8 are refused rather than published with replacement characters.
+    let bytes: Buffer;
+    try {
+      bytes = await readOwnR2ObjectBytes(artifact.objectKey, { maxBytes: HTML_PREVIEW_MAX_BYTES });
+    } catch (error) {
+      const tooLarge = error instanceof BoundedBufferError ? sizeRefusal(HTML_PREVIEW_MAX_BYTES + 1) : null;
+      if (tooLarge) return { ok: false, ...tooLarge };
+      throw error;
+    }
+    let content: string;
+    try {
+      content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      return { ok: false, code: "ARTIFACT_SHARE_SOURCE_NOT_FOUND", status: 404 };
+    }
+    const after = sizeRefusal(bytes.byteLength);
     if (after) return { ok: false, ...after };
     const format = artifact.format.toLowerCase() as ArtifactShareLanguage;
     return {
@@ -272,13 +286,45 @@ const viewOf = (row: { id: string; token: string; createdAt: Date; expiresAt: Da
 });
 
 /**
+ * The one way a link is removed: its owner stops sharing it, or it has
+ * expired. The row and the page it held go together, and every removal is
+ * recorded the same way, under `artifact.share.revoke` with its reason.
+ */
+async function removeArtifactShares(
+  condition: Prisma.Sql,
+  record: { reason: "OWNER_STOPPED" | "EXPIRED"; request?: Request }
+): Promise<number> {
+  const removed = await prisma.$queryRaw<Array<{ id: string; userId: string }>>(Prisma.sql`
+    DELETE FROM "ArtifactShare" WHERE ${condition} RETURNING "id", "userId"
+  `);
+  for (const row of removed) {
+    logSecurityAuditEvent("artifact.share.revoke", {
+      userId: row.userId,
+      resourceId: row.id,
+      request: record.request,
+      outcome: "success",
+      reason: record.reason,
+    });
+  }
+  return removed.length;
+}
+
+const expiredAt = (now: Date) => Prisma.sql`"expiresAt" <= ${now.toISOString()}::timestamp(3)`;
+
+/** Removes the caller's expired link for a source, if it has one. */
+const removeExpiredForSource = (userId: string, sourceKey: string, now: Date) =>
+  removeArtifactShares(Prisma.sql`"sourceKey" = ${sourceKey} AND "userId" = ${userId} AND ${expiredAt(now)}`, { reason: "EXPIRED" });
+
+/**
  * Publishes the prepared page, or answers the live link this source already
- * has. An expired link for the same source is replaced in the same
- * transaction, so a source never has two rows.
+ * has. An expired link for the same source is removed first, the way stopping
+ * a share removes one, so a source never has two rows.
  *
- * The conversation's lock and temporary state are checked again in the
- * statement that writes: a lock set between the read above and this write
- * leaves nothing published.
+ * The conversation facts the decision read from its row -- lock, temporary
+ * state, kind and continuation bridge -- are checked again in the statement
+ * that writes: a conversation that changed between the read above and this
+ * write leaves nothing published. (The owner's plan and the Research run are
+ * not conversation facts; every public read decides them again.)
  */
 export async function publishArtifactShare(
   userId: string,
@@ -297,6 +343,7 @@ export async function publishArtifactShare(
 
 async function publishOnce(userId: string, prepared: Prepared, now: Date) {
   const expiresAt = new Date(now.getTime() + artifactShareTtlDays(process.env) * 24 * 60 * 60 * 1000);
+  await removeExpiredForSource(userId, prepared.sourceKey, now);
   return prisma.$transaction(async (tx) => {
     const existing = await tx.artifactShare.findUnique({
       where: { sourceKey: prepared.sourceKey },
@@ -304,8 +351,8 @@ async function publishOnce(userId: string, prepared: Prepared, now: Date) {
     });
     // A source key names ids only one account holds; a row of anyone else's is never touched.
     if (existing && existing.userId !== userId) return null;
-    if (existing && existing.expiresAt > now) return { share: viewOf(existing), created: false };
-    if (existing) await tx.artifactShare.delete({ where: { id: existing.id } });
+    // Live, because every row of this source expired by `now` was removed above.
+    if (existing) return existing.expiresAt > now ? { share: viewOf(existing), created: false } : null;
     const token = createShareToken();
     const inserted = await tx.$queryRaw<Array<{ id: string; token: string; createdAt: Date; expiresAt: Date }>>(Prisma.sql`
       INSERT INTO "ArtifactShare" ("id", "token", "userId", "conversationId", "messageId", "artifactId", "sourceKey",
@@ -319,6 +366,11 @@ async function publishOnce(userId: string, prepared: Prepared, now: Date) {
         AND conversation."userId" = ${userId}
         AND conversation."password" IS NULL
         AND conversation."temporaryExpiresAt" IS NULL
+        -- isChatConversationKind (lib/conversationKindGuard.ts): no kind, or "chat".
+        AND COALESCE(conversation."kind", '') IN ('chat', '')
+        AND NOT EXISTS (
+          SELECT 1 FROM "ConversationContinuationBridge" bridge WHERE bridge."conversationId" = conversation."id"
+        )
       RETURNING "id", "token", "createdAt", "expiresAt"
     `);
     const row = inserted[0];
@@ -326,8 +378,13 @@ async function publishOnce(userId: string, prepared: Prepared, now: Date) {
   });
 }
 
-/** The caller's live link for a source, or null. */
+/**
+ * The caller's live link for a source, or null. An expired one is removed
+ * here: the owner's panel does not show it, so nothing else would let them
+ * take it away.
+ */
 export async function findArtifactShare(userId: string, sourceKey: string, now: Date = new Date()) {
+  await removeExpiredForSource(userId, sourceKey, now);
   const row = await prisma.artifactShare.findFirst({
     where: { sourceKey, userId, expiresAt: { gt: now } },
     select: { id: true, token: true, createdAt: true, expiresAt: true },
@@ -336,9 +393,32 @@ export async function findArtifactShare(userId: string, sourceKey: string, now: 
 }
 
 /** Removes the caller's link. Nothing else can: the id is matched with its owner. */
-export async function revokeArtifactShare(userId: string, shareId: string) {
-  const removed = await prisma.artifactShare.deleteMany({ where: { id: shareId, userId } });
-  return removed.count > 0;
+export async function revokeArtifactShare(userId: string, shareId: string, request?: Request) {
+  const removed = await removeArtifactShares(Prisma.sql`"id" = ${shareId} AND "userId" = ${userId}`, {
+    reason: "OWNER_STOPPED",
+    request,
+  });
+  return removed > 0;
+}
+
+const EXPIRED_SWEEP_BATCH = 500;
+const EXPIRED_SWEEP_MAX_BATCHES = 20;
+
+/**
+ * The maintenance sweep's part: every link past its expiry, removed the way
+ * stopping one is, in bounded batches so one run cannot hold the table.
+ */
+export async function deleteExpiredArtifactShares(now: Date = new Date()): Promise<{ count: number }> {
+  let count = 0;
+  for (let batch = 0; batch < EXPIRED_SWEEP_MAX_BATCHES; batch += 1) {
+    const removed = await removeArtifactShares(
+      Prisma.sql`"id" IN (SELECT "id" FROM "ArtifactShare" WHERE ${expiredAt(now)} ORDER BY "expiresAt" LIMIT ${EXPIRED_SWEEP_BATCH})`,
+      { reason: "EXPIRED" }
+    );
+    count += removed;
+    if (removed < EXPIRED_SWEEP_BATCH) break;
+  }
+  return { count };
 }
 
 /**
@@ -349,7 +429,7 @@ export async function revokeArtifactShare(userId: string, shareId: string) {
  * answer's Research run and its owner's plan -- plus the switches the caller
  * passes in. A link whose source stopped qualifying is closed, not deleted,
  * as a lock closes one: it opens again if the source qualifies again before
- * it expires.
+ * it expires. An expired link is deleted when it is met here.
  *
  * Reads no session and no cookie: it takes the token and follows the
  * database from the link's own row.
@@ -362,8 +442,9 @@ export async function readPublicArtifactShare(
   // The switch first, so a closed feature reads no link at all.
   if (!isStrongShareToken(token) || gateRefusal({ sharingAvailable: gates.sharingAvailable, planAllowsSharing: true })) return null;
   const row = await prisma.artifactShare.findFirst({
-    where: { token, expiresAt: { gt: now } },
+    where: { token },
     select: {
+      id: true,
       userId: true,
       previewKind: true,
       language: true,
@@ -375,6 +456,11 @@ export async function readPublicArtifactShare(
     },
   });
   if (!row) return null;
+  if (row.expiresAt <= now) {
+    // Expired: not shown, and removed now, the way stopping a share removes one.
+    await removeArtifactShares(Prisma.sql`"id" = ${row.id} AND ${expiredAt(now)}`, { reason: "EXPIRED" });
+    return null;
+  }
   const refusal = await shareRefusal({
     sharingAvailable: gates.sharingAvailable,
     ownerId: row.userId,

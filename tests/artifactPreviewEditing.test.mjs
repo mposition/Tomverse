@@ -9,6 +9,7 @@ import {
     editedVersionKey,
     keepEditedVersion,
     markdownFenceFor,
+    previewableBlockIndex,
     readEditedVersion,
 } from "../lib/artifactPreviewEditing.ts";
 import { artifactWorkspaceCopy } from "../locales/artifactWorkspace.ts";
@@ -75,6 +76,20 @@ test("the same code in two answers, or twice in one answer, keeps its edits apar
     // A block whose text changed is a different source.
     assert.notEqual(editedVersionKey({ messageId: "msg_1", blockIndex: 0, kind: "html", original: "<p>new</p>" }), first);
     keepEditedVersion(first, original, original);
+});
+
+test("a block's position counts only the answer's previewable blocks", () => {
+    const blocks = ["hljs language-bash", "hljs language-html", undefined, "hljs language-python", "hljs language-svg", "hljs language-tsx"];
+    assert.equal(previewableBlockIndex(blocks, 1), 0);
+    assert.equal(previewableBlockIndex(blocks, 4), 1);
+    assert.equal(previewableBlockIndex(blocks, 5), 2);
+    // Code that cannot be previewed has no position, and a block that is not in the answer has none either.
+    assert.equal(previewableBlockIndex(blocks, 0), -1);
+    assert.equal(previewableBlockIndex(blocks, 2), -1);
+    assert.equal(previewableBlockIndex(blocks, -1), -1);
+    assert.equal(previewableBlockIndex(blocks, 9), -1);
+    // A shell block added above the HTML block does not move it.
+    assert.equal(previewableBlockIndex(["hljs language-js", ...blocks], 2), 0);
 });
 
 test("a block with no saved answer around it keeps no edit at all", () => {

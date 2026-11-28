@@ -11,7 +11,7 @@
  * Pure and client-safe: strings only.
  */
 
-import type { CodePreviewKind } from "@/lib/chatArtifactPreview";
+import { codeLanguageFromClassName, codePreviewKindForLanguage, type CodePreviewKind } from "@/lib/chatArtifactPreview";
 
 /** The pause after the last keystroke before the live preview is rebuilt. */
 export const ARTIFACT_EDIT_RENDER_DELAY_MS = 400;
@@ -80,7 +80,8 @@ const editedVersions = new Map<string, string>();
 /**
  * Which edit belongs to which source. A file is its id. A code block is where
  * it is -- its answer's `data-message-id` and its position among that
- * answer's blocks, the same source the share link reads -- plus its text, so
+ * answer's previewable blocks (`previewableBlockIndex`), the same answer id
+ * the share link reads -- plus its text, so
  * two answers that hold the same code keep their edits apart, and an answer
  * whose block changed does not inherit an edit of the old one. A block with no
  * answer id (an answer not saved yet) has no key and keeps no edit.
@@ -95,6 +96,20 @@ export const editedVersionKey = (source: {
     if (source.artifactId) return `artifact:${source.artifactId}`;
     if (!source.messageId || source.blockIndex == null || !Number.isInteger(source.blockIndex) || source.blockIndex < 0) return null;
     return `code:${source.messageId}:${source.blockIndex}:${source.kind}:${source.original}`;
+};
+
+const isPreviewableBlock = (codeClassName: string | null | undefined) =>
+    codePreviewKindForLanguage(codeLanguageFromClassName(codeClassName)) !== null;
+
+/**
+ * A block's position among the blocks of its answer that can be previewed,
+ * from each block's `<code>` class name in document order -- so a shell or
+ * Python block above an HTML block does not move that block's edit. -1 when
+ * the block itself cannot be previewed or is not in the list.
+ */
+export const previewableBlockIndex = (codeClassNames: ReadonlyArray<string | null | undefined>, own: number): number => {
+    if (!Number.isInteger(own) || own < 0 || own >= codeClassNames.length || !isPreviewableBlock(codeClassNames[own])) return -1;
+    return codeClassNames.slice(0, own).filter(isPreviewableBlock).length;
 };
 
 export const readEditedVersion = (key: string | null) => (key ? editedVersions.get(key) ?? null : null);

@@ -8,6 +8,7 @@ import { ArtifactPreviewWorkspace } from "@/components/chat/ArtifactPreviewWorks
 import { ArtifactShareControl } from "@/components/chat/ArtifactShareControl";
 import { useChatArtifactWorkspace, useCodeBlockStreaming } from "@/components/chat/ChatArtifactWorkspaceContext";
 import { useLanguage } from "@/components/LanguageProvider";
+import { previewableBlockIndex } from "@/lib/artifactPreviewEditing";
 import {
   codeLanguageFromClassName,
   codePreviewKindForLanguage,
@@ -44,7 +45,7 @@ type Opened = {
   code: string;
   /** The answer the block is in, from the message element around it (`data-message-id`); null for an unsaved one. */
   messageId: string | null;
-  /** The block's position among that answer's blocks, -1 when there is no answer element. */
+  /** The block's position among that answer's previewable blocks, -1 when there is no answer element. */
   blockIndex: number;
 };
 
@@ -77,7 +78,11 @@ export function CodeBlockPreview({ children, preRef }: { children: ReactNode; pr
     const code = (preRef.current?.textContent ?? "").replace(/\r?\n$/, "");
     const answer = preRef.current?.closest("[data-message-id]") ?? null;
     const messageId = answer?.getAttribute("data-message-id") || null;
-    const blockIndex = answer && preRef.current ? Array.from(answer.querySelectorAll("pre")).indexOf(preRef.current) : -1;
+    // Counted among the answer's previewable blocks only, so other code above it does not move its edit.
+    const blocks = answer ? Array.from(answer.querySelectorAll("pre")) : [];
+    const blockIndex = preRef.current
+      ? previewableBlockIndex(blocks.map((pre) => pre.querySelector("code")?.className), blocks.indexOf(preRef.current))
+      : -1;
     setOpened({ kind, language, code, messageId, blockIndex });
   };
 

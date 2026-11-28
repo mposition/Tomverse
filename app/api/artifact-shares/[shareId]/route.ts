@@ -28,11 +28,11 @@ export async function DELETE(req: Request, context: { params: Promise<{ shareId:
     return security;
   }
   logSecurityAuditEvent("artifact.share.revoke", { userId, resourceId: shareId, request: req, outcome: "attempt" });
-  const removed = typeof shareId === "string" && shareId.length <= 64 ? await revokeArtifactShare(userId, shareId) : false;
+  // The removal records its own success, as an expired link's removal does (lib/artifactShareService.ts).
+  const removed = typeof shareId === "string" && shareId.length <= 64 ? await revokeArtifactShare(userId, shareId, req) : false;
   if (!removed) {
     logSecurityAuditEvent("artifact.share.revoke", { userId, resourceId: shareId, request: req, outcome: "denied", reason: "NOT_FOUND" });
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  logSecurityAuditEvent("artifact.share.revoke", { userId, resourceId: shareId, request: req, outcome: "success" });
   return NextResponse.json({ success: true });
 }
