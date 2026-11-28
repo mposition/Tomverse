@@ -35,15 +35,21 @@ const sha256Hex = async (text: string) => {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 };
 
-const statusPath = async (source: ArtifactShareSource) =>
-  source.kind === "artifact"
-    ? `/api/artifact-shares?artifactId=${encodeURIComponent(source.artifactId)}`
-    : `/api/artifact-shares?${new URLSearchParams({
+const SHARES_PATH = "/api/artifact-shares";
+
+// The query is built with URLSearchParams on both branches (no literal "?name=" in a
+// string, which the repository's encoding check reads as mojibake).
+const statusPath = async (source: ArtifactShareSource) => {
+  const query = source.kind === "artifact"
+    ? new URLSearchParams({ artifactId: source.artifactId })
+    : new URLSearchParams({
         messageId: source.messageId,
         blockIndex: String(source.blockIndex),
         language: source.language,
         contentHash: await sha256Hex(source.code),
-      }).toString()}`;
+      });
+  return `${SHARES_PATH}?${query.toString()}`;
+};
 
 const button =
   "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-generated-artifact-500 disabled:opacity-60";
