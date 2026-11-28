@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -47,13 +48,13 @@ setTimeout(() => {}, 2600);
   try {
     const page = await application.firstWindow();
     page.setDefaultTimeout(10_000);
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     const composer = page.getByRole("textbox", { name: "Code request" });
     const send = page.getByRole("button", { name: "Send Code request" });
     const recovery = page.getByRole("button", { name: "Check recovery" });
     const view = () => page.evaluate(() => window.desktop.state());
 
-    await page.getByLabel("Code mode").selectOption("ask");
+    await selectCodeMode(page, "ask");
     await composer.fill("Stream cut");
     await send.click();
     await expect(recovery).toBeEnabled();
@@ -127,7 +128,7 @@ setTimeout(() => {}, 2600);
     } finally {
       saved.release();
     }
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await page.getByRole("button", { name: "Interrupted patch checkpoint", exact: true }).click();
     await expect(page.getByText("Outcome unconfirmed", { exact: true })).toBeVisible();
     await application.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false }); });
@@ -139,7 +140,7 @@ setTimeout(() => {}, 2600);
     assert.equal(await readFile(join(root, "interrupted.txt"), "utf8"), persistedText);
     assert.equal(gateway.completions.length, 2);
 
-    await page.getByLabel("Code mode").selectOption("agent");
+    await selectCodeMode(page, "agent");
     await composer.fill("Interrupted command");
     const [approval] = await Promise.all([application.waitForEvent("window", { timeout: 10_000 }), send.click()]);
     await expect(approval.getByRole("heading", { name: "Exact command" })).toBeVisible();
@@ -178,7 +179,7 @@ setTimeout(() => {}, 2600);
 
     await rename(root, join(tmp, "old-project"));
     await mkdir(root);
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await expect(page.getByRole("button", { name: "Status unavailable", exact: true })).toHaveCount(0);
     assert.equal((await view()).history.length, 0);
     await page.evaluate((id) => window.desktop.openHistory(id), saved.state.id);

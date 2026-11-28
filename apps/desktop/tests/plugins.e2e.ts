@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -40,7 +41,7 @@ test("a plugin installed from a folder shows what it holds before it is installe
   });
   try {
     const page = await app.firstWindow();
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await page.getByRole("button", { name: "Desktop settings" }).click();
     await page.getByRole("button", { name: "Execution and limits", exact: true }).click();
 
@@ -80,7 +81,7 @@ test("a plugin installed from a folder shows what it holds before it is installe
 
     // Back in Code: the plugin's skill is in the / list under its plugin name, and runs.
     await page.getByRole("button", { name: "Code", exact: true }).click();
-    await page.getByLabel("Code mode").selectOption("ask");
+    await selectCodeMode(page, "ask");
     const composer = page.getByRole("textbox", { name: "Code request" });
     await composer.fill("/demo");
     const menu = page.getByTestId("slash-menu");
@@ -101,7 +102,7 @@ test("a plugin installed from a folder shows what it holds before it is installe
     await expect(approving.getByRole("status")).toHaveText("On");
     await page.getByRole("button", { name: "Code", exact: true }).click();
     await page.getByRole("button", { name: "New task", exact: true }).click();
-    await page.getByLabel("Code mode").selectOption("ask");
+    await selectCodeMode(page, "ask");
     await composer.fill("Say hi");
     await page.getByRole("button", { name: "Send Code request" }).click();
     await expect.poll(() => gateway.completions.length, { timeout: 20_000 }).toBe(2);

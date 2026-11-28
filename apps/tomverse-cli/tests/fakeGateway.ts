@@ -53,6 +53,10 @@ export type FakeGatewayOptions = {
     beforeStatus?: (requestId: string | null) => void | Promise<void>;
     /** POST /web-search: the answer for one search request ("drop" closes the connection). Absent: the route does not exist (404). */
     webSearch?: (body: any, index: number) => { status: number; body: unknown } | "drop";
+    /** Which requests are signed in. Absent: exactly the test key, as before. A Desktop session test checks its own token and origin. */
+    authorize?: (headers: IncomingMessage["headers"]) => boolean;
+    /** A fixed port (a Desktop build whose test account origin is baked in). Absent: any free port. */
+    port?: number;
 };
 
 /** The Tomverse API's web search answer for these queries, one result each. */
@@ -104,6 +108,12 @@ export class FakeGateway {
     async start() {
         // fetch refuses the Fetch standard's "bad ports" (e.g. 6665-6669), which a
         // random port can be; take another one then.
+        if (this.options.port) {
+            this.server = createServer((req, res) => this.handle(req, res));
+            await new Promise<void>((resolve, reject) => this.server!.once("error", reject).listen(this.options.port, "127.0.0.1", resolve));
+            this.port = this.options.port;
+            return this;
+        }
         for (;;) {
             this.server = createServer((req, res) => this.handle(req, res));
             await new Promise<void>((resolve) => this.server!.listen(0, "127.0.0.1", resolve));
@@ -137,7 +147,8 @@ export class FakeGateway {
         }
         const recorded = { method: req.method ?? "GET", url: url.pathname + url.search, headers: req.headers, body };
         this.requests.push(recorded);
-        if (this.revoked || req.headers.authorization !== `Bearer ${TEST_KEY}`) {
+        const signedIn = this.options.authorize ? this.options.authorize(req.headers) : req.headers.authorization === `Bearer ${TEST_KEY}`;
+        if (this.revoked || !signedIn) {
             return this.json(res, 401, { error: { message: "A valid Tomverse API key is required.", code: "invalid_api_key", type: "authentication_error" } });
         }
         if (url.pathname === "/api/code/v1/models") return this.json(res, 200, { object: "list", data: this.options.models ?? DEFAULT_MODELS });

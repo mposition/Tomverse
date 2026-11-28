@@ -13,7 +13,12 @@ import type { ReviewDiff, ReviewFile, ReviewHunk, ReviewModelResult, ReviewScope
 import type { AgentGitAction, AgentGitResult } from "../git-actions-contract";
 import type { PickedPicture } from "./browser-pick-store";
 
-export type Connection = { endpoint: string; key: string };
+/**
+ * Where Code's agent engine sends its requests, and with what. `key` is a Code key, or with `session` the stable, non-secret
+ * identity of the account's signed-in Desktop session (host/code-session.ts): history and receipts are kept under it
+ * as under a key, and the access token itself reaches a runtime only through the "desktop-session" message.
+ */
+export type Connection = { endpoint: string; key: string; session?: true };
 export type RecordedSession = { requestId: string; storage: string | null; sessionId: string; project: ProjectRoot;
   sourceProject?: ProjectRoot; scope: HistoryScope };
 type RecordedItem = RecordedSession & { recordId: string };
@@ -25,6 +30,8 @@ type NativeFixtureTask = { runId: string; project: ProjectRoot; fixture: CliFixt
 export type WorkerCommand =
   /** The permission mode (a person's choice in the app) and the folder of the user's permission rules; the runtime asks until it has one. */
   | { type: "permissions"; mode: "read_only" | "ask" | "auto_review" | "allow_all"; home: string }
+  /** The Desktop session's access token in force for `identity`, or null: signed out, expired or another account. Kept in memory only. */
+  | { type: "desktop-session"; identity: string; token: string | null }
   | { type: "catalog"; requestId: string; connection: Connection }
   | { type: "start"; runId: string; project: ProjectRoot; sourceProject?: ProjectRoot; scope: HistoryScope; protectedRoot: string; connection: Connection; input: StartInput;
     references: WorkspaceReference[]; pictures?: PickedPicture[]; preference: CodeExecutionMode; browserSnapshot?: boolean; browserAgent?: boolean; browserWeb?: boolean; computerUse?: boolean; terminalRead?: boolean;
@@ -79,7 +86,8 @@ export type WorkerCommand =
 
 export type WorkerEvent =
   | { type: "catalog"; requestId: string; models: Model[] }
-  | { type: "catalog-failed"; requestId: string }
+  /** `plan`: the server refused the account's plan (Code is Pro and above); anything else is a plain failure. */
+  | { type: "catalog-failed"; requestId: string; reason?: "plan" }
   | { type: "task"; runId: string; task: Task }
   | { type: "code-plugin"; runId: string; requestId: string; action: DesktopMcpAction }
   | { type: "code-plugin-cancel"; runId: string; requestId: string }

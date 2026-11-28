@@ -595,6 +595,8 @@ export const de = {
         locationErrordenied: "Standortzugriff verweigert. Erlauben Sie ihn in den Browser- oder Geräteeinstellungen und versuchen Sie es erneut.",
         locationErrortimeout: "Standortabfrage abgelaufen. Die Nachricht wird ohne Standort gesendet. Erneut versuchen unter + Werkzeuge.",
         locationErrorunavailable: "Standort nicht verfügbar. Die Nachricht wird ohne Standort gesendet. Sie können einen Ort eingeben.",
+        locationWindowsOff: "Die Windows-Standortdienste sind aus, daher kann Ihr aktueller Standort nicht ermittelt werden. Sie können einen Ort eingeben.",
+        locationOpenWindowsSettings: "Windows-Standorteinstellungen öffnen",
         toolsWebSearchOffDescription: "Antworten erfolgen ohne Websuche.",
         toolsWebSearchOnDescription: "Sucht automatisch im Web, wenn aktuelle Informationen oder Quellen nötig sind.",
         toolsWebSearchCostNote: "Pro Modell, das tatsächlich sucht, fallen zusätzlich {credits} Credits an. Ohne Suche entstehen keine zusätzlichen Credits.",

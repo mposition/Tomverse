@@ -26,11 +26,13 @@ test("Desktop opens the shared model picker, dismisses menus, renders saved imag
         const url = new URL(href);
         if (url.origin !== origin) throw Error("Unexpected external origin");
         if (url.pathname === "/auth/desktop/drive-picker") {
+          // The first window is left open with nothing chosen: the composer must offer its own Cancel.
+          if (driveOpens++ === 0) return;
           const request = new URLSearchParams(url.hash.slice(1));
           const state = request.get("state")!;
           const callback = new URL(`http://127.0.0.1:${request.get("port")}/desktop-drive/callback`);
           callback.searchParams.set("state", state);
-          if (driveOpens++ > 0) {
+          if (driveOpens > 2) {
             const algorithm = { name: "ECDH", namedCurve: "P-256" };
             const pair = await crypto.subtle.generateKey(algorithm, false, ["deriveKey"]);
             const peer = await crypto.subtle.importKey("raw", new Uint8Array(Buffer.from(request.get("key")!, "base64url")), algorithm, false, []);
@@ -73,8 +75,9 @@ test("Desktop opens the shared model picker, dismisses menus, renders saved imag
         ] }], contradictions: [], missingPoints: [], verificationNeeded: [], modelAssessments: [], synthesis: "", confidence: "high",
         limitations: [], groundingStats: { totalCitations: 1, verifiedCitations: 1 },
       } }, secondary: null, agreement: null } };
-      const host = globalThis as typeof globalThis & { runs: number };
+      const host = globalThis as typeof globalThis & { runs: number; driveImports: number };
       host.runs = 0;
+      host.driveImports = 0;
       globalThis.fetch = async (input, init) => {
         const url = new URL(String(input));
         if (url.origin !== origin) throw Error("Unexpected network request");
@@ -124,6 +127,7 @@ test("Desktop opens the shared model picker, dismisses menus, renders saved imag
           case "/api/chat": {
             const body = JSON.parse(String(init?.body));
             if (method === "PUT" && body.action === "google-drive-import" && body.fileId === "fake-drive-doc" && body.accessToken === "synthetic-google-token") {
+              host.driveImports++;
               return Response.json({ uploadId: "synthetic-drive-upload", name: "Notebook.txt", mediaType: "text/plain", size: 64, kind: "text" });
             }
             if (method !== "POST" || body.deepResearchDepth !== "deep" || body.modelId !== researchModel ||
@@ -267,6 +271,15 @@ test("Desktop opens the shared model picker, dismisses menus, renders saved imag
     const draft = page.locator("#chat-draft-input");
     await draft.fill("Investigate the sources in the attached note.");
     const drive = () => tools.getByRole("button", { name: /Attach from Google Drive/ });
+    await tools.locator("summary").click();
+    await drive().click();
+    await expect(page.locator(".attachment-progress")).toContainText("Choosing files in the Google Drive window…");
+    await page.locator(".attachment-progress").getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(page.locator(".attachment-progress")).toHaveCount(0);
+    await expect(page.locator("#chat-draft-input")).toBeEnabled();
+    await expect(page.locator(".notice")).toHaveCount(0);
+    await expect(page.locator(".attachment-draft")).toHaveCount(0);
+    assert.equal(await app.evaluate(() => (globalThis as typeof globalThis & { driveImports: number }).driveImports), 0);
     await tools.locator("summary").click();
     await drive().click();
     await expect(page.locator(".attachment-progress")).toHaveCount(0);

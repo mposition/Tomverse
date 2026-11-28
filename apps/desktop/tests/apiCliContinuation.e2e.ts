@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { openCodeProject } from "./code-project-fixture";
 import { expect, type ElectronApplication } from "@playwright/test";
 import { FakeGateway, fixtureWorkAnalysis, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
 import { codeHistoryScope } from "../src/host/history-scope";
@@ -124,7 +125,7 @@ test("A reconciled API refusal starts one confirmed read-only Codex continuation
     app = await open();
     const page = await app.firstWindow();
     const state = () => page.evaluate(() => window.desktop.state());
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await expect.poll(async () => (await state()).codeFallback?.scope).toBeTruthy();
     await page.evaluate(async (model) => {
       const scope = (await window.desktop.state()).codeFallback!.scope;
@@ -226,7 +227,7 @@ test("A reconciled API refusal starts one confirmed read-only Codex continuation
     await app.close();
     app = await open();
     const restored = await app.firstWindow();
-    await restored.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(restored);
     const openSavedTask = async (name: string | RegExp) => {
       const showHistory = restored.getByRole("button", { name: "Show history", exact: true });
       if (await showHistory.isVisible()) await showHistory.click();

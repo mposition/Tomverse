@@ -614,6 +614,8 @@ export const zh = {
         locationErrordenied: "位置权限被拒绝。请在浏览器或设备设置中允许后重试。",
         locationErrortimeout: "获取位置超时，本条消息将不使用位置。可在 + 工具中重试。",
         locationErrorunavailable: "无法获取当前位置，将不使用位置继续对话。您也可以直接输入地点。",
+        locationWindowsOff: "Windows 位置服务已关闭，无法获取当前位置。您也可以直接输入地点。",
+        locationOpenWindowsSettings: "打开 Windows 位置设置",
         toolsWebSearchOffDescription: "不搜索网页作答。",
         toolsWebSearchOnDescription: "需要最新信息或来源时会自动搜索网页。",
         toolsWebSearchCostNote: "每个执行搜索的模型会额外扣除 {credits} 个积分。未执行搜索则不额外扣费。",

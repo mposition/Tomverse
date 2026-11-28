@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject, selectCodeMode, startPlanOnly } from "./code-project-fixture";
 import { execFileSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, realpath, rm, rmdir, writeFile } from "node:fs/promises";
@@ -361,12 +362,11 @@ for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop a
       }
       return [state?.title, state?.status];
     }, { timeout: taskWait }).toEqual([phase === "guide" ? titles.allow : titles[phase], status]);
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await page.evaluate(() => window.desktop.setCodeExecutionPreference("provider_cli"));
-    const mode = page.getByLabel("Code mode");
     const composer = page.getByRole("textbox", { name: "Code request" });
     const send = page.getByRole("button", { name: "Send Code request", exact: true });
-    await mode.selectOption("ask");
+    await selectCodeMode(page, "ask");
     await composer.fill(titles.ask);
     await send.click();
     await awaitTask("completed");
@@ -380,9 +380,7 @@ for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop a
       await expect(usage.locator("..")).toContainText("Token usage unconfirmed");
     }
     phase = "plan";
-    await mode.selectOption("plan");
-    await composer.fill(titles.plan);
-    await send.click();
+    await startPlanOnly(page, titles.plan);
     await awaitTask("completed");
     const planned = await task();
     assert.equal(planned?.plan?.analysis?.objective, fixtureWorkAnalysis.objective);
@@ -393,7 +391,7 @@ for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop a
     await expect(page.locator('.code-task-list-item[data-status="pending"]')).toHaveCount(2);
     await expect(page.locator(".code-task-list")).toContainText("0/2 complete");
     await assert.rejects(readFile(join(project, "plan.txt")), { code: "ENOENT" });
-    await mode.selectOption("agent");
+    await selectCodeMode(page, "agent");
     await page.getByRole("checkbox", { name: "Save to local history" }).check();
     const row = page.locator(".code-task-list-item").filter({ hasText: rowTitle });
     for (const action of ["deny", "stale", "allow"] as const) {
@@ -477,7 +475,7 @@ for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop a
     app = await launchNativeFixture(descriptor);
     let restored = await app.firstWindow();
     const current = () => restored.evaluate(() => window.desktop.state().then(({ task }) => task));
-    await restored.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(restored);
     await restored.getByRole("complementary", { name: "History" }).getByRole("button", { name: titles.allow, exact: true }).click();
     await expect(restored.locator(".code-task-list-item").filter({ hasText: rowTitle })).toContainText(model);
     if (!zcode) await expect(restored.locator(".entry--user").filter({ hasText: guideText })).toHaveCount(1);
@@ -514,7 +512,7 @@ for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop a
       await app.close();
       app = await launchNativeFixture(descriptor);
       restored = await app.firstWindow();
-      await restored.getByRole("button", { name: "Open local folder" }).click();
+      await openCodeProject(restored);
       await restored.getByRole("complementary", { name: "History" }).getByRole("button", { name: titles.allow, exact: true }).click();
       const summary = restored.getByText("Provider usage · ZCode Agent", { exact: true });
       await summary.click();
@@ -537,7 +535,7 @@ for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop a
       await app.close();
       app = await launchNativeFixture(descriptor);
       restored = await app.firstWindow();
-      await restored.getByRole("button", { name: "Open local folder" }).click();
+      await openCodeProject(restored);
       await restored.getByRole("complementary", { name: "History" }).getByRole("button", { name: titles.allow, exact: true }).click();
       const usage = restored.getByText("Provider usage · " + (vendor.key === "vibe" ? "Mistral Vibe" : vendor.name), { exact: true });
       await usage.click();
@@ -552,12 +550,11 @@ for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop a
     }
 
     if (antigravity) {
-      const restoredMode = restored.getByLabel("Code mode");
       const restoredComposer = restored.getByRole("textbox", { name: "Code request" });
       const restoredSend = restored.getByRole("button", { name: "Send Code request", exact: true });
       await restored.getByRole("checkbox", { name: "Save to local history" }).check();
       phase = "crashApproval";
-      await restoredMode.selectOption("agent");
+      await selectCodeMode(restored, "agent");
       await restoredComposer.fill(titles.crashApproval);
       const [interruptedApproval] = await Promise.all([app.waitForEvent("window", { timeout: taskWait }), restoredSend.click()]);
       await expect(interruptedApproval.getByRole("heading", { name: "crashApproval.txt · create" })).toBeVisible({ timeout: approvalViewWait });
@@ -573,7 +570,7 @@ for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop a
         alternate: { url: "http://127.0.0.1:" + address.port + "/unexpected-mcp" },
       } }));
       const modelRequests = serial;
-      await restored.getByLabel("Code mode").selectOption("ask");
+      await selectCodeMode(restored, "ask");
       await restored.getByRole("textbox", { name: "Code request" }).fill("Try the workspace with a configured MCP server");
       await restored.getByRole("button", { name: "Send Code request", exact: true }).click();
       await expect.poll(async () => {
@@ -586,7 +583,7 @@ for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop a
       await rmdir(join(project, ".agents"));
 
       phase = "crashStream";
-      await restoredMode.selectOption("ask");
+      await selectCodeMode(restored, "ask");
       await restoredComposer.fill(titles.crashStream);
       await restoredSend.click();
       await expect.poll(() => count.crashStream, { timeout: taskWait }).toBe(1);
@@ -690,16 +687,13 @@ test("ZCode Agent applies a guide in the active task and restores the draft when
       if (current?.status === "unknown" || current?.status === "failed") throw new Error(`ZCode returned ${current.status} during ${phase}.`);
       return current?.status;
     }, { timeout: taskWait }).toBe(status);
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await page.evaluate(() => window.desktop.setCodeExecutionPreference("provider_cli"));
-    const mode = page.getByLabel("Code mode");
     const composer = page.getByRole("textbox", { name: "Code request" });
     const send = page.getByRole("button", { name: "Send Code request", exact: true });
     const steer = page.getByRole("button", { name: "Send follow-up instruction", exact: true });
     await page.getByRole("checkbox", { name: "Save to local history" }).check();
-    await mode.selectOption("plan");
-    await composer.fill(planPrompt);
-    await send.click();
+    await startPlanOnly(page, planPrompt);
     await expect.poll(() => Boolean(held), { timeout: taskWait }).toBe(true);
     const initial = await task();
     assert.ok(initial?.id && initial.nativeSession);
@@ -735,7 +729,7 @@ test("ZCode Agent applies a guide in the active task and restores the draft when
     calls = 0;
     held = undefined;
     heldClosed = false;
-    await mode.selectOption("ask");
+    await selectCodeMode(page, "ask");
     await composer.fill(stopPrompt);
     await send.click();
     await expect.poll(() => Boolean(held), { timeout: taskWait }).toBe(true);
@@ -757,7 +751,7 @@ test("ZCode Agent applies a guide in the active task and restores the draft when
     calls = 0;
     app = await launchNativeFixture(descriptor);
     const restored = await app.firstWindow();
-    await restored.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(restored);
     const history = restored.getByRole("complementary", { name: "History" });
     await history.getByRole("button", { name: planPrompt, exact: true }).click();
     await expect(restored.locator(".entry--user").filter({ hasText: guide })).toHaveCount(1);

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject } from "./code-project-fixture";
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -37,7 +38,7 @@ test("The Git panel commits locally, and a push leaves the app only after the ap
     await writeFile(descriptor, JSON.stringify({ root, profile, endpoint: gateway.base, key: TEST_KEY }));
     app = await launchNativeFixture(descriptor);
     const page = await app.firstWindow();
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await page.getByRole("button", { name: "Git and pull request", exact: true }).click();
     const panel = page.getByRole("dialog", { name: "Git", exact: true });
     await expect(panel.getByText("main", { exact: true })).toBeVisible();

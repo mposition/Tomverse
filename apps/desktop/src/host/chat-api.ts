@@ -31,6 +31,8 @@ import { VOICE_TRANSCRIPT_MAX_CHARACTERS } from "../../../../lib/voiceInputForma
 import type { DictationClip, DictationReply } from "../dictation-contract";
 import { desktopMcpReply, type DesktopMcpAction } from "../../../../lib/desktopCodeMcpContract";
 import { desktopPluginInventory } from "../plugin-contract";
+import { PLUGIN_CATALOG_PATH, catalogMaxAge, pluginCatalogBody } from "../plugin-catalog-contract";
+import type { CatalogRead } from "./plugin-catalog";
 import type { McpProgressState } from "../../../../lib/mcpConnectorProgress";
 import { DesktopSessionRefused } from "./browser-login";
 import type { VoiceBody } from "../voice-contract";
@@ -185,6 +187,22 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
     },
     async pluginInventory() {
       return request(DESKTOP_PLUGIN_INVENTORY, desktopPluginInventory);
+    },
+    /** The Plugins screen's platform list, revalidated with the ETag of the copy already held. */
+    async pluginCatalog(known?: string): Promise<CatalogRead> {
+      const response = await send(PLUGIN_CATALOG_PATH, "GET", undefined, {
+        signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]), headers: known ? { "If-None-Match": known } : undefined });
+      const maxAge = catalogMaxAge(response.headers.get("cache-control"));
+      if (response.status === 304) {
+        await response.body?.cancel().catch(() => {});
+        return { status: "not-modified", maxAge };
+      }
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => {});
+        if (response.status === 401) throw new DesktopSessionRefused();
+        throw new DesktopApiError(response.status);
+      }
+      return { status: "ok", catalog: pluginCatalogBody.parse(await response.json()), etag: response.headers.get("etag"), maxAge };
     },
     async imageConversations() {
       const rows = await request(DESKTOP_CHAT_HISTORY, z.array(chatHistoryRow));

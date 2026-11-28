@@ -37,7 +37,8 @@ import { noteSmartAdaptiveRefusal, rememberSmartAdaptiveToolCalls, routeSmartAda
 import { externalApiRunnableModels, type ExternalApiSurface } from "@/lib/externalApiCatalog";
 import { externalApiAdmissionHook } from "@/lib/externalApiAdmission";
 import { pickRequestedModel } from "@/lib/externalApiProtocols";
-import { authenticateExternalApiKey, ExternalApiKeyError } from "@/lib/externalApiKeys";
+import { ExternalApiKeyError } from "@/lib/externalApiKeys";
+import { admissionCredential, authenticateExternalApiCaller, callerScope, receiptOwner, type ExternalApiReceiptOwner } from "@/lib/externalApiCaller";
 import { sha256Hex } from "@/lib/externalApiKeyCore";
 import { modelReasoningEffortOptions, modelWithReasoningEffort, reasoningEffortEnabled, reasoningEffortStepsEnabled } from "@/lib/reasoningEffort";
 import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
@@ -81,6 +82,10 @@ import {
  * account's plan and purchased credits (and the provider cost budget) before
  * dispatch, the admission hook enforces the key's own cap inside that same
  * transaction, and settleChatUsage settles at the existing contract.
+ *
+ * On the coding API, Desktop Code's engine may come with the account's Desktop
+ * session instead of a key (lib/externalApiCaller.ts): the same account check,
+ * reservation, settlement and receipt, with no key cap of its own.
  */
 
 const NO_STORE = { "Cache-Control": "no-store" } as const;
@@ -233,7 +238,7 @@ export async function handleChatCompletions(request: Request, options: { surface
     let handedToStream = false;
     let disposeDispatch: (() => void) | null = null;
     try {
-        const key = await authenticateExternalApiKey(request.headers.get("authorization"));
+        const key = await authenticateExternalApiCaller(request);
         const account = await externalApiAccountAccess(key.userId);
         if (!account.allowed) return externalApiErrorResponse(403, account.message, account.code, { requestId });
         // An abuse guard on request rate, generous and per account: credits,
@@ -267,7 +272,7 @@ export async function handleChatCompletions(request: Request, options: { surface
         }
         const idempotencyKeyDigest = idempotencyHeader ? sha256Hex(idempotencyHeader) : null;
         if (idempotencyKeyDigest) {
-            const replay = await idempotentReplay(key.keyId, idempotencyKeyDigest, requestDigest);
+            const replay = await idempotentReplay(receiptOwner(key), idempotencyKeyDigest, requestDigest);
             if (replay) return replay;
         }
 
@@ -306,10 +311,10 @@ export async function handleChatCompletions(request: Request, options: { surface
                 ? await routeSmartAdaptive({
                       request: parsed,
                       runnable,
-                      keyId: key.keyId,
+                      keyId: callerScope(key),
                       userId: key.userId,
                       requestId,
-                      routerAllowed: () => smartAdaptiveRouterAllowed(key),
+                      routerAllowed: () => smartAdaptiveRouterAllowed({ keyId: callerScope(key), creditCap: key.creditCap }),
                       idempotencyKeyDigest,
                       requestDigest,
                       userAgent: request.headers.get("user-agent"),
@@ -442,7 +447,7 @@ export async function handleChatCompletions(request: Request, options: { surface
                 source: "external_api",
                 withinReservationTransaction: externalApiAdmissionHook({
                     requestId,
-                    keyId: key.keyId,
+                    credential: admissionCredential(key),
                     userId: key.userId,
                     modelId: model.id,
                     stream: requestOptions.stream,
@@ -461,12 +466,12 @@ export async function handleChatCompletions(request: Request, options: { surface
             // recorded under this key, the twin is that request: it gets the
             // original's receipt, not the refusal.
             if (idempotencyKeyDigest && (isChatAccessError(error) || error instanceof ApiSecurityError)) {
-                const replay = await idempotentReplay(key.keyId, idempotencyKeyDigest, requestDigest);
+                const replay = await idempotentReplay(receiptOwner(key), idempotencyKeyDigest, requestDigest);
                 if (replay) return replay;
             }
             // Admission refused: hold off further router calls for this key a
             // while, since the next requests would most likely be refused too.
-            if (parsed.model === SMART_ADAPTIVE_MODEL_ID && isChatAccessError(error)) noteSmartAdaptiveRefusal(key.keyId);
+            if (parsed.model === SMART_ADAPTIVE_MODEL_ID && isChatAccessError(error)) noteSmartAdaptiveRefusal(callerScope(key));
             throw error;
         }
         leaseId = grant.leaseId;
@@ -519,7 +524,7 @@ export async function handleChatCompletions(request: Request, options: { surface
             // Smart Adaptive: the round answering these calls goes to this model.
             onToolCalls:
                 parsed.model === SMART_ADAPTIVE_MODEL_ID
-                    ? (ids) => rememberSmartAdaptiveToolCalls(key.keyId, model.id, ids)
+                    ? (ids) => rememberSmartAdaptiveToolCalls(callerScope(key), model.id, ids)
                     : undefined,
         });
         const result = streamText({
@@ -674,17 +679,20 @@ export async function handleChatCompletions(request: Request, options: { surface
 type ErrorRenderer = typeof externalApiErrorResponse;
 
 /**
- * The receipt for an Idempotency-Key this key already used, or null. Shared
- * by every protocol; `render` gives the answer that protocol's error shape.
+ * The receipt for an Idempotency-Key this key (or this account's Desktop
+ * session) already used, or null. Shared by every protocol; `render` gives the
+ * answer that protocol's error shape.
  */
 export const idempotentReplay = async (
-    keyId: string,
+    owner: ExternalApiReceiptOwner,
     idempotencyKeyDigest: string,
     requestDigest: string,
     render: ErrorRenderer = externalApiErrorResponse
 ) => {
     const existing = await prisma.externalApiRequest.findUnique({
-        where: { keyId_idempotencyKeyDigest: { keyId, idempotencyKeyDigest } },
+        where: "keyId" in owner
+            ? { keyId_idempotencyKeyDigest: { keyId: owner.keyId, idempotencyKeyDigest } }
+            : { desktopUserId_idempotencyKeyDigest: { desktopUserId: owner.desktopUserId, idempotencyKeyDigest } },
         select: {
             id: true,
             requestDigest: true,

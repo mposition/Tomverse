@@ -17,6 +17,8 @@ const BEARER_FILES = [
     "lib/externalApiAdmission.ts",
     "lib/externalApiKeys.ts",
     "lib/externalApiAccess.ts",
+    // The caller: a key, or Desktop Code's verified Desktop bearer (never a cookie or the web session).
+    "lib/externalApiCaller.ts",
     // Native protocols (Claude Code, Codex): the same condition.
     "app/api/v1/responses/route.ts",
     "app/api/anthropic/v1/messages/route.ts",
@@ -50,6 +52,20 @@ test("Bearer routes read no session or cookie", () => {
         for (const forbidden of ["getServerSession", "next/headers", "cookies()", "resolveChatRouteSession", "requireMobileBearer"]) {
             assert.ok(!source.includes(forbidden), `${file} must not use ${forbidden}`);
         }
+    }
+});
+
+test("a Desktop session is a verified bearer on exact coding paths, never a cookie", () => {
+    const caller = read("lib/externalApiCaller.ts");
+    // The only session it reads is the Desktop bearer, and only for an enrolled path from the Desktop origin.
+    assert.ok(caller.includes("await requireDesktopCodeBearer(request)"));
+    assert.ok(caller.includes("desktopCodeSessionRoute(new URL(request.url).pathname, request.method)"));
+    assert.ok(caller.includes(`if (request.headers.has("cookie")) throw refused();`));
+    // Every coding route that takes it resolves its caller there, not by a key-only path of its own.
+    for (const file of ["lib/externalApiInference.ts", "lib/codeWebSearch.ts", "lib/externalApiRoutes.ts"]) {
+        const source = read(file);
+        assert.ok(source.includes("authenticateExternalApiCaller(request)"), file);
+        assert.ok(!source.includes("authenticateExternalApiKey("), file);
     }
 });
 
@@ -151,17 +167,21 @@ test("request status lookup is a read: GET only, key-scoped, no dispatch, reserv
     }
     const keys = read("lib/externalApiKeys.ts");
     const lookup = keys.match(/export const externalApiRequestStatus[\s\S]*?\n};/)[0];
-    assert.match(lookup, /where: \{ id: selector\.requestId, keyId \}/, "a request id is looked up within this key only");
-    assert.match(lookup, /keyId_idempotencyKeyDigest: \{ keyId,/);
+    // Within this key only, or within this account's Desktop session requests only (no key).
+    assert.ok(lookup.includes(`const scope = "keyId" in owner ? { keyId: owner.keyId } : { desktopUserId: owner.desktopUserId };`));
+    assert.ok(lookup.includes("where: { id: selector.requestId, ...scope }"), "a request id is looked up within this key only");
+    assert.match(lookup, /keyId_idempotencyKeyDigest: \{ keyId: owner\.keyId,/);
+    assert.match(lookup, /desktopUserId_idempotencyKeyDigest: \{ desktopUserId: owner\.desktopUserId,/);
     assert.ok(!/\.(create|update|upsert|delete|\$executeRaw)/.test(lookup));
 });
 
 test("every keyed front door checks the account and its paid plan through one function", () => {
     // Chat Completions, the /models, /usage and /requests/status reads, and
     // the native protocols: each accepts a key and then asks externalApiAccess.
-    for (const file of ["lib/externalApiInference.ts", "lib/externalApiRoutes.ts", "lib/externalApiNative.ts"]) {
+    // A Desktop session (lib/externalApiCaller.ts) is accepted at the same doors and asks the same function.
+    for (const file of ["lib/externalApiInference.ts", "lib/externalApiRoutes.ts", "lib/externalApiNative.ts", "lib/codeWebSearch.ts"]) {
         const source = read(file);
-        const accepts = (source.match(/await authenticateExternalApiKey\(/g) ?? []).length;
+        const accepts = (source.match(/await authenticateExternalApi(?:Key|Caller)\(/g) ?? []).length;
         assert.ok(accepts > 0, file);
         assert.equal((source.match(/await externalApiAccountAccess\(key\.userId\)/g) ?? []).length, accepts, file);
         assert.ok(!source.includes("externalApiUserAllowed(process.env, key.userId)"), `${file}: the allowlist alone is not the check`);

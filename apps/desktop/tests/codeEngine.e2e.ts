@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { fileURLToPath } from "node:url";
 import { _electron as electron, expect, type Page } from "@playwright/test";
 import { FakeGateway, fixtureWorkAnalysis, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
@@ -26,7 +27,7 @@ async function launch(prefix: string, gateway: FakeGateway) {
   await writeFile(descriptor, JSON.stringify({ root, profile, endpoint: gateway.base, key: TEST_KEY }));
   const app = await electron.launch({ executablePath: electronPath, args: [desktopDir, "--desktop-fixture", descriptor], timeout: 20_000 });
   const page = await app.firstWindow();
-  await page.getByRole("button", { name: "Open local folder" }).click();
+  await openCodeProject(page);
   return { directory, app, page };
 }
 
@@ -44,7 +45,7 @@ test("Code queues several messages, reorders, edits and removes them, and runs t
   }).start();
   const { directory, app, page } = await launch("tomverse-desktop-queue-", gateway);
   try {
-    await page.getByLabel("Code mode").selectOption("ask");
+    await selectCodeMode(page, "ask");
     const composer = page.getByRole("textbox", { name: "Code request" });
     await composer.fill("first");
     await page.getByRole("button", { name: "Send Code request" }).click();

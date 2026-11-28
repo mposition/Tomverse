@@ -606,6 +606,8 @@ export const pt = {
         locationErrordenied: "Permissão de localização recusada. Autorize nas definições do navegador ou dispositivo e tente novamente.",
         locationErrortimeout: "Tempo de localização esgotado. A mensagem continua sem localização. Tente de novo em + ferramentas.",
         locationErrorunavailable: "Localização indisponível. A mensagem continua sem ela. Pode introduzir um local.",
+        locationWindowsOff: "A localização do Windows está desativada, por isso não é possível obter a sua localização atual. Pode introduzir um local.",
+        locationOpenWindowsSettings: "Abrir definições de localização do Windows",
         toolsWebSearchOffDescription: "As respostas são dadas sem pesquisar na web.",
         toolsWebSearchOnDescription: "Pesquisa na web automaticamente quando são necessárias informações atuais ou fontes.",
         toolsWebSearchCostNote: "Aplicam-se {credits} créditos extras por cada modelo que realizar uma pesquisa. Sem pesquisa, não há créditos extras.",

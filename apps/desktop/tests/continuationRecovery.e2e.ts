@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject } from "./code-project-fixture";
 import { once } from "node:events";
 import { access, mkdir, mkdtemp, readdir, readFile, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -54,7 +55,7 @@ async function setup(context: TestContext, gateway: FakeGateway, respond: (reque
   const scope = codeHistoryScope(profile, null, bindProjectRoot(root), { key: TEST_KEY, endpoint: gateway.base });
   async function selectProject(app: ElectronApplication) {
     const page = await app.firstWindow();
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await expect.poll(() => page.evaluate(async () => {
       const { root, codeCatalog } = await window.desktop.state();
       return Boolean(root) && codeCatalog === "ready";
