@@ -155,6 +155,14 @@ identity may still reattach at capacity, but a different new identity is
 refused with `409 CHAT_ATTEMPT_STORAGE_QUOTA_EXCEEDED`. These caps are a hard
 storage bound, not a retention promise or permission to remove audit rows.
 
+The paid Auto Router call runs before the claim (its pick decides the model the
+turn is reserved for and checked against), so a repeated POST -- a reattach
+included -- is routed again like any turn. A duplicate therefore still pays for
+a Router call; removing that would mean claiming before the Router, which is
+not done here. Guest Auto turns are de-duplicated earlier, by their
+`clientTurnId` prehold, before the Guest Refiner and the Router. The Router call
+is aborted with the request (2026-11-28), so a client that goes away stops it.
+
 The authenticated stored-Chat send path wires claim, checkpoint and terminal
 transition around the existing provider dispatch. Review, continuation, guest
 and Deep Research keep their existing contracts and do not enter this path.
@@ -202,9 +210,15 @@ not count as the final owner/revision/lease CAS.
 
 Errors raised after the provider's stream reported
 done -- a refused attempt CAS or a database error in the final checkpoint, the
-settlement or the Message write -- are this application's: they are classified
-with the stream-failure `completion` phase (never a fallback) and are not
-recorded as provider or model failures.
+settlement or the Message write, and a storage refusal
+(`MESSAGE_STORAGE_QUOTA_EXCEEDED`) at that write -- are this application's: they
+are classified with the stream-failure `completion` phase (never a fallback)
+and are not recorded as provider or model failures. A turn whose answer
+certainly cannot be stored (the message count at its limit, or the account's
+bytes already over theirs; the question is already stored) is refused before anything is reserved
+(docs/policy/credit-and-cost-limits.md, "완료 분기의 정산"); the write's own check
+remains the authority for a long answer that overflows and for the concurrent
+case.
 
 Credit settlement follows the provider outcome and is separate from Message
 and attempt-state persistence. A checkpoint or terminal CAS failure is logged
@@ -253,6 +267,11 @@ saved; reload to check" -- instead of ending as if it were saved.
 Finish reasons and failure codes are closed, public-safe classifications shared
 by runtime parsing and database constraints. A failed attempt must use the
 generic `error` finish reason and one of the approved coarse failure codes.
+A turn whose provider never wrote a token -- the first-token deadline, or a
+provider stream that failed before its first chunk -- is `provider_unavailable`;
+`stream_interrupted` is for a stream that broke off after it started. The
+browser learns of the deadline from the stream's `stalled` keepalive signal
+(`CHAT_FIRST_RESPONSE_TIMEOUT`), not from this code.
 Completed and cancelled attempts cannot carry a failure code. Raw provider
 messages, exception text, credentials and request fragments are never accepted
 into either field, exposed by GET, or included in account export.

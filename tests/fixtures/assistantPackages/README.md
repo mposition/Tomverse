@@ -69,3 +69,15 @@ b0dcf4918935b795  scripts/with_server.py
 upstream이 이 skill을 바꾸면 fixture는 **자동으로 따라가지 않습니다.** 다시 만들려면
 같은 경로를 clone 해서 다시 압축하고, 위의 commit·SHA-256·정답지를 함께 고칩니다.
 셋 중 하나만 고치면 나머지 둘이 무엇을 말하는지 알 수 없게 됩니다.
+
+## `agentskills-spec-pdf-processing.SKILL.md`
+
+| 항목 | 값 |
+|---|---|
+| 출처 | `https://agentskills.io/specification` (Agent Skills 사양) |
+| 내려받은 날짜 | 2026-11-28 (UTC) |
+
+frontmatter는 사양의 "Example with optional fields"(`name`, `description`, `license`,
+`metadata`)에, 사양 "`allowed-tools` field"의 예시 값 한 줄을 더한 것입니다. 본문은 사양의
+"File references" 절 예시입니다. 단독 `SKILL.md` 가져오기와 `allowed-tools`·스크립트
+참조가 손실 보고에 나타나는지 확인하는 데 씁니다.

@@ -980,9 +980,13 @@ test("a legacy reservation reconciles when it expires", async () => {
 
   const result = await reconcileExpiredChatCreditReservations();
   assert.equal(result.failed, 0);
+  // The user's credits come back in full: an unsettled turn earns none.
   assert.equal(result.refunded, 1);
-  // The hold is given back in full: nothing was spent.
-  assert.equal(await bucket("provider:openai", "provider-cost-day"), 0);
+  // The provider side keeps the reservation's own estimate (10K in, 10K out
+  // at $100/M) rather than recording a turn nobody settled as free: it was
+  // admitted and may have reached the provider (credit-and-cost-limits.md,
+  // "정산 실패와 재시도").
+  assert.equal(await bucket("provider:openai", "provider-cost-day"), 2_000_000);
 });
 
 test("a legacy reservation's primary hold survives its first fallback", async () => {

@@ -44,6 +44,8 @@ Profile로 **변환**하는 기능의 릴리스 차단 계약입니다.
 | `lib/assistantPackageExport.ts` | package를 쓰는 쪽. reader의 거울 |
 | `lib/assistantProfileExportService.ts` | 게시된 version을 package로 |
 | `app/api/assistant-profiles/[profileId]/export/route.ts` | 내려받기. 읽기 전용 |
+| `lib/assistantSkillDocument.ts` | 게시된 instructions를 사양의 `SKILL.md`로 쓰는 쪽(필수 필드 `name`·`description`만) |
+| `app/api/assistant-profiles/[profileId]/skill/route.ts` | `SKILL.md` 내려받기. 읽기 전용, 두 flag(profiles, package import)를 따름 |
 | `lib/assistantPackageImportMetricsCore.ts` | 네 이벤트를 세는 순수 함수 |
 | `lib/assistantPackageImportMetrics.ts` | 위 함수의 질의. server 전용 |
 | `components/admin/AdminPackageImportPanel.tsx` | Admin Console의 단계·경고·완료 분포 |
@@ -64,7 +66,8 @@ Profile로 **변환**하는 기능의 릴리스 차단 계약입니다.
 
 | 입력 | 판정 |
 |---|---|
-| Agent Skills 패키지 **ZIP** | 채택 |
+| Agent Skills 패키지 **ZIP** (`SKILL.md`가 최상위에 있거나, 사양대로 폴더 하나 안에 있는 것) | 채택 |
+| 단독 `SKILL.md` (또는 `.markdown`) 파일 | 채택(운영자 지시 2026-11-28). 컨테이너가 없으므로 knowledge 후보와 건너뜀이 없고, 나머지 검토·손실 보고·A1 승인은 ZIP과 같음 |
 | Tomverse native package (`.tomverse-assistant.zip`, 단독 `.json`) | 채택 |
 | Gemini Gem · ChatGPT GPT 설정의 paste/import | 범위 밖 |
 | `gemini_gems_data.html` 파싱 | 범위 밖 |
@@ -385,6 +388,22 @@ migration은 **코드로 명시적으로 작성**하며 관용적 파싱으로 �
   다시 읽는 것을 금지하고, 링크는 정확히 그것을 부릅니다.
 - 표시 대상은 **게시된 import뿐**입니다. staging 중인 것은 아직 revision을
   만들지 않았고, 여기에 그리면 승인하지 않은 가져오기를 알리는 것이 됩니다.
+
+### 6.6 `SKILL.md` 내려받기
+
+native package와 별개로, 게시된 revision의 instructions를 사양
+(`https://agentskills.io/specification`)의 `SKILL.md` 한 파일로 내려받을 수
+있습니다.
+
+- frontmatter는 **필수 두 필드만** 씁니다: `name`(소문자 ASCII 영숫자와 하이픈,
+  64자 이하. 쓸 글자가 없으면 `assistant`)과 `description`(profile의 설명, 없으면
+  표시 이름). `license`·`compatibility`·`metadata`·`allowed-tools`는 어시스턴트가
+  참이라고 말할 수 있는 값이 없으므로 쓰지 않습니다.
+- 문서, 모델, 도구·메모리 정책은 `SKILL.md`에 자리가 없어 **나가지 않습니다.**
+  그것들은 §6.1의 package 내려받기가 맡습니다.
+- 가져오기의 역이므로 내려받은 파일은 §1의 단독 `SKILL.md` 경로로 다시
+  열립니다(테스트가 왕복을 확인합니다). 표시 이름은 slug가 되어 돌아오고,
+  그래서 가져오기 검토에서 이름은 늘 확인 대상입니다.
 
 ## 7. 원격 source 자동 업데이트 금지
 

@@ -4,6 +4,7 @@ import { withSentryConfig } from "@sentry/nextjs/config";
 // loader rather than by the app's module graph, so tsconfig paths do not
 // apply here.
 import { robotsDecision } from "./lib/robotsPolicyCore";
+import { ARTIFACT_SHARE_OVERRIDE_HEADERS, ARTIFACT_SHARE_PAGE_PREFIX } from "./lib/artifactSharePageHeaders";
 
 const securityHeaders = [
   {
@@ -154,6 +155,13 @@ const nextConfig: NextConfig = {
       {
         source: "/:path*",
         headers: securityHeaders,
+      },
+      // A public share page (docs/policy/generated-artifacts.md section 19). After the site-wide rule so these win
+      // for the same keys: its CSP `sandbox` cannot travel with a COOP other than unsafe-none, it sends no
+      // referrer, and every powerful feature is off. The route sets the same values itself.
+      {
+        source: `${ARTIFACT_SHARE_PAGE_PREFIX}:shareToken`,
+        headers: [...ARTIFACT_SHARE_OVERRIDE_HEADERS],
       },
       // Belt to app/robots.ts's braces, on every response a non-canonical
       // deployment serves.

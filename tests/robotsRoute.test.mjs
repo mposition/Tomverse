@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { isPathAllowed } from "../lib/robotsTxtCore.ts";
 import {
+  AD_LANDING_CRAWLERS,
   CANONICAL_PRIVATE_DISALLOW,
   CONTENT_SIGNAL,
   REFUSED_AI_CRAWLERS,
@@ -145,6 +146,25 @@ test("an invited fetcher does not pardon the same operator's training crawler", 
   }
   assert.equal(isPathAllowed(body, "ClaudeBot", "/"), false);
   assert.equal(isPathAllowed(body, "Google-Extended", "/"), false);
+});
+
+/**
+ * Ad crawlers read only a group that names them (AdsBot ignores `*`), so the
+ * share pages are closed to them by name: an ad cannot land on a shared page,
+ * and the site's own ads still land on its public pages.
+ */
+test("ad landing-page crawlers may not read any share page, by name, and still read the public site", () => {
+  const body = PRODUCTION();
+  assert.deepEqual([...AD_LANDING_CRAWLERS], ["AdsBot-Google", "AdsBot-Google-Mobile", "adidxbot"]);
+  for (const crawler of AD_LANDING_CRAWLERS) {
+    assert.match(body, new RegExp(`^User-Agent: ${crawler}$`, "m"), `${crawler} has a group of its own`);
+    for (const path of ["/share/a/abcdefghijklmnopqrstuvwxyz012345", "/share/abcdefghijklmnopqrstuvwxyz012345", "/admin", "/api/artifact-shares"]) {
+      assert.equal(isPathAllowed(body, crawler, path), false, `${crawler} ${path}`);
+    }
+    for (const path of ["/", "/pricing", "/compare-ai-models"]) {
+      assert.equal(isPathAllowed(body, crawler, path), true, `${crawler} ${path}`);
+    }
+  }
 });
 
 test("the canonical site names its sitemap and host", () => {

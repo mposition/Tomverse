@@ -115,8 +115,14 @@ const prismaStub = {
   mobileAuthEvent: { deleteMany: async () => ({ count: 32 }) },
   mobileLoginGrant: { deleteMany: async () => ({ count: 33 }) },
   mobileRefreshRotation: { deleteMany: async () => ({ count: 34 }) },
-  $queryRaw: async (strings: TemplateStringsArray) => {
-    const query = strings.join("?");
+  // Called either as a tagged template or with a composed `Prisma.sql` value,
+  // whose text parts are on `.strings`. Each raw query a step sends is named
+  // here, so a new one fails loudly instead of passing as an empty result.
+  $queryRaw: async (first: TemplateStringsArray | { strings: readonly string[] }) => {
+    const parts = Array.isArray(first) ? first : (first as { strings: readonly string[] }).strings;
+    const query = parts.join("?");
+    // The expired artifact-share sweep (lib/artifactShareService.ts): nothing expired.
+    if (/DELETE FROM "ArtifactShare"/.test(query)) return [];
     assert.match(query, /SELECT "id" FROM "PromptRefinerChatSuggestion"/);
     assert.match(query, /FOR UPDATE SKIP LOCKED/);
     return [];
