@@ -29,6 +29,9 @@ export type ChatAnswerSurfaceCopy = {
   branchQuota: string;
   branchTitleTemplate: string;
   branchFilesTemplate: string;
+  answerCreditsOne: string;
+  answerCreditsOther: string;
+  answerCreditsTitle: string;
 };
 
 export const chatAnswerSurfaceCopy: Record<Language, ChatAnswerSurfaceCopy> = {
@@ -54,6 +57,9 @@ export const chatAnswerSurfaceCopy: Record<Language, ChatAnswerSurfaceCopy> = {
     branchQuota: "You have reached the conversation or message storage limit.",
     branchTitleTemplate: "Branch: {title}",
     branchFilesTemplate: "[Files not copied to this conversation: {names}]",
+    answerCreditsOne: "{credits} credit",
+    answerCreditsOther: "{credits} credits",
+    answerCreditsTitle: "Credits charged for this answer",
   },
   ko: {
     chartBar: "막대 차트",
@@ -77,6 +83,9 @@ export const chatAnswerSurfaceCopy: Record<Language, ChatAnswerSurfaceCopy> = {
     branchQuota: "대화 또는 메시지 저장 한도에 도달했습니다.",
     branchTitleTemplate: "분기: {title}",
     branchFilesTemplate: "[이 대화로 복사되지 않은 파일: {names}]",
+    answerCreditsOne: "{credits}크레딧",
+    answerCreditsOther: "{credits}크레딧",
+    answerCreditsTitle: "이 답변에 실제로 차감된 크레딧",
   },
   zh: {
     chartBar: "柱状图",
@@ -100,6 +109,9 @@ export const chatAnswerSurfaceCopy: Record<Language, ChatAnswerSurfaceCopy> = {
     branchQuota: "已达到对话或消息的存储上限。",
     branchTitleTemplate: "分支：{title}",
     branchFilesTemplate: "[未复制到此对话的文件：{names}]",
+    answerCreditsOne: "{credits} 积分",
+    answerCreditsOther: "{credits} 积分",
+    answerCreditsTitle: "此回答实际扣除的积分",
   },
   "zh-Hant": {
     chartBar: "長條圖",
@@ -123,6 +135,9 @@ export const chatAnswerSurfaceCopy: Record<Language, ChatAnswerSurfaceCopy> = {
     branchQuota: "已達對話或訊息的儲存上限。",
     branchTitleTemplate: "分支：{title}",
     branchFilesTemplate: "[未複製到此對話的檔案：{names}]",
+    answerCreditsOne: "{credits} 點數",
+    answerCreditsOther: "{credits} 點數",
+    answerCreditsTitle: "此回答實際扣除的點數",
   },
   fr: {
     chartBar: "Diagramme à barres",
@@ -146,6 +161,9 @@ export const chatAnswerSurfaceCopy: Record<Language, ChatAnswerSurfaceCopy> = {
     branchQuota: "Vous avez atteint la limite de stockage des conversations ou des messages.",
     branchTitleTemplate: "Branche : {title}",
     branchFilesTemplate: "[Fichiers non copiés dans cette conversation : {names}]",
+    answerCreditsOne: "{credits} crédit",
+    answerCreditsOther: "{credits} crédits",
+    answerCreditsTitle: "Crédits réellement débités pour cette réponse",
   },
   de: {
     chartBar: "Balkendiagramm",
@@ -169,6 +187,9 @@ export const chatAnswerSurfaceCopy: Record<Language, ChatAnswerSurfaceCopy> = {
     branchQuota: "Das Speicherlimit für Unterhaltungen oder Nachrichten ist erreicht.",
     branchTitleTemplate: "Zweig: {title}",
     branchFilesTemplate: "[Nicht in diese Unterhaltung kopierte Dateien: {names}]",
+    answerCreditsOne: "{credits} Credit",
+    answerCreditsOther: "{credits} Credits",
+    answerCreditsTitle: "Für diese Antwort tatsächlich abgebuchte Credits",
   },
   es: {
     chartBar: "Gráfico de barras",
@@ -192,6 +213,9 @@ export const chatAnswerSurfaceCopy: Record<Language, ChatAnswerSurfaceCopy> = {
     branchQuota: "Has alcanzado el límite de almacenamiento de conversaciones o mensajes.",
     branchTitleTemplate: "Rama: {title}",
     branchFilesTemplate: "[Archivos no copiados a esta conversación: {names}]",
+    answerCreditsOne: "{credits} crédito",
+    answerCreditsOther: "{credits} créditos",
+    answerCreditsTitle: "Créditos realmente descontados por esta respuesta",
   },
   pt: {
     chartBar: "Gráfico de barras",
@@ -215,5 +239,8 @@ export const chatAnswerSurfaceCopy: Record<Language, ChatAnswerSurfaceCopy> = {
     branchQuota: "Você atingiu o limite de armazenamento de conversas ou mensagens.",
     branchTitleTemplate: "Ramificação: {title}",
     branchFilesTemplate: "[Arquivos não copiados para esta conversa: {names}]",
+    answerCreditsOne: "{credits} crédito",
+    answerCreditsOther: "{credits} créditos",
+    answerCreditsTitle: "Créditos efetivamente descontados por esta resposta",
   },
 };
