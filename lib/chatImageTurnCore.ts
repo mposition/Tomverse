@@ -122,7 +122,8 @@ export async function readRefusedReviewPanelAnswer(input: {
     delaysMs?: readonly number[];
 }): Promise<{ content: string; imageTurn: ChatImageTurnRef } | null> {
     const request = input.fetch ?? fetch;
-    const url = `/api/conversations/${encodeURIComponent(input.conversationId)}/image-turn?assistantMessageId=${encodeURIComponent(input.assistantMessageId)}`;
+    const query = new URLSearchParams({ assistantMessageId: input.assistantMessageId });
+    const url = `/api/conversations/${encodeURIComponent(input.conversationId)}/image-turn?${query}`;
     for (const delay of input.delaysMs ?? REVIEW_PANEL_ANSWER_READ_DELAYS_MS) {
         if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
         if (input.signal?.aborted) return null;
