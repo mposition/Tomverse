@@ -1620,6 +1620,7 @@ async function handleChatPost(
             turnstileToken,
             deepResearchDepth,
             reasoningEffort,
+            studyMode,
             webSearchMode,
             mcpConnectionId,
             admissionToken,
@@ -4199,6 +4200,9 @@ async function handleChatPost(
         });
         const turnSystemBlocks = buildChatTurnSystemBlocks({
             currentLocation,
+            // Study mode is the reader's own opt-in for this turn; a research
+            // preview carries none of the capability blocks.
+            studyMode: studyMode === true && !isResearchPreview,
             omittedEarlierMessages,
             clientTimeZone,
             urlReadAvailable,

@@ -340,6 +340,8 @@ type ChatAppProps = {
     researchDurable?: boolean;
     researchMode?: "preview";
     reasoningEffort?: import("@/lib/reasoningEffort").ExplicitReasoningEffort;
+    /** Study mode was on when this question was sent (lib/chatStudyPrompt.ts). */
+    studyMode?: boolean;
     deepResearchDepth?: "quick" | "standard" | "deep";
     /**
      * Web search for this send only, when the send was made by the web-search
@@ -1861,6 +1863,7 @@ function ChatAppComponent({
     requestOptions?: {
       webSearchMode?: WebSearchToggleMode;
       reasoningEffort?: ExplicitReasoningEffort;
+      studyMode?: boolean;
       /** Project search-hit refs the user attached to this one question. */
       projectReferences?: readonly string[];
     },
@@ -1975,6 +1978,7 @@ function ChatAppComponent({
     replacement = beginReplacement(targetChatId, takeArmedSupersede(targetChatId, text), !isGuestMode);
     const replacedIds = replacement.excludedIds();
     const { webSearchMode: webSearchModeOverride, reasoningEffort, projectReferences } = requestOptions ?? {};
+    const studyMode = requestOptions?.studyMode === true && !researchMode;
     const effectiveWebSearchMode: WebSearchMode | undefined =
       researchMode ? "always" : webSearchModeOverride ?? webSearchMode;
     const mcpConnectionId = !researchMode && currentProduct === "chat" ? selectedMcpConnection(initialConversationId) : undefined;
@@ -1990,6 +1994,7 @@ function ChatAppComponent({
       // and its retry reads the conversation's mode exactly as before.
       ...(webSearchModeOverride ? { webSearchMode: webSearchModeOverride } : {}),
       ...(reasoningEffort ? { reasoningEffort } : {}),
+      ...(studyMode ? { studyMode } : {}),
       // A Guest Auto authority and logical turn are one-shot. Keeping this
       // content-free marker with the retry source lets a remounted panel hide
       // and reject the generic manual retry rather than silently sending the
@@ -2539,6 +2544,7 @@ function ChatAppComponent({
           ...(researchMode ? { researchMode } : {}),
           ...(deepResearchDepth ? { deepResearchDepth } : {}),
           ...(reasoningEffort ? { reasoningEffort } : {}),
+          ...(studyMode ? { studyMode } : {}),
           ...(mcpConnectionId ? { mcpConnectionId } : {}),
           ...(admissionToken ? { admissionToken } : {}),
           ...(activeContextBundle ? { contextBundle: activeContextBundle } : {}),
@@ -3732,7 +3738,7 @@ function ChatAppComponent({
             null,
             null,
             "single",
-            { reasoningEffort: lastPrompt.reasoningEffort },
+            { reasoningEffort: lastPrompt.reasoningEffort, studyMode: lastPrompt.studyMode },
             attachmentIds,
             lastPrompt.sourceUserMessageId
           );

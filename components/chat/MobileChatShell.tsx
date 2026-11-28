@@ -365,6 +365,9 @@ type MobileChatShellProps = {
   accountMemoryMasterEnabled?: boolean | null;
   onMemorySettingsRefresh?: () => void;
   researchPreview?: ResearchPreviewControls;
+  /** Study mode for this conversation (Chat only), and its switch. */
+  studyMode?: boolean;
+  onStudyModeChange?: (on: boolean) => void;
   onOpenDeepResearchSetup: () => void;
   isDeepResearchPending: boolean;
   onDismissDeepResearchChip: () => void;
@@ -586,6 +589,8 @@ export function MobileChatShell({
   accountMemoryMasterEnabled,
   onMemorySettingsRefresh,
   researchPreview,
+  studyMode,
+  onStudyModeChange,
   onOpenDeepResearchSetup,
   isDeepResearchPending,
   onDismissDeepResearchChip,
@@ -2003,6 +2008,8 @@ export function MobileChatShell({
             accountMemoryMasterEnabled={accountMemoryMasterEnabled}
             onMemorySettingsRefresh={onMemorySettingsRefresh}
             researchPreview={researchPreview}
+            studyMode={studyMode}
+            onStudyModeChange={onStudyModeChange}
             onOpenDeepResearchSetup={onOpenDeepResearchSetup}
             isDeepResearchPending={isDeepResearchPending}
             onDismissDeepResearchChip={onDismissDeepResearchChip}
