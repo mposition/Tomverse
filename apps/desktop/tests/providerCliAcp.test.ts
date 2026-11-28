@@ -985,3 +985,28 @@ test("A diff and the arguments of the same edit must agree: they are shown toget
     assert.equal(classifyAcpPermission({ sessionId: "s", options, toolCall: { toolCallId: "t" } }, { cwd, plan: cliPermissionPlan("mistral", "ask"), tracked: calls.get("t") }).verdict, "refuse");
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
+
+test("Two names for one argument are all checked: a second path, text or command that differs is not hidden behind the first", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "acp-alias-"));
+  try {
+    const plan = cliPermissionPlan("mistral", "ask");
+    const edit = (rawInput: Record<string, unknown>) => classifyAcpPermission({
+      toolCall: { toolCallId: "t", kind: "edit", title: "Write", content: [{ type: "diff", path: "a.txt", newText: "hi" }], rawInput },
+      options: [{ optionId: "allow_once", kind: "allow_once" }, { optionId: "reject_once", kind: "reject_once" }],
+    }, { cwd, plan });
+    assert.equal(edit({ path: "a.txt", content: "hi" }).verdict, "ask");
+    for (const raw of [{ path: "a.txt", filePath: "b.txt", content: "hi" }, { path: "a.txt", Path: "b.txt", content: "hi" },
+      { path: "a.txt", content: "hi", newText: "other" }, { path: "a.txt", content: "hi", Content: "other" }, { path: "a.txt", file: 7, content: "hi" }]) {
+      assert.equal(edit(raw).verdict, "refuse", JSON.stringify(raw));
+    }
+    const run = (rawInput: Record<string, unknown>) => classifyAcpPermission({
+      toolCall: { toolCallId: "c", kind: "execute", title: "run", rawInput },
+      options: [{ optionId: "allow_once", kind: "allow_once" }, { optionId: "reject_once", kind: "reject_once" }],
+    }, { cwd, plan });
+    assert.equal(run({ command: "echo hi" }).verdict, "ask");
+    assert.equal(run({ command: "echo hi", CommandLine: "echo hi" }).verdict, "ask", "the same command under two names");
+    assert.equal(run({ command: "echo hi", CommandLine: "cat secrets.yaml" }).verdict, "refuse");
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});

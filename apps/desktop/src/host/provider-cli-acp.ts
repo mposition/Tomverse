@@ -215,12 +215,18 @@ function field(source: Json | undefined, names: readonly string[]): unknown {
   return undefined;
 }
 const stringField = (source: Json | undefined, names: readonly string[]) => { const value = field(source, names); return typeof value === "string" ? value : undefined; };
+/** Every value of the fields with these names, whatever their case: a request may carry two names for one thing (path and filePath). */
+function allFields(source: Json | undefined, names: readonly string[]): unknown[] {
+  if (!source) return [];
+  return Object.keys(source).filter((key) => names.includes(key.toLowerCase())).map((key) => source[key]);
+}
 
 /** The command text of a request's arguments: a string, or a list of words. */
 function commandOf(source: Json | undefined): string | undefined {
-  const value = field(source, commandNames);
-  if (typeof value === "string") return value.trim() ? value : undefined;
-  return Array.isArray(value) && value.length > 0 && value.every((word) => typeof word === "string") ? value.join(" ") : undefined;
+  // Two command fields that disagree are no command the card can show: the request is refused as one without a command.
+  const commands = unique(allFields(source, commandNames).map((value) => typeof value === "string" ? (value.trim() ? value : "")
+    : Array.isArray(value) && value.length > 0 && value.every((word) => typeof word === "string") ? value.join(" ") : ""));
+  return commands.length === 1 && commands[0] ? commands[0] : undefined;
 }
 
 /** Collects the places a request's arguments name. False when it could not look at all of them (too many, or nested too deep). */
@@ -327,10 +333,10 @@ function factsOf(call: Json, tracked?: TrackedCall): Facts {
 const unique = (values: readonly string[]) => [...new Set(values)];
 
 /** The places a request's arguments name as the file it works on (not the other path-like fields, which stay on the card). */
-function primaryPaths(raw: Json): string[] {
-  const list = field(raw, ["paths", "files", "file_paths"]);
-  const one = stringField(raw, pathNames);
-  return [...(one !== undefined ? [one] : []), ...(Array.isArray(list) ? list.filter((entry): entry is string => typeof entry === "string") : [])];
+function primaryPaths(raw: Json): string[] | null {
+  const values = [...allFields(raw, pathNames), ...allFields(raw, ["paths", "files", "file_paths"]).flatMap((list) => Array.isArray(list) ? list : [list])];
+  // Every one is checked; a value that is not a path string cannot be compared, so the request is not shown as only its diff.
+  return values.every((value) => typeof value === "string") ? values as string[] : null;
 }
 
 /**
@@ -344,14 +350,16 @@ function diffMatchesRaw(diffs: readonly Diff[], raw: Json | undefined, cwd: stri
   const where = (path: string) => realPathOf(path, cwd) ?? resolve(cwd, path);
   const fromDiffs = new Set(diffs.map(({ path }) => fold(where(path))));
   const named = primaryPaths(raw);
+  if (named === null) return false;
   if (named.length > 0) {
     const fromRaw = new Set(named.map((path) => fold(where(path))));
     if (fromRaw.size !== fromDiffs.size || [...fromRaw].some((path) => !fromDiffs.has(path))) return false;
   }
-  const after = stringField(raw, afterNames);
-  const before = stringField(raw, beforeNames);
-  if (after !== undefined && (diffs.length !== 1 || diffs[0]!.newText !== after)) return false;
-  if (before !== undefined && (diffs.length !== 1 || diffs[0]!.oldText !== before)) return false;
+  // Every text field, under each of its names, must be the diff's own text.
+  const after = allFields(raw, afterNames);
+  const before = allFields(raw, beforeNames);
+  if (after.length > 0 && (diffs.length !== 1 || after.some((value) => value !== diffs[0]!.newText))) return false;
+  if (before.length > 0 && (diffs.length !== 1 || before.some((value) => value !== diffs[0]!.oldText))) return false;
   return true;
 }
 
