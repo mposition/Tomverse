@@ -140,6 +140,8 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    얕게 받은 `repo/`(최근 100개 commit 이력), patch가 있으면 그것을 적용한 `repo-patched/`, 카드가 가리키는 근거 원문
    전체(`evidence/PATCH.diff`·`FINDINGS.md`·`CRITERIA.md`·`CONTEXT.md`), 안내 `WORKSPACE.md`. 근거는 앱이 보낼 때마다 원래 행에서
    다시 읽어 준다(`POST /api/internal/amux/decision-maker/workspace`). 카드는 요약과 안내만 담고, 근거를 카드에 맞춰 자르지 않는다.
+   운영자 결정 2026-11-28: 판정(settlement)과 결과 검토 카드의 `CONTEXT.md`에는 그 Task가 의존하는 카드마다 최신 실행 결과
+   전문을 싣는다. 완료 기준이 다른 카드의 산출물을 가리키는데 그 산출물이 없어, DM이 AMUX-PUBLIC-004를 두 번 사람에게 넘겼다.
 2. **도구(§5a).** codex는 읽기 전용 shell(권한 profile)로, claude는 `Read`·`Grep`·`Glob`으로 작업 공간을 읽는다. 쓰기와
    네트워크는 없다. 테스트 실행은 켜지 않는다(§5a에 이유). — 2026-11-22 §0f-4로 바뀌었다: DM은 작업 공간의 자기 사본에서
    명령을 실행하고 쓰며 테스트와 typecheck를 돌린다. 네트워크는 여전히 없다.
