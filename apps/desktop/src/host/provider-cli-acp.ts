@@ -261,7 +261,9 @@ type Diff = { path: string; oldText?: string | null; newText: string };
  * earlier `tool_call`); Kimi streams the call's arguments as JSON text in `tool_call_update` content before it asks, and only
  * reports `rawInput` and `locations` afterwards; MiniMax Code reports `rawInput` in an update after the call.
  */
-export type TrackedCall = { kind?: string; title?: string; rawInput?: unknown; diffs: unknown[]; locations: unknown[]; streamed: string; lastChunk: string; limited?: boolean };
+export type TrackedCall = { kind?: string; title?: string; rawInput?: unknown; diffs: unknown[]; locations: unknown[]; streamed: string; lastChunk: string; limited?: boolean;
+  /** The call's latest `rawInput` was there but could not be read (null among them): its arguments are unknown until a readable one comes. */
+  rawUnreadable?: boolean };
 const STREAM_LIMIT = MAX_INPUT;
 
 /** Adds what a `tool_call` or `tool_call_update` says to what is known of that call. */
@@ -274,7 +276,11 @@ export function trackToolCall(calls: Map<string, TrackedCall>, id: string, updat
   }
   known.kind = text(update.kind, 40) ?? known.kind;
   known.title = text(update.title, 300) ?? known.title;
-  if (update.rawInput !== undefined && update.rawInput !== null) known.rawInput = update.rawInput;
+  // A readable rawInput replaces the one before; one that is there but cannot be read (null, not an object) leaves the arguments
+  // unknown, so a request about the call is refused rather than judged on streamed or earlier arguments, until a readable one comes.
+  if (update.rawInput !== undefined) {
+    if (parsedInput(update.rawInput)) { known.rawInput = update.rawInput; known.rawUnreadable = false; } else { known.rawInput = undefined; known.rawUnreadable = true; }
+  }
   // Too much to look at is remembered, and a request about the call is refused.
   if (Array.isArray(update.locations) && update.locations.length > MAX_PLACES) known.limited = true;
   if (Array.isArray(update.content) && update.content.length > MAX_PLACES) known.limited = true;
@@ -309,7 +315,7 @@ function factsOf(call: Json, tracked?: TrackedCall): Facts {
   const paths: string[] = [];
   const places: string[] = [];
   const diffs: Diff[] = [];
-  let limited = tracked?.limited === true;
+  let limited = tracked?.limited === true || tracked?.rawUnreadable === true;
   const oversized = (value: unknown) => typeof value === "string" && value.length > MAX_INPUT;
   if (oversized(call.rawInput) || oversized(call.args)) limited = true;
   const raw = parsedInput(call.rawInput) ?? (tracked ? streamedInput(tracked) : undefined) ?? parsedInput(call.args);

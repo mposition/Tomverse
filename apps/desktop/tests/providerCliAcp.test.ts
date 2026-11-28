@@ -329,6 +329,22 @@ const tracking = (updates: Array<[string, object]>) => {
 };
 const chunk = (text: string) => ({ content: [{ type: "content", content: { type: "text", text } }] });
 
+test("A tracked call whose latest rawInput cannot be read is refused until a readable one comes", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "tomverse-acp-unread-"));
+  try {
+    const plan = cliPermissionPlan("mistral", "allow_all");
+    const ask = (calls: Map<string, TrackedCall>) => classifyAcpPermission({ sessionId: "s", toolCall: { toolCallId: "w" }, options: vibeOptions }, { cwd, plan, tracked: calls.get("w") });
+    const start = { title: "Writing a.txt", kind: "edit", locations: [{ path: join(cwd, "a.txt") }], rawInput: { filePath: "a.txt", content: "hi" } };
+    assert.equal(ask(tracking([["w", start]])).verdict, "allow");
+    for (const rawInput of [null, "{not json", 7]) {
+      // Arguments that were readable, then reported as unreadable: neither the earlier ones nor streamed text stand in for them.
+      assert.equal(ask(tracking([["w", start], ["w", { rawInput, ...chunk('{"filePath":"a.txt","content":"hi"}') }]])).verdict, "refuse", JSON.stringify(rawInput));
+      // A readable rawInput afterwards makes the arguments known again.
+      assert.equal(ask(tracking([["w", { ...start, rawInput }], ["w", { rawInput: start.rawInput }]])).verdict, "allow", JSON.stringify(rawInput));
+    }
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
 test("Vibe asks with only the call's id: what its earlier tool_call said is what the card and the checks use", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "tomverse-acp-vibe-"));
   try {
