@@ -482,6 +482,8 @@ export const de = {
         attachmentModelImageUnsupported: "Dieses Modell kann die in dieser Datei enthaltenen Bilder nicht verarbeiten.",
         attachmentModelUnsupported: "Dieses Modell kann das angehängte Bild nicht lesen. Wählen Sie ein Modell mit Bildunterstützung oder entfernen Sie den Anhang.",
         attachmentOcrUnavailable: "Der Text dieser PDF konnte gerade nicht gelesen werden. Bitte versuchen Sie es gleich erneut oder wählen Sie ein Modell, das PDFs direkt lesen kann.",
+        imageEditSourceTooLarge: "Dieses Foto ist zu groß zum Bearbeiten. Hängen Sie eine kleinere Version an, zum Beispiel eine verkleinerte Kopie, und versuchen Sie es erneut. Es wurden keine Credits verbraucht.",
+        imageEditSourceUnsupported: "Dieses Foto kann nicht bearbeitet werden, weil sein Format nicht unterstützt wird. Hängen Sie es als PNG, JPEG, WebP oder GIF an und versuchen Sie es erneut. Es wurden keine Credits verbraucht.",
         archiveCorrupt: "Die ZIP-Datei ist beschädigt.",
         archiveEncrypted: "Verschlüsselte ZIP-Dateien werden nicht unterstützt.",
         archiveZip64: "ZIP64-Archive werden noch nicht unterstützt.",

@@ -403,7 +403,14 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
 - **sweep**: 15분 유지보수 cron이 (a) tombstone queue를 drain하고,
   (b) `ARTIFACT_ORPHAN_TTL_MS`(6시간)보다 오래된 접두사 객체 중 참조하는 행이
   없는 것을 지운다. (b)의 age 필터는 필수다 — 없으면 바이트를 저장하고 아직 행을
-  쓰지 않은 진행 중인 turn의 파일을 지운다.
+  쓰지 않은 진행 중인 turn의 파일을 지운다. (b)는 한 번에 접두사 객체를 키 순서로 한
+  쪽(500개)만 보고, 마지막으로 본 키를 `AppSetting`(`generated_artifact_orphan_sweep_cursor`)에
+  남겨 다음 run이 그 뒤를 보며, 끝까지 가면 처음부터 다시 돈다(2026-11-28: 전에는 매번 맨 앞의
+  오래된 객체 200개만 봐서, 행이 있는 오래된 파일 200개가 앞서면 그 뒤의 고아가 영원히
+  지워지지 않았다). 지우는 조건은 그대로다: 행이 없고 TTL보다 오래된 키뿐이다. 삭제가 실패한
+  run은 위치를 그 페이지 끝이 아니라 **처음 실패한 키 바로 앞**에 두어 다음 run이 그 키를 다시
+  시도한다. 같은 자리에서 연속 두 번 실패하면 이번 바퀴에서는 놓아 주어(한 객체가 sweep을 붙잡지
+  않게) 계속 간다.
 - sweep은 절대 throw하지 않는다. 저장소 장애가 유지보수 run 전체를 실패시키면
   안 된다.
 
@@ -492,9 +499,17 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
     더 좁은 정책(`reactPreviewCsp`)을 하나 더 둡니다. 두 정책이 함께 적용되어 고정한 세 파일과 inline script만 실행됩니다.
     그 세 파일은 **이 앱이 직접 제공합니다**(`public/vendor/artifact-preview/`, 아래). 그래서 React 미리보기에는 제3자 host가
     하나도 없고, script URL의 경로나 query에 글을 실어도 이 앱 서버에만 닿습니다. 공통 정책은 앱 origin 중
-    `/vendor/artifact-preview/` 경로만 더 허용합니다(`htmlPreviewCsp(origin)`; `srcdoc` frame의 origin은 opaque라 `'self'`로는 안 됩니다).
+    그 세 파일의 **정확한 URL**만 더 허용합니다(`htmlPreviewCsp(origin)`, `HTML_PREVIEW_VENDOR_FILES`; 디렉터리 전체가 아니므로 그 아래에
+    파일이 더해져도 모델의 page가 닿지 못합니다. `srcdoc` frame의 origin은 opaque라 `'self'`로는 안 됩니다. 무결성 hash는 `<script integrity>`에 두고
+    정책에는 hash source를 넣지 않습니다 — 넣으면 브라우저가 `'unsafe-inline'`을 무시해 page의 inline script가 막힙니다).
     한계: 모델이 쓴 HTML page(React가 아닌 것)는 차트·지도 라이브러리를 쓰려고 세 CDN의 script·style·글꼴을 계속 받을 수
     있으므로, 그 page가 CDN 주소에 글을 실어 요청하면 CDN 운영자 로그에는 남을 수 있습니다(다른 host로는 못 보냄).
+  - **resource hint는 알려진 잔여 위험입니다**(2026-11-28). `<link rel="dns-prefetch|preconnect|prefetch|prerender">`는 CSP가 막지 못하고
+    `href`의 host로 DNS 조회·연결을 시작하므로 host 이름에 글을 실어 보내는 통로가 됩니다. 이것을 지우려고 **부모 문서에서 모델의 HTML을
+    파싱하거나 고쳐 쓰지 않습니다**(`DOMParser`로 지우는 시도는 신뢰할 수 없는 HTML을 부모 문서가 다루게 해 철회했고, 정규식은 우회됩니다).
+    남는 방어는 안쪽 문서의 CSP(`connect-src 'none'`을 브라우저가 이 hint에 적용하는 만큼)와 그 다음에 둔
+    `x-dns-prefetch-control: off` meta뿐이며 Browser 창에서는 관찰하지 못했습니다. 부모 문서가 page를 파싱하는 곳은 앱 문서에 nonce가 있을 때
+    nonce를 붙이는 `withEmbedderNonce` 하나뿐이고, 이는 이번 변경 전부터 있던 것입니다(위 설명).
   - 미리보기는 **frame 안의 frame**입니다. 안쪽이 모델의 page(위 sandbox·CSP)이고 바깥쪽은 우리 문서로
     `frame-src 'none'`**만** 갖습니다(`srcdoc` 자식은 부모의 모든 정책을 상속하므로 다른 지시문을 더하면 page에
     닿습니다). script가 `location`을 바꿔 자기 frame을 임의 주소로 보내는 것은 page 정책으로 막을 수 없는
@@ -1050,7 +1065,10 @@ OpenDocument(`odt`·`odp`·`ods`), Office 97-2003(`doc`·`ppt`·`xls`), `rtf`,
 ## 16. 문서에 그림 넣기 (PDF → Office)
 
 운영자 결정: 2026-11-13. 파일을 만들 수 있는 모델(GPT 6 Luna, Claude, Gemini)은
-PDF를 원본 그대로 받아 스캔 페이지까지 읽는다. 그래서 "이 PDF를 Word로"는 모델이
+PDF를 읽는다. 텍스트 층이 있는 페이지는 추출한 텍스트로 읽고, 텍스트가 없는 스캔·그림
+페이지가 있으면 이번 메시지의 PDF를 원본 그대로 텍스트와 함께 받아 읽는다(2026-11-28
+정정: 전에는 텍스트가 조금이라도 있으면 원본을 받지 못해 스캔 페이지가 말없이 빠졌다.
+정본은 `chat-attachment-formats.md` §6). 그래서 "이 PDF를 Word로"는 모델이
 읽고 `create_document`로 다시 쓰는 일이고, 빠져 있던 것은 **그림**이었다.
 
 ### 16.1 image 블록

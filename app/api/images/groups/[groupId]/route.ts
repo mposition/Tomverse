@@ -9,7 +9,10 @@ import {
 } from "@/lib/imageGenerationRead";
 import { prisma } from "@/lib/prisma";
 import { DESKTOP_APP_ORIGIN } from "@/lib/desktopReadApiContract";
-import { conversationLockedResponse } from "@/lib/conversationLock";
+import {
+  conversationLockedResponse,
+  hasConversationUnlockGrant,
+} from "@/lib/conversationLock";
 
 // GET /api/images/groups/[groupId] -- the polling endpoint policy §11 asks
 // for: "one group-level endpoint returns group, target and attempt state
@@ -56,10 +59,35 @@ export async function GET(req: Request, { params }: Params) {
         { status: 404, headers: { "Cache-Control": "no-store" } }
       );
     }
-    if (req.headers.get("origin") === DESKTOP_APP_ORIGIN && !(await prisma.conversation.findFirst({
-      where: { id: group.conversationId, userId, password: null },
-      select: { id: true },
-    }))) return conversationLockedResponse();
+    // The signed asset URLs below are the conversation's content. The desktop
+    // never reads a locked conversation; the web reads it with the unlock
+    // grant, as its attachments and generated files do. A group whose
+    // conversation has no password (the image workspace, Studio) reads as before.
+    const conversation = await prisma.conversation.findFirst({
+      where: { id: group.conversationId, userId },
+      select: { password: true, passwordVersion: true },
+    });
+    if (!conversation) {
+      return NextResponse.json(
+        {
+          error: "Image generation group not found.",
+          code: "IMAGE_GENERATION_GROUP_NOT_FOUND",
+        },
+        { status: 404, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+    if (
+      req.headers.get("origin") === DESKTOP_APP_ORIGIN
+        ? conversation.password != null
+        : !hasConversationUnlockGrant(
+            req,
+            userId,
+            group.conversationId,
+            conversation.password == null ? null : conversation.passwordVersion
+          )
+    ) {
+      return conversationLockedResponse();
+    }
 
     const generationIds = group.targets.flatMap((target) =>
       target.generations.map((generation) => generation.id)

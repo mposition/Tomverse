@@ -8,6 +8,10 @@ import {
 } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import {
+  conversationLockedResponse,
+  hasConversationUnlockGrant,
+} from "@/lib/conversationLock";
+import {
   IMAGE_GENERATION_READ_SELECT,
   serializeImageGeneration,
 } from "@/lib/imageGenerationRead";
@@ -46,6 +50,30 @@ export async function GET(req: Request, { params }: Params) {
         { error: "Image generation not found.", code: "IMAGE_GENERATION_NOT_FOUND" },
         { status: 404, headers: { "Cache-Control": "no-store" } }
       );
+    }
+
+    // The signed asset URLs are the conversation's content: a locked
+    // conversation needs its unlock grant here as on the group and download
+    // routes. An image workspace or Studio conversation has no password.
+    const conversation = await prisma.conversation.findFirst({
+      where: { id: generation.conversationId, userId },
+      select: { password: true, passwordVersion: true },
+    });
+    if (
+      !conversation ||
+      !hasConversationUnlockGrant(
+        req,
+        userId,
+        generation.conversationId,
+        conversation.password == null ? null : conversation.passwordVersion
+      )
+    ) {
+      return conversation
+        ? conversationLockedResponse()
+        : NextResponse.json(
+            { error: "Image generation not found.", code: "IMAGE_GENERATION_NOT_FOUND" },
+            { status: 404, headers: { "Cache-Control": "no-store" } }
+          );
     }
 
     const reservation = await prisma.imageCreditReservation.findUnique({
