@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Check, Plus, Puzzle, RefreshCw, Search, ShieldCheck } from "lucide-react";
+import { Check, Plus, Puzzle, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
 import type { Language } from "../../../../lib/language";
 import { mcpConnectorCopy } from "../../../../lib/mcpConnectorCopy";
 import { mcpProviderCopy } from "../../../../lib/mcpProviderCopy";
@@ -28,6 +28,52 @@ function ServiceLogo({ src }: { src: string | undefined }) {
     {src && failed !== src ? <img src={src} alt="" width={24} height={24} onError={() => setFailed(src)} />
       : <Puzzle size={24} />}
   </span>;
+}
+
+const FOCUSABLE = "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex=\"-1\"])";
+
+// The detail drawer is a modal dialog for the keyboard and for assistive technology: focus moves into it when it opens or its
+// content changes, Tab cycles inside it, Esc and the close button dismiss it. It is deliberately not a click-blocking overlay:
+// the list stays where it was, and pressing another card's button swaps the drawer's content instead of needing a second click.
+function DetailDrawer({ contentKey, labelledBy, closeLabel, closable, onClose, children }: {
+  contentKey: string; labelledBy: string; closeLabel: string; closable: boolean; onClose: () => void; children: ReactNode;
+}) {
+  const root = useRef<HTMLDivElement>(null);
+  const latest = useRef({ closable, onClose });
+  useEffect(() => { latest.current = { closable, onClose }; });
+  useEffect(() => {
+    const element = root.current;
+    const first = element?.querySelector<HTMLElement>("[data-autofocus]:not([disabled])") ?? element?.querySelector<HTMLElement>(FOCUSABLE) ?? element;
+    first?.focus();
+  }, [contentKey]);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const element = root.current;
+      if (!element || event.defaultPrevented) return;
+      const active = document.activeElement;
+      const inside = Boolean(active && element.contains(active));
+      if (event.key === "Escape") {
+        if ((inside || active === document.body) && latest.current.closable) { event.preventDefault(); latest.current.onClose(); }
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = [...element.querySelectorAll<HTMLElement>(FOCUSABLE)];
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (!first || !last) { event.preventDefault(); element.focus(); return; }
+      // Focus that a pointer click left in the list comes back into the drawer on the next Tab.
+      if (!inside) { event.preventDefault(); (event.shiftKey ? last : first).focus(); }
+      else if (event.shiftKey && (active === first || active === element)) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && active === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+  return <div ref={root} className="desktop-drawer" role="dialog" aria-modal="true" aria-labelledby={labelledBy} tabIndex={-1} data-testid="desktop-plugin-drawer">
+    <button type="button" className="icon desktop-drawer-close" data-testid="desktop-plugin-drawer-close" aria-label={closeLabel} title={closeLabel}
+      disabled={!closable} onClick={onClose}><X size={16} aria-hidden="true" /></button>
+    <div className="desktop-drawer-body">{children}</div>
+  </div>;
 }
 
 type Tab = "all" | "connected" | "approvals";
@@ -62,7 +108,11 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
   const [checked, setChecked] = useState<string[]>([]);
   const [verified, setVerified] = useState<Record<string, boolean>>({});
   const alive = useRef(true);
-  const detailRef = useRef<HTMLElement>(null);
+  const titleId = useId();
+  // The control that opened the drawer last; closing the drawer puts focus back on it (the search box if it is gone).
+  const returnTo = useRef<HTMLElement | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const drawerWasOpen = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -125,34 +175,49 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
   const selectedProvider = providerId ? providers.find(({ id }) => id === providerId) : undefined;
   const resetPage = () => setLimit(PAGE);
 
-  const choose = (connection: ConnectorConnection) => {
+  // `trigger` is the control the person pressed. Without it the drawer is already open and keeps the control it was opened from.
+  const choose = (connection: ConnectorConnection, trigger?: HTMLElement) => {
+    if (trigger) returnTo.current = trigger;
     setForm(undefined);
     setProviderId(undefined);
     setSelectedId(connection.id);
     setChecked(connection.grants.map(({ name }) => name));
   };
-  const chooseFromLane = (connection: ConnectorConnection) => {
+  const chooseFromLane = (connection: ConnectorConnection, trigger: HTMLElement) => {
     if (tab === "approvals") setTab("all");
-    choose(connection);
-    requestAnimationFrame(() => detailRef.current?.scrollIntoView?.({ block: "nearest" }));
+    choose(connection, trigger);
   };
-  const chooseProvider = (provider: McpProvider) => {
+  const chooseProvider = (provider: McpProvider, trigger: HTMLElement) => {
+    returnTo.current = trigger;
     setForm(undefined);
     setSelectedId(undefined);
     setProviderId(provider.id);
-    requestAnimationFrame(() => detailRef.current?.scrollIntoView?.({ block: "nearest" }));
   };
-  const openServer = (server: ConnectorServer) => {
+  const openServer = (server: ConnectorServer, trigger?: HTMLElement) => {
+    if (trigger) {
+      // Started from a card, not from a connection's own detail: cancelling closes the drawer instead of showing an earlier detail.
+      returnTo.current = trigger;
+      setSelectedId(undefined);
+      setProviderId(undefined);
+    }
     setForm({ kind: "server", serverId: server.id });
     setCredential("");
     setScopes(initialPluginScopes(server));
     setMessage(undefined);
   };
-  const openCustom = () => {
+  const openCustom = (trigger: HTMLElement) => {
+    returnTo.current = trigger;
+    setSelectedId(undefined);
+    setProviderId(undefined);
     setForm({ kind: "custom" });
     setCustom(NEW_CUSTOM);
     setCredential("");
     setMessage(undefined);
+  };
+  const closeDrawer = () => {
+    setForm(undefined);
+    setSelectedId(undefined);
+    setProviderId(undefined);
   };
 
   const formServer = form?.kind === "server" ? inventory?.servers.find(({ id }) => id === form.serverId) : undefined;
@@ -200,7 +265,7 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
       {connections.map((connection) => {
         const server = inventory?.servers.find(({ id }) => id === connection.serverId);
         return <button key={connection.id} type="button" data-testid="desktop-connector-mine" disabled={busy}
-          aria-current={connection.id === selectedId ? "true" : undefined} title={connection.name} onClick={() => chooseFromLane(connection)}>
+          aria-current={connection.id === selectedId ? "true" : undefined} title={connection.name} onClick={(event) => chooseFromLane(connection, event.currentTarget)}>
           <ServiceLogo src={logoOf(server?.custom || (!server && (connection.serverId === "custom" || connection.serverId.startsWith("custom-"))) ? undefined : findMcpProvider(providers, connection.serverId))} />
           <span>{connection.name}</span></button>;
       })}
@@ -208,7 +273,93 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
     </div>
   </div>, lane);
 
-  return <section className="desktop-plugins" aria-label={c.title} data-testid="desktop-connectors">
+  // One drawer shows one thing: the connect form, a connection's management, or a platform's details (in that order of precedence).
+  const showDetail = tab !== "approvals";
+  const drawerKey = form ? (form.kind === "custom" ? "form:custom" : `form:${form.serverId}`)
+    : showDetail && selected ? `detail:${selected.id}` : showDetail && selectedProvider ? `provider:${selectedProvider.id}` : undefined;
+  useEffect(() => {
+    if (drawerWasOpen.current && !drawerKey) {
+      const target = returnTo.current;
+      (target?.isConnected && !target.matches(":disabled") ? target : searchRef.current)?.focus();
+    }
+    drawerWasOpen.current = Boolean(drawerKey);
+  }, [drawerKey]);
+  // Results and errors appear where the person is looking: in the drawer while it is open, above the list otherwise.
+  const notices = <>
+    {message && <p role={message.tone === "error" ? "alert" : "status"} className="notice">{message.text}</p>}
+    {busy && form && <p role="status" className="notice">{d.confirming}</p>}
+  </>;
+
+  const formView = form && <form className="desktop-connector-form" aria-labelledby={titleId} onSubmit={(event) => void submit(event)}>
+    <h3 id={titleId}>{form.kind === "custom" ? c.custom : formServer?.name}</h3>
+    {form.kind === "custom" ? <>
+      <label>{c.customUrl}<input data-testid="desktop-connector-url" data-autofocus type="url" inputMode="url" placeholder="https://mcp.example.com/mcp"
+        value={custom.url} maxLength={2048} autoComplete="off" required onChange={(event) => setCustom({ ...custom, url: event.currentTarget.value })} /></label>
+      <label>{c.customName}<input data-testid="desktop-connector-name" value={custom.name} maxLength={80} autoComplete="off"
+        onChange={(event) => setCustom({ ...custom, name: event.currentTarget.value })} /></label>
+      <label>{c.customAuth}<select data-testid="desktop-connector-auth" value={custom.auth} onChange={(event) => {
+        setCustom({ ...custom, auth: event.currentTarget.value as ConnectorServer["auth"] });
+        setCredential("");
+      }}>
+        <option value="none">{c.authNone}</option><option value="bearer">{c.authBearer}</option><option value="oauth">{c.authOAuth}</option>
+      </select></label>
+      <p className="desktop-connector-help">{c.customHelp}</p>
+    </> : <>
+      {formServer && <p className="desktop-connector-help">{formServer.origin}</p>}
+      {scopeServer && <PluginScopePicker server={scopeServer} value={scopes} onChange={setScopes} disabled={busy} copy={c}
+        className="desktop-connector-scopes" />}
+    </>}
+    {formAuth === "bearer" && <label>{c.token}<input data-testid="desktop-connector-credential" type="password" value={credential}
+      maxLength={4096} autoComplete="off" required onChange={(event) => setCredential(event.currentTarget.value)} /></label>}
+    <p>{formAuth === "oauth" ? c.oauthHelp : c.authHelp}</p>
+    <p className="desktop-connector-help">{c.sharing}</p>
+    {refused && <p role="alert" className="notice">{d.oauthUnsupportedHost.replace("{host}", () => refused)}</p>}
+    <div className="desktop-connector-actions">
+      <button type="submit" className="primary" data-testid="desktop-connector-submit" disabled={!canSubmit}>{busy ? c.sending : c.connect}</button>
+      <button type="button" className="soft" disabled={busy} onClick={() => setForm(undefined)}>{c.cancel}</button>
+    </div>
+  </form>;
+
+  const detailView = selected && <div className="desktop-connector-detail" data-testid="desktop-connector-detail">
+    <h3 id={titleId}>{selected.name}</h3>
+    <p className="desktop-connector-help">{c.sharing}</p>
+    {selected.status !== "connected" && <p role="status">{c.expired}</p>}
+    {!!selected.scopes?.length && <p className="desktop-connector-help" data-testid="desktop-connector-scopes">{c.grantedScopes}: {selected.scopes.join(", ")}</p>}
+    <h4>{c.tools}</h4>
+    <p className="desktop-connector-help">{c.permissionNotice}</p>
+    <div className="desktop-connector-tools">
+      {(selected.status === "connected" ? selected.catalog : []).map((tool) => <label key={tool.name}>
+        <input type="checkbox" disabled={busy} checked={checked.includes(tool.name)} onChange={(event) =>
+          setChecked(event.currentTarget.checked ? [...checked, tool.name] : checked.filter((name) => name !== tool.name))} />
+        <span><strong>{tool.name}</strong><small>{tool.mode === "read" ? c.read : c.confirm}</small></span>
+      </label>)}
+    </div>
+    <div className="desktop-connector-actions">
+      <button type="button" className="primary" disabled={busy || selected.status !== "connected"}
+        onClick={() => void run({ action: "saveTools", connectionId: selected.id, tools: checked, version: selected.version })}>{c.save}</button>
+      <button type="button" className="soft" disabled={busy || !inventory?.enabled} onClick={() => {
+        const server = inventory?.servers.find(({ id }) => id === selected.serverId);
+        if (server) openServer(server);
+      }}>{c.reconnect}</button>
+      <button type="button" className="soft" disabled={busy} onClick={() => void run({ action: "disconnect", connectionId: selected.id })
+        .then((next) => { if (next) setSelectedId(undefined); })}>{c.disconnect}</button>
+    </div>
+    <p className="desktop-connector-help">{c.disconnectNotice}</p>
+  </div>;
+
+  const providerView = selectedProvider && <div className="desktop-connector-detail" data-testid="desktop-provider-detail">
+    <h3 id={titleId}>{selectedProvider.name}</h3>
+    <p className="desktop-connector-help">{p[selectedProvider.kind]}</p>
+    <p>{p[`${selectedProvider.kind}Help`]}</p>
+    {selectedProvider.origins.map((origin) => <p className="desktop-connector-help" key={origin}>{origin}</p>)}
+    {!!selectedProvider.profiles.length && <p className="desktop-connector-help">{p.profiles}: {selectedProvider.profiles.join(", ")}</p>}
+    {linkViewUrl(selectedProvider.docs) && <p><a href={selectedProvider.docs} data-testid="desktop-provider-docs"
+      onClick={(event) => { event.preventDefault(); void openLink(selectedProvider.docs).catch(() => {}); }}>{p.docs} ↗</a></p>}
+    <p className="desktop-connector-help">{c.sharing}</p>
+    <p className="desktop-connector-help">{c.permissionNotice}</p>
+  </div>;
+
+  return <section className="desktop-plugins" aria-label={c.title} data-testid="desktop-connectors" data-drawer={drawerKey ? "open" : undefined}>
     {laneMenu}
     <div className="desktop-plugins-heading">
       <div><h2>{c.title}</h2><p>{c.subtitle}</p></div>
@@ -216,12 +367,12 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
         <button type="button" className="soft" aria-label={c.refresh} title={c.refresh} disabled={busy}
           onClick={() => { setMessage(undefined); void refresh(); refreshCatalog(); }}><RefreshCw size={15} /></button>
         <button type="button" className="primary" data-testid="desktop-connector-add" disabled={busy || !inventory?.enabled || !inventory.customEnabled}
-          onClick={openCustom}><Plus size={15} />{c.add}</button>
+          onClick={(event) => openCustom(event.currentTarget)}><Plus size={15} />{c.add}</button>
       </div>
     </div>
     <div className="desktop-plugins-controls">
       <label className="desktop-plugins-search"><Search size={16} aria-hidden="true" />
-        <input type="search" aria-label={c.search} placeholder={c.search} value={query} onChange={(event) => { setQuery(event.currentTarget.value); resetPage(); }} /></label>
+        <input ref={searchRef} type="search" aria-label={c.search} placeholder={c.search} value={query} onChange={(event) => { setQuery(event.currentTarget.value); resetPage(); }} /></label>
       {tab !== "approvals" && <select className="desktop-plugins-filter" data-testid="desktop-connector-category" aria-label={p.category} value={category}
         onChange={(event) => { setCategory(event.currentTarget.value as McpProviderCategory | "all"); resetPage(); }}>
         <option value="all">{p.any}</option>
@@ -234,39 +385,8 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
       {!lane && <nav className="desktop-plugins-tabs" aria-label={c.title}>{tabButtons("pressed")}</nav>}
     </div>
     <p className="desktop-connector-disclosure"><ShieldCheck size={16} aria-hidden="true" />{c.disclosure}</p>
-    {message && <p role={message.tone === "error" ? "alert" : "status"} className="notice">{message.text}</p>}
-    {busy && form && <p role="status" className="notice">{d.confirming}</p>}
+    {!drawerKey && notices}
     {inventory?.enabled === false && <p className="notice">{c.disabled}</p>}
-
-    {form && <form className="desktop-connector-form" aria-label={c.add} onSubmit={(event) => void submit(event)}>
-      <h3>{form.kind === "custom" ? c.custom : formServer?.name}</h3>
-      {form.kind === "custom" ? <>
-        <label>{c.customUrl}<input data-testid="desktop-connector-url" type="url" inputMode="url" placeholder="https://mcp.example.com/mcp"
-          value={custom.url} maxLength={2048} autoComplete="off" required onChange={(event) => setCustom({ ...custom, url: event.currentTarget.value })} /></label>
-        <label>{c.customName}<input data-testid="desktop-connector-name" value={custom.name} maxLength={80} autoComplete="off"
-          onChange={(event) => setCustom({ ...custom, name: event.currentTarget.value })} /></label>
-        <label>{c.customAuth}<select data-testid="desktop-connector-auth" value={custom.auth} onChange={(event) => {
-          setCustom({ ...custom, auth: event.currentTarget.value as ConnectorServer["auth"] });
-          setCredential("");
-        }}>
-          <option value="none">{c.authNone}</option><option value="bearer">{c.authBearer}</option><option value="oauth">{c.authOAuth}</option>
-        </select></label>
-        <p className="desktop-connector-help">{c.customHelp}</p>
-      </> : <>
-        {formServer && <p className="desktop-connector-help">{formServer.origin}</p>}
-        {scopeServer && <PluginScopePicker server={scopeServer} value={scopes} onChange={setScopes} disabled={busy} copy={c}
-          className="desktop-connector-scopes" />}
-      </>}
-      {formAuth === "bearer" && <label>{c.token}<input data-testid="desktop-connector-credential" type="password" value={credential}
-        maxLength={4096} autoComplete="off" required onChange={(event) => setCredential(event.currentTarget.value)} /></label>}
-      <p>{formAuth === "oauth" ? c.oauthHelp : c.authHelp}</p>
-      <p className="desktop-connector-help">{c.sharing}</p>
-      {refused && <p role="alert" className="notice">{d.oauthUnsupportedHost.replace("{host}", () => refused)}</p>}
-      <div className="desktop-connector-actions">
-        <button type="submit" className="primary" data-testid="desktop-connector-submit" disabled={!canSubmit}>{busy ? c.sending : c.connect}</button>
-        <button type="button" className="soft" disabled={busy} onClick={() => setForm(undefined)}>{c.cancel}</button>
-      </div>
-    </form>}
 
     {tab === "approvals" ? <div className="desktop-connector-approvals">
       {inventory && !inventory.invocations.length && <p className="notice">{c.missing}</p>}
@@ -320,7 +440,7 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
                 <p className="desktop-connector-help">{server.origin}</p>
                 {refusedHost && <p className="desktop-connector-help" data-testid="desktop-connector-unavailable">{d.oauthUnsupportedHost.replace("{host}", () => refusedHost)}</p>}
               </div>
-              <button type="button" className="soft" disabled={busy} onClick={() => connection ? choose(connection) : openServer(server)}>
+              <button type="button" className="soft" disabled={busy} onClick={(event) => connection ? choose(connection, event.currentTarget) : openServer(server, event.currentTarget)}>
                 {connection ? c.manage : c.connect}</button>
             </li>;
           }
@@ -329,7 +449,7 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
             return <li key="custom" data-testid="desktop-connector-custom">
               <ServiceLogo src={undefined} />
               <div className="desktop-connector-summary"><strong>{c.custom}</strong><p>{enabled ? c.customReady : c.serverSetup}</p><p className="desktop-connector-help">{c.customDescription}</p></div>
-              <button type="button" className="soft" disabled={busy || !enabled} onClick={openCustom}>{c.connect}</button>
+              <button type="button" className="soft" disabled={busy || !enabled} onClick={(event) => openCustom(event.currentTarget)}>{c.connect}</button>
             </li>;
           }
           // A platform the web lists that this deployment has no server for: what it is and where its documentation is, as on the web.
@@ -341,7 +461,7 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
               <p className="desktop-connector-help">{provider ? mcpProviderSummary(provider, language) : ""}</p>
               {provider && <p className="desktop-connector-help">{[p[provider.kind], ...provider.sources.map((name) => name === "openai" ? "Codex" : "Claude Code")].join(" · ")}</p>}
             </div>
-            <button type="button" className="soft" disabled={busy || !provider} onClick={() => provider && chooseProvider(provider)}>{p.details}</button>
+            <button type="button" className="soft" disabled={busy || !provider} onClick={(event) => provider && chooseProvider(provider, event.currentTarget)}>{p.details}</button>
           </li>;
         })}
       </ul>
@@ -349,43 +469,10 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
         {p.more} ({Math.min(limit, visibleCards.length)}/{visibleCards.length})</button>}
     </>}
 
-    {selected && tab !== "approvals" && <section ref={detailRef} className="desktop-connector-detail" aria-label={c.manage} data-testid="desktop-connector-detail">
-      <h3>{selected.name}</h3>
-      <p className="desktop-connector-help">{c.sharing}</p>
-      {selected.status !== "connected" && <p role="status">{c.expired}</p>}
-      {!!selected.scopes?.length && <p className="desktop-connector-help" data-testid="desktop-connector-scopes">{c.grantedScopes}: {selected.scopes.join(", ")}</p>}
-      <h4>{c.tools}</h4>
-      <p className="desktop-connector-help">{c.permissionNotice}</p>
-      <div className="desktop-connector-tools">
-        {(selected.status === "connected" ? selected.catalog : []).map((tool) => <label key={tool.name}>
-          <input type="checkbox" disabled={busy} checked={checked.includes(tool.name)} onChange={(event) =>
-            setChecked(event.currentTarget.checked ? [...checked, tool.name] : checked.filter((name) => name !== tool.name))} />
-          <span><strong>{tool.name}</strong><small>{tool.mode === "read" ? c.read : c.confirm}</small></span>
-        </label>)}
-      </div>
-      <div className="desktop-connector-actions">
-        <button type="button" className="primary" disabled={busy || selected.status !== "connected"}
-          onClick={() => void run({ action: "saveTools", connectionId: selected.id, tools: checked, version: selected.version })}>{c.save}</button>
-        <button type="button" className="soft" disabled={busy || !inventory?.enabled} onClick={() => {
-          const server = inventory?.servers.find(({ id }) => id === selected.serverId);
-          if (server) openServer(server);
-        }}>{c.reconnect}</button>
-        <button type="button" className="soft" disabled={busy} onClick={() => void run({ action: "disconnect", connectionId: selected.id })
-          .then((next) => { if (next) setSelectedId(undefined); })}>{c.disconnect}</button>
-      </div>
-      <p className="desktop-connector-help">{c.disconnectNotice}</p>
-    </section>}
-    {selectedProvider && tab !== "approvals" && !selected && <section ref={detailRef} className="desktop-connector-detail" aria-label={p.details} data-testid="desktop-provider-detail">
-      <h3>{selectedProvider.name}</h3>
-      <p className="desktop-connector-help">{p[selectedProvider.kind]}</p>
-      <p>{p[`${selectedProvider.kind}Help`]}</p>
-      {selectedProvider.origins.map((origin) => <p className="desktop-connector-help" key={origin}>{origin}</p>)}
-      {!!selectedProvider.profiles.length && <p className="desktop-connector-help">{p.profiles}: {selectedProvider.profiles.join(", ")}</p>}
-      {linkViewUrl(selectedProvider.docs) && <p><a href={selectedProvider.docs} data-testid="desktop-provider-docs"
-        onClick={(event) => { event.preventDefault(); void openLink(selectedProvider.docs).catch(() => {}); }}>{p.docs} ↗</a></p>}
-      <p className="desktop-connector-help">{c.sharing}</p>
-      <p className="desktop-connector-help">{c.permissionNotice}</p>
-    </section>}
+    {drawerKey && <DetailDrawer contentKey={drawerKey} labelledBy={titleId} closeLabel={d.closeDetails} closable={!(busy && form)} onClose={closeDrawer}>
+      {notices}
+      {form ? formView : showDetail && selected ? detailView : providerView}
+    </DetailDrawer>}
     <LocalExtensionsPanel language={language} />
   </section>;
 }

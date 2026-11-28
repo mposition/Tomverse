@@ -848,6 +848,15 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     const detail = plugins.getByTestId("desktop-connector-detail");
     await expect(detail.getByRole("checkbox", { name: /search_issues/ })).toBeChecked();
     await expect(detail.getByRole("checkbox", { name: /create_issue/ })).not.toBeChecked();
+    // Management is a drawer: it is the page's one dialog, named for the connection, and Esc hands focus back to the card's button.
+    const manageButton = connected.getByRole("button", { name: "Manage access", exact: true });
+    await expect(page.getByRole("dialog", { name: "GitHub", exact: true }).getByTestId("desktop-connector-detail")).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(1);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(manageButton).toBeFocused();
+    await manageButton.click();
+    await expect(detail.getByRole("checkbox", { name: /search_issues/ })).toBeChecked();
     // A provider that blocks sign-in inside an app window is reported, not handed to the system browser.
     await plugins.getByRole("listitem").filter({ hasText: "Google Drive" }).getByRole("button", { name: "Connect", exact: true }).click();
     await expect(plugins.getByRole("alert")).toContainText("drivemcp.googleapis.com");
