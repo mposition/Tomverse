@@ -83,7 +83,10 @@ test("the key is read only from a root-owned regular file nobody else may read",
   const fakeOpen = (stat, text) => async (path, flags) => {
     opened.push([path.replaceAll("\\", "/"), flags]);
     return { stat: async () => stat,
-      read: async (buffer) => { const bytes = Buffer.from(text); bytes.copy(buffer); return { bytesRead: bytes.length }; },
+      // One byte per read, as a short read may return: the reader reads to the end.
+      read: async (buffer, offset, length, position) => {
+        const bytes = Buffer.from(text).subarray(position, position + Math.min(1, length));
+        bytes.copy(buffer, offset); return { bytesRead: bytes.length }; },
       close: async () => {} };
   };
   const file = (fields = {}) => ({ isFile: () => true, uid: 0, mode: 0o100640, size: 80, ...fields });

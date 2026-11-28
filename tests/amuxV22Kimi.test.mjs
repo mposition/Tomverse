@@ -384,15 +384,25 @@ test("Kimi runs only inside a bubblewrap view: the checkout read-only, its run h
   assert.equal(args.at(-1), "--");
   const binds = [];
   for (let i = 0; i < args.length; i += 1)
-    if (["--ro-bind", "--bind"].includes(args[i])) { binds.push([args[i], args[i + 1]]); i += 2; }
-  assert.deepEqual(binds, [["--ro-bind", "/usr"], ["--ro-bind", "/etc"],
-    ["--ro-bind", "/opt/tomverse-amux-v22"], ["--ro-bind", GUARD.nodePath],
+    if (["--ro-bind", "--ro-bind-try", "--bind", "--tmpfs"].includes(args[i])) {
+      binds.push([args[i], args[i + 1]]);
+      if (args[i] !== "--tmpfs") i += 2; else i += 1;
+    }
+  // Only the /etc files TLS and name resolution read, over an empty /etc, and
+  // only Kimi's own install directory, not every CLI's.
+  assert.deepEqual(binds, [["--ro-bind", "/usr"], ["--tmpfs", "/etc"],
+    ...["/etc/ssl", "/etc/ca-certificates", "/etc/pki", "/etc/resolv.conf", "/etc/hosts",
+      "/etc/host.conf", "/etc/nsswitch.conf", "/etc/gai.conf", "/etc/localtime"]
+      .map((path) => ["--ro-bind-try", path]),
+    ["--tmpfs", "/tmp"], ["--ro-bind", "/opt/tomverse-amux-v22/kimi"], ["--ro-bind", GUARD.nodePath],
     ["--ro-bind", GUARD.guardPath], ["--ro-bind", WORKTREE], ["--bind", RUN_HOME]]);
+  assert.ok(!args.includes("/etc/passwd") && !args.includes("/opt/tomverse-amux-v22"));
   // The network stays (the CLI calls Kimi Code); nothing else of the box is in view.
-  assert.ok(!args.includes("--unshare-net") && !args.includes("--proc") && !args.includes("--bind-try"));
+  assert.ok(!args.includes("--unshare-net") && !args.includes("--proc"));
   assert.ok(args.includes("--die-with-parent") && args.includes("--unshare-user"));
   assert.deepEqual(args.slice(args.indexOf("--chdir"), args.indexOf("--chdir") + 2), ["--chdir", WORKTREE]);
-  for (const binaryPath of ["/home/tommy/.local/bin/kimi", "/opt/tomverse-amux-v22-x/kimi"])
+  for (const binaryPath of ["/home/tommy/.local/bin/kimi", "/opt/tomverse-amux-v22-x/kimi",
+    "/opt/tomverse-amux-v22/kimi", "/opt/tomverse-amux-v22/./kimi"])
     assert.throws(() => amuxV22KimiSandboxArgs({ worktreePath: WORKTREE, runHomePath: RUN_HOME,
       binaryPath, ...GUARD }), /root-owned install/);
   assert.throws(() => amuxV22KimiSandboxArgs({ worktreePath: WORKTREE, runHomePath: `${WORKTREE}/home`,

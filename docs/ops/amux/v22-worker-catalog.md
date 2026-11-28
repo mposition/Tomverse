@@ -144,9 +144,11 @@ without a sandbox. Each run home holds an agent file (`extend: default`,
 `tools` = ReadFile, Glob, Grep) and an empty `--skills-dir`; the whole
 configuration (Kimi Code platform, OAuth key `oauth/kimi-code`, the route's
 model) comes from `--config`, so no user `config.toml` or hook is read. The
-CLI runs only inside a bubblewrap view (network kept): `/usr`, `/etc`,
-`/opt/tomverse-amux-v22` (so the CLI must be installed there), the guard's
-node and script, the checkout read-only and the run home; nothing else of the
+CLI runs only inside a bubblewrap view (network kept): `/usr`, only the
+`/etc` files TLS and name resolution read (certificates, `resolv.conf`,
+`hosts`, `nsswitch.conf`, `localtime`; the rest of `/etc` is empty), its own
+install directory `/opt/tomverse-amux-v22/<dir>` (the CLI and its Python must
+be installed there), the guard's node and script, the checkout read-only and the run home; nothing else of the
 box is visible, and where bwrap cannot start the CLI does not either. A
 `PreToolUse` hook (`lib/amux/v22KimiToolGuard.mjs`) also blocks, before a tool
 runs, any path that resolves outside the checkout (symlinks and a pattern's
