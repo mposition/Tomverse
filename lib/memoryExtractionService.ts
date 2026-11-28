@@ -1330,7 +1330,8 @@ export async function reconcileExpiredMemoryExtractionRuns(now = new Date()) {
  */
 export async function createNativeMemoryExtractionRun(input: {
     userId: string;
-    projectId: string;
+    /** null: an ordinary (non-project) Chat conversation. */
+    projectId: string | null;
     conversationId: string;
     sourceKey: string;
     sourceSelection: Prisma.InputJsonValue;
@@ -1355,15 +1356,15 @@ export async function createNativeMemoryExtractionRun(input: {
     return prisma.$transaction(async (tx) => {
         await acquireCreditAccountLock(tx, input.userId);
         await acquireUserRunLock(tx, input.userId);
-        const conversation = await tx.$queryRaw<Array<{ password: string | null; projectId: string | null }>>`
-            SELECT password, "projectId" FROM "Conversation"
+        const conversation = await tx.$queryRaw<Array<{ password: string | null; projectId: string | null; temporaryExpiresAt: Date | null }>>`
+            SELECT password, "projectId", "temporaryExpiresAt" FROM "Conversation"
             WHERE id = ${input.conversationId} AND "userId" = ${input.userId}
             FOR UPDATE
         `;
         if (!conversation[0] || conversation[0].projectId !== input.projectId) {
             throw new ApiSecurityError(404, "NOT_FOUND", "Conversation not found.");
         }
-        if (conversation[0].password !== null) {
+        if (conversation[0].password !== null || conversation[0].temporaryExpiresAt !== null) {
             throw new ApiSecurityError(409, "MEMORY_EXTRACTION_SOURCE_LOCKED", "The conversation is locked.");
         }
         const existing = await tx.memoryExtractionRun.findUnique({ where: { sourceKey: input.sourceKey }, select: { id: true } });

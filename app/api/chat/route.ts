@@ -414,7 +414,7 @@ import type { ChatToolSlot } from "@/lib/chatToolLoop";
 import { projectReceiptSources } from "@/lib/projectSourceAccess";
 import { resolveConversationProjectScope } from "@/lib/projectWorkspaceService";
 import { projectContextRequiresBundle, type ProjectTurnScope } from "@/lib/projectWorkspaceCore";
-import { enqueueNativeProjectExtraction } from "@/lib/projectMemoryExtraction";
+import { enqueueNativeChatExtraction, enqueueNativeProjectExtraction } from "@/lib/projectMemoryExtraction";
 import { buildMcpProgressChunk } from "@/lib/mcpConnectorProgress";
 import { MCP_UNTRUSTED_NOTICE, mcpPreviewEnabled } from "@/lib/mcpConnectorPolicy";
 import { sanitizeWebSearchCitations } from "@/lib/webSearchCitations";
@@ -9280,14 +9280,22 @@ async function handleChatPost(
                                 // The rows are committed, so the objects they
                                 // point at must survive the release below.
                                 artifactsPersisted = true;
-                                // Project memory from this conversation's new
+                                // Memory from this conversation's new
                                 // messages: queued after the commit, never
                                 // awaited, so the answer is not held for it.
-                                // Off unless the operator switch is on.
-                                if (verifiedContext?.project && session?.user?.id && conversationId) {
+                                // A project conversation and an ordinary Chat
+                                // one each have their own operator switch, off
+                                // by default; the Chat path decides everything
+                                // else (locks, temporary, memory off) itself.
+                                if (session?.user?.id && conversationId) {
                                     const ownerId = session.user.id;
-                                    void enqueueNativeProjectExtraction({ userId: ownerId, conversationId })
-                                        .catch((error) => logRequestError("project_memory_enqueue_failed", traceId, error));
+                                    if (verifiedContext?.project) {
+                                        void enqueueNativeProjectExtraction({ userId: ownerId, conversationId })
+                                            .catch((error) => logRequestError("project_memory_enqueue_failed", traceId, error));
+                                    } else {
+                                        void enqueueNativeChatExtraction({ userId: ownerId, conversationId })
+                                            .catch((error) => logRequestError("chat_memory_enqueue_failed", traceId, error));
+                                    }
                                 }
                             } catch (error) {
                                 logRequestError(

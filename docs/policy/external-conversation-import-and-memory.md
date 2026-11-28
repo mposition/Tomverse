@@ -1757,6 +1757,29 @@ memory 개수는 표시하지 않으므로(§13.4) 두 숫자를 합치는 일�
   큐잉합니다. 근거는 사용자 메시지여야 하며(validator), 저장 직전에 owner·project·잠금·digest를
   다시 확인합니다. 새 provider 지출이므로 운영 스위치
   `TOMVERSE_PROJECT_AUTO_MEMORY_ENABLED`는 기본 꺼져 있습니다.
+- **일반 Chat 대화의 자동 기억** (운영자 지시 2026-11-28): 프로젝트 밖의 일반 Chat 대화도 같은 native
+  extraction 경로(같은 승인 pair, 검증기, fenced commit, 충돌·중복 처리)로 개인 기억을 쌓습니다. 새 provider
+  지출이므로 운영 스위치 `TOMVERSE_CHAT_AUTO_MEMORY_ENABLED`(기본 꺼짐)와 `memoryExtractionEnabled`, 계정
+  master toggle이 모두 켜져 있어야 합니다. run은 `projectId`가 NULL이고 selection의 `projectId`도 null이며,
+  프로젝트가 삭제되어 컬럼이 NULL이 된 run과는 selection으로 구분합니다(`nativeRunScope`: 후자는 아무것도
+  저장하지 않습니다). 비용은 다른 native·import run과 같은 Tomverse 내부 provider 비용이며 사용자 credit은
+  0입니다. 묶음과 상한(`CHAT_AUTO_MEMORY_LIMITS`): 새 사용자 메시지 2개 이상, 같은 대화의 snapshot 사이 15분,
+  계정당 24시간 10회. 제외: 임시 Chat, 잠긴 대화, 대화별 memory off(계정 기본값 상속 포함), 프로젝트 안의
+  대화, 이미지·Review 대화, memory를 끈 Assistant, 가져온 대화에서 이어간 대화(이 정책이 이어가기의 기억 사용을
+  따로 허용하지 않으므로 제외), 게스트. 조건은 enqueue·worker 읽기·commit 세 곳에서 `readChatExtractionGate`
+  한 함수로 다시 판정합니다. 근거 메시지가 있는 기억은 §7.1·§13.1과 같이 대화 잠금·삭제를 따라갑니다.
+  메모리 화면은 근거가 Tomverse 대화이면 "일반 대화에서 추출됨"과 원문 대화 링크를 보입니다.
+- **대화 중 기억 저장 도구 `save_memory`** (운영자 지시 2026-11-28, `lib/chatMemoryTool.ts`): 사용자가
+  이 대화에서 명시적으로 기억해 달라고 했을 때만 쓰도록 도구 설명에 적고, 코드가 둘레를 강제합니다.
+  `CHAT_MEMORY_TOOL_ENABLED=true`(기본 꺼짐)일 때만 등록되며, 자동 추출 스위치와 별개입니다(provider 호출이
+  없고, 도구 정의 토큰만 다른 application tool처럼 가격에 반영됩니다). 도구는 위 `readChatExtractionGate`와
+  `memoryExtractionEnabled`를 모두 통과한 대화에서만 등록되고 호출마다 다시 확인합니다. 항목마다 사용자가 이
+  대화에 쓴 글에서 그대로 가져온 `quote`가 필요하며(페이지·파일·도구 결과의 글은 사용자 메시지에 없으므로
+  저장을 시킬 수 없습니다) 그 quote가 "직접 작성한 근거"가 됩니다. 저장은 설정 화면의 직접 추가와 같은
+  `createManualMemory`와 validator를 거치며, 모델이 `sensitive`로 표시했거나 validator가 보류·거부하는 문장은
+  저장하지 않고 설정 화면에서 직접 추가하도록 안내합니다. 답변당 최대 3개·호출 2회이고 직접 추가와 같은
+  rate limit을 씁니다. 저장되면 답변 출처 목록에 `memory_saved` 항목이 붙어 "기억에 저장했습니다"와 메모리
+  화면 링크로 보입니다. 삭제("잊어 줘")는 도구가 없고 설정 화면에서 합니다.
 - **답변 출처**: `ProjectAnswerReceipt`는 답변에 전달된 프로젝트 출처(ref·제목)만 기록합니다.
   공유 snapshot·대화 export에 들어가지 않고, 열 때마다 접근을 다시 확인합니다. 전달 기록이지
   모델이 실제로 활용했다는 증명이 아닙니다. 답변별 "Memory N개" 배지는 만들지 않습니다(§13.4).

@@ -18,7 +18,8 @@ import {
 import { encodeVector } from "@/lib/semanticRetrievalCore";
 import { activeMemoryConflicts } from "@/lib/memoryService";
 import { memoryStatementKey } from "@/lib/memoryValidatorCore";
-import { verifyNativeMessageEvidence } from "@/lib/nativeMemoryEvidence";
+import { readChatExtractionGate, verifyNativeMessageEvidence } from "@/lib/nativeMemoryEvidence";
+import { nativeRunScope } from "@/lib/projectWorkspaceCore";
 
 /**
  * The storage step of an extraction chunk
@@ -237,21 +238,36 @@ export async function persistExtractionChunkDecisions(
     // The run's own record decides its source and scope, never the caller.
     const run = await tx.memoryExtractionRun.findUnique({
         where: { id: input.runId },
-        select: { sourceKind: true, projectId: true },
+        select: { sourceKind: true, projectId: true, sourceSelection: true, sourceConversationId: true },
     });
     const native = run?.sourceKind === "native";
-    const projectId = native ? (run?.projectId ?? null) : null;
+    // A native run is a project run, an ordinary Chat run (no project, and its
+    // selection says so) or neither -- a run whose project is gone stores nothing.
+    const scope = native && run ? nativeRunScope(run) : null;
+    const projectId = scope?.kind === "project" ? scope.projectId : null;
     let nativeAllowed = true;
     if (native) {
-        const project = projectId
-            ? await tx.conversationProject.findFirst({
-                  where: { id: projectId, userId: input.userId },
-                  select: { contextEnabled: true, autoMemoryEnabled: true, archivedAt: true },
-              })
-            : null;
-        // Re-read under the memory lock: a project switched off, archived or
-        // deleted while the provider answered stores nothing.
-        nativeAllowed = Boolean(project && project.contextEnabled && project.autoMemoryEnabled && !project.archivedAt);
+        if (scope?.kind === "chat") {
+            // Re-read under the memory lock like a project: a conversation locked,
+            // switched to memory off, or moved into a project while the provider
+            // answered stores nothing, and neither does an account that turned memory off.
+            nativeAllowed = Boolean(run?.sourceConversationId) &&
+                (await readChatExtractionGate(tx, {
+                    userId: input.userId,
+                    conversationId: run!.sourceConversationId!,
+                    operatorEnabled: true,
+                })).allowed;
+        } else {
+            const project = projectId
+                ? await tx.conversationProject.findFirst({
+                      where: { id: projectId, userId: input.userId },
+                      select: { contextEnabled: true, autoMemoryEnabled: true, archivedAt: true },
+                  })
+                : null;
+            // Re-read under the memory lock: a project switched off, archived or
+            // deleted while the provider answered stores nothing.
+            nativeAllowed = Boolean(project && project.contextEnabled && project.autoMemoryEnabled && !project.archivedAt);
+        }
     }
     const keep = nativeAllowed
         ? input.decisions.filter(
@@ -302,7 +318,7 @@ export async function persistExtractionChunkDecisions(
     // each is verified against its own store, and a native citation must still
     // sit in the run's project, unlocked, with the same content digest.
     const outcomes: ReadonlyArray<{ outcome: string }> = native
-        ? projectId
+        ? scope
             ? await verifyNativeMessageEvidence(input.userId, projectId, refs, tx)
             : refs.map(() => ({ outcome: "not_found" }))
         : await verifyExternalMessageEvidence(input.userId, refs, tx);

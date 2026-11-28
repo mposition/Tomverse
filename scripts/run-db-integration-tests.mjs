@@ -1004,6 +1004,10 @@ run(
     // move/lock/delete lifecycle, explicit scope moves, confirmed project
     // deletion, the knowledge owner container and the turn context identity.
     "tests/integration/project-workspace.db.test.ts",
+    // Automatic memory from ordinary Chat conversations: which conversations are queued
+    // (default-off switch, locks, temporary, memory off, pacing), what the commit refuses
+    // after the fact, and that locking or deleting the source takes the memory with it.
+    "tests/integration/chat-auto-memory.db.test.ts",
     "tests/integration/external-conversation-lock.db.test.ts",
     "tests/integration/memory-expiry.db.test.ts",
     "tests/integration/chat-context-bundle.db.test.ts",
