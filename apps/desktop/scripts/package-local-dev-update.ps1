@@ -139,11 +139,45 @@ if (-not $BuildOnly) {
         if ([IO.File]::Exists($temporaryFeed)) { [IO.File]::Delete($temporaryFeed) }
         if ([IO.File]::Exists($feed) -and [IO.File]::Exists($backupFeed)) { [IO.File]::Delete($backupFeed) }
     }
+
+    # App Installer's launch check never blocks a packaged desktop app: Windows starts the installed
+    # build first and can only apply the release on the launch after that. Update this PC's Local Dev
+    # install now instead: at once when the app is closed, or at its next launch while it is running.
+    # The Appx module loads only in Windows PowerShell.
+    $localInstall = & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -NonInteractive -Command {
+        param($Identity, $Feed, $Asset, $Version)
+        $ErrorActionPreference = 'Stop'
+        try {
+            $installed = Get-AppxPackage -Name $Identity
+            if (-not $installed) { return 'not installed on this PC' }
+            if ([version]$installed.Version -ge [version]$Version) { return "already $($installed.Version)" }
+            $root = $installed.InstallLocation.TrimEnd('\') + '\'
+            $running = @(Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) })
+            if ($running.Count -eq 0) {
+                try {
+                    Add-AppxPackage -Path $Feed -AppInstallerFile
+                    return 'installed now'
+                } catch {
+                    # The app was started after the check above; fall back to the next launch.
+                    if ($_.Exception.HResult -ne 0x80073D02 -and $_.Exception.Message -notmatch '0x80073D02') { throw }
+                }
+            }
+            Add-AppxPackage -Path $Asset -DeferRegistrationWhenPackagesAreInUse
+            return 'applies at the next launch'
+        } catch {
+            return "failed: $($_.Exception.Message.Trim())"
+        }
+    } -args $identity, $feed, $asset, $releaseVersion.ToString()
+    $localInstall = @($localInstall | Where-Object { $_ -is [string] })[-1]
+    if (-not $localInstall -or $localInstall.StartsWith('failed')) {
+        Write-Warning "The channel is published, but this PC's Local Dev install was not updated ($localInstall). Close the app and run: Add-AppxPackage -AppInstallerFile '$feed'"
+    }
 }
 
 [pscustomobject]@{
     Package = $asset
     AppInstaller = if (-not $BuildOnly) { $feed }
+    LocalInstall = if (-not $BuildOnly) { $localInstall }
     Version = $releaseVersion.ToString()
     Signer = $certificate.Thumbprint
     SHA256 = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash
