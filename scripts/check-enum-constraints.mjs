@@ -745,6 +745,27 @@ const REGISTRY = {
     reason:
       "One occurrence's lifecycle. unknown is a run whose Chat attempt lease lapsed without a terminal state: its outcome cannot be confirmed, so it is recorded and never dispatched again.",
   },
+  ArtifactShare_sourceKind_check: {
+    owner: "list",
+    module: "lib/artifactShareAccess.ts",
+    list: "ARTIFACT_SHARE_SOURCE_KINDS",
+    reason:
+      "What a public share link was made from: a generated file (artifactId set, ArtifactShare_source_shape_check) or a code block in the answer text. Written only by lib/artifactShareService.ts.",
+  },
+  ArtifactShare_previewKind_check: {
+    owner: "list",
+    module: "lib/artifactShareAccess.ts",
+    list: "ARTIFACT_SHARE_PREVIEW_KINDS",
+    reason:
+      "How the shared page is turned into a document: the preview's own kinds (lib/chatArtifactPreview.ts). The public page refuses a row whose kind and language disagree.",
+  },
+  ArtifactShare_language_check: {
+    owner: "list",
+    module: "lib/artifactShareAccess.ts",
+    list: "ARTIFACT_SHARE_LANGUAGES",
+    reason:
+      "The file format or fence tag the page was written in. Office documents and other code are not shareable pages, so they have no value here.",
+  },
   CodeCloudJob_status_check: {
     owner: "list",
     module: "lib/codeCloudContract.ts",
