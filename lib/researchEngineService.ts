@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { assertConversationCapacity, assertMessageCapacity } from "@/lib/apiSecurity";
+import { isTemporaryConversationExpired } from "@/lib/temporaryChatAccess";
 import { hasConversationUnlockGrant } from "@/lib/conversationLock";
 import { createConversation } from "@/lib/conversationCreation";
 import { ResearchPreviewRunError } from "@/lib/deepResearchSettlementHandoff";
@@ -203,17 +205,24 @@ export async function createResearchRun(input: { request: Request; userId: strin
     let conversationId = payload.conversationId;
     if (conversationId) {
       const conversation = await tx.conversation.findFirst({ where: { id: conversationId, userId: input.userId },
-        select: { id: true, kind: true, productKey: true, password: true, passwordVersion: true } });
+        select: { id: true, kind: true, productKey: true, password: true, passwordVersion: true, temporaryExpiresAt: true } });
       if (!conversation || conversation.kind !== "chat" || conversation.productKey !== "chat") throw refuse(409, "RESEARCH_CONVERSATION_UNAVAILABLE", "This conversation cannot hold research.");
+      // An expired temporary Chat is about to be deleted with every research row under it
+      // (the sweep, lib/temporaryConversationSweep.ts): a new paid run would be started only to be lost.
+      if (isTemporaryConversationExpired(conversation.temporaryExpiresAt, new Date())) {
+        throw refuse(410, "TEMPORARY_CHAT_EXPIRED", "This temporary chat has ended.");
+      }
       if (conversation.password != null && !hasConversationUnlockGrant(input.request, input.userId, conversation.id, conversation.passwordVersion)) {
         throw refuse(423, "RESEARCH_CONVERSATION_LOCKED", "Unlock this conversation first.");
       }
     } else {
+      await assertConversationCapacity(tx, input.userId);
       const created = await createConversation(tx, { userId: input.userId, title: payload.brief.question.slice(0, 80), productKey: "chat",
         selectedModels: JSON.stringify([pinned.writer.id]) }, { id: true });
       conversationId = created.id;
     }
     if (await tx.message.findUnique({ where: { id: payload.userMessageId }, select: { id: true } })) throw refuse(409, "RESEARCH_RUN_ID_REUSED", "The message identity is already in use.");
+    await assertMessageCapacity(tx, input.userId, conversationId, 1, Buffer.byteLength(payload.brief.question, "utf8"));
     await tx.message.create({ data: { id: payload.userMessageId, role: "user", content: payload.brief.question, status: "normal", conversationId } });
     const created = await tx.researchPreviewRun.create({ data: {
       userId: input.userId, conversationId, sourceUserMessageId: payload.userMessageId, assistantMessageId: payload.assistantMessageId,
@@ -237,13 +246,22 @@ export async function createResearchRun(input: { request: Request; userId: strin
   return { created: true as const, run: await readResearchRunDto(input.userId, run.id, input.request) };
 }
 
-async function ownedRunForMutation(tx: Prisma.TransactionClient, userId: string, runId: string, request?: Request) {
+/**
+ * `startsWork`: the mutation puts the run (back) into execution, so provider calls follow. An expired
+ * temporary Chat is about to be deleted with every row under it (lib/temporaryConversationSweep.ts), and the
+ * sweep stops waiting for running work 7 hours after the expiry: new paid work there would be started only to
+ * be lost, so it is refused. Pause, cancel and delete never start work and stay allowed.
+ */
+async function ownedRunForMutation(tx: Prisma.TransactionClient, userId: string, runId: string, request?: Request, startsWork = false) {
   await lockResearchRun(tx, runId);
   const run = await tx.researchPreviewRun.findFirst({ where: { id: runId, userId, engineVersion: 2 },
-    include: { conversation: { select: { password: true, passwordVersion: true } } } });
+    include: { conversation: { select: { password: true, passwordVersion: true, temporaryExpiresAt: true } } } });
   if (!run) throw refuse(404, "RESEARCH_RUN_NOT_FOUND", "Research run not found.");
   if (run.conversation.password != null && !(request && hasConversationUnlockGrant(request, userId, run.conversationId, run.conversation.passwordVersion))) {
     throw refuse(423, "RESEARCH_CONVERSATION_LOCKED", "Unlock this conversation before changing Research.");
+  }
+  if (startsWork && isTemporaryConversationExpired(run.conversation.temporaryExpiresAt, new Date())) {
+    throw refuse(410, "TEMPORARY_CHAT_EXPIRED", "This temporary chat has ended.");
   }
   return run;
 }
@@ -251,7 +269,7 @@ async function ownedRunForMutation(tx: Prisma.TransactionClient, userId: string,
 /** Explicit, paid action: queues one planning call funded from the approved total. */
 export async function requestResearchPlan(input: { request: Request; userId: string; runId: string; expectedPlanRevision: number; feedback?: string }) {
   await prisma.$transaction(async (tx) => {
-    const run = await ownedRunForMutation(tx, input.userId, input.runId, input.request);
+    const run = await ownedRunForMutation(tx, input.userId, input.runId, input.request, true);
     if (run.planRevision !== input.expectedPlanRevision) {
       // Idempotent readback: a plan request already made for this revision is not repeated.
       if (run.status === "planning" || run.planRevision > input.expectedPlanRevision) return;
@@ -282,7 +300,7 @@ export async function editResearchPlan(input: { request: Request; userId: string
 
 export async function approveResearchPlan(input: { request: Request; userId: string; runId: string; planRevision: number }) {
   await prisma.$transaction(async (tx) => {
-    const run = await ownedRunForMutation(tx, input.userId, input.runId, input.request);
+    const run = await ownedRunForMutation(tx, input.userId, input.runId, input.request, true);
     if (run.approvedPlanRevision === input.planRevision) return; // idempotent readback
     if (run.status !== "awaiting_input" || run.approvedPlanRevision) throw refuse(409, "RESEARCH_PLAN_NOT_APPROVABLE", "This plan cannot be started.");
     if (run.planRevision !== input.planRevision) throw refuse(409, "RESEARCH_PLAN_STALE", "The plan changed; reload it first.");
@@ -305,7 +323,7 @@ export async function pauseResearchRun(input: { request: Request; userId: string
 
 export async function resumeResearchRun(input: { request: Request; userId: string; runId: string }) {
   await prisma.$transaction(async (tx) => {
-    const run = await ownedRunForMutation(tx, input.userId, input.runId, input.request);
+    const run = await ownedRunForMutation(tx, input.userId, input.runId, input.request, true);
     if (!run.pauseRequestedAt && run.status !== "paused") return;
     if (run.cancelRequestedAt) throw refuse(409, "RESEARCH_RUN_CANCELLED", "This research was cancelled.");
     const finalOpen = await tx.researchWorkItem.count({ where: { runId: run.id, kind: { in: ["verify", "write_section", "synthesize"] }, status: { in: ["queued", "running", "blocked"] } } });
@@ -343,7 +361,7 @@ export async function cancelResearchRun(input: { request: Request; userId: strin
 export async function extendResearchBudget(input: { request: Request; userId: string; runId: string; expectedApprovedCredits: number; approvedCredits: number }) {
   const { features } = await assertEligible(input.userId);
   await prisma.$transaction(async (tx) => {
-    const run = await ownedRunForMutation(tx, input.userId, input.runId, input.request);
+    const run = await ownedRunForMutation(tx, input.userId, input.runId, input.request, true);
     if (run.approvedCredits === input.approvedCredits) return; // idempotent readback
     if (run.approvedCredits !== input.expectedApprovedCredits) throw refuse(409, "RESEARCH_BUDGET_STALE", "The research total changed; reload it first.");
     if (input.approvedCredits <= (run.approvedCredits ?? 0) || input.approvedCredits > features.maxApprovedCredits) {
@@ -362,7 +380,7 @@ export async function extendResearchBudget(input: { request: Request; userId: st
 /** Stops further research and writes the report from the evidence already gathered. */
 export async function finishResearchNow(input: { request: Request; userId: string; runId: string }) {
   await prisma.$transaction(async (tx) => {
-    const run = await ownedRunForMutation(tx, input.userId, input.runId, input.request);
+    const run = await ownedRunForMutation(tx, input.userId, input.runId, input.request, true);
     if (run.lastErrorCode === "RESEARCH_FINALIZE_REQUESTED" || run.status === "finalizing") return; // readback
     const waiting = run.status === "awaiting_input" && run.lastErrorCode === "RESEARCH_RUN_BUDGET_REACHED";
     if (!run.approvedPlanRevision || !(waiting || ["queued", "running"].includes(run.status)) || run.cancelRequestedAt) {
@@ -389,7 +407,7 @@ export const researchScopeAmendmentSchema = z.object({
 /** Mid-run scope change. Applies to work created after it; already-dispatched work is not repeated. */
 export async function amendResearchScope(input: { request: Request; userId: string; runId: string; amendment: z.infer<typeof researchScopeAmendmentSchema> }) {
   await prisma.$transaction(async (tx) => {
-    const run = await ownedRunForMutation(tx, input.userId, input.runId, input.request);
+    const run = await ownedRunForMutation(tx, input.userId, input.runId, input.request, true);
     if (run.inputRevision !== input.amendment.expectedInputRevision) {
       if (run.inputRevision > input.amendment.expectedInputRevision) return;
       throw refuse(409, "RESEARCH_SCOPE_STALE", "The scope changed; reload it first.");
@@ -444,7 +462,7 @@ export async function requestResearchRevision(input: { request: Request; userId:
     return readResearchRunDto(input.userId, input.runId, input.request);
   }
   await prisma.$transaction(async (tx) => {
-    const run = await ownedRunForMutation(tx, input.userId, input.runId, input.request);
+    const run = await ownedRunForMutation(tx, input.userId, input.runId, input.request, true);
     const manifest = researchInputManifestSchema.parse(run.inputManifest);
     if (manifest.revisionRequests.some((entry) => entry.parentRevision === request.expectedReportRevision && entry.kind === request.kind &&
       JSON.stringify(entry.sectionKeys) === JSON.stringify(request.sectionKeys) && entry.instruction === request.instruction)) return; // readback
