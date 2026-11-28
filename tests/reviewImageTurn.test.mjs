@@ -42,10 +42,13 @@ test("provider answers share one group and persist a catalogue-independent targe
       { provider: "anthropic", modelId: null },
       { provider: "google", modelId: "fal-ai/nano-banana-2" },
     ] });
+  // Every panel carries each panel's chat model in image-model order, so the
+  // request that reserves the group writes every panel's answer.
+  const panelModelIds = ["google-chat", "openai-chat"];
   assert.deepEqual(plan.turns["openai-chat"].comparison,
-    { id: "shared-turn", index: 1, modelIds: ["fal-ai/nano-banana-2", "gpt-image-2"] });
+    { id: "shared-turn", index: 1, modelIds: ["fal-ai/nano-banana-2", "gpt-image-2"], panelModelIds });
   assert.deepEqual(plan.turns["google-chat"].comparison,
-    { id: "shared-turn", index: 0, modelIds: ["fal-ai/nano-banana-2", "gpt-image-2"] });
+    { id: "shared-turn", index: 0, modelIds: ["fal-ai/nano-banana-2", "gpt-image-2"], panelModelIds });
   assert.equal(plan.turns["claude-chat"], null);
 });
 
