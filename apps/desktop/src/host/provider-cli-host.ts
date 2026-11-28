@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
 import { cliLoginArguments, isCliScanProvider, type CliLoginOpen, type CliPathCheck, type CliProvider, type CliScan, type SavedCliPath } from "../code-execution";
 import { cliLoginCommandLine, readCliLogin, type CliRunner, type LoginShell } from "./provider-cli-login";
-import { nodeExecutable, resolveMiniMaxInstall } from "./minimax-install";
+import { installManifest, nodeExecutable, resolveMiniMaxInstall } from "./minimax-install";
 import { cliPathStillMatches, inspectCliPath } from "./provider-cli-path";
 import { cliScanDirectories, expandScanDirectories, scanCliProviders, scanHome, type ScanOptions } from "./provider-cli-scan";
 import { cliTrustFile, trustRecordFor, trustedCliFile, withTrust, type CliTrustFile } from "./provider-cli-trust";
@@ -88,7 +88,10 @@ export function createProviderCliHost(options: ProviderCliHostOptions) {
     const install = await resolveMiniMaxInstall(path);
     if (!install || install.entry !== trusted.file || !record?.node) return null;
     const node = await miniMaxNode(install.root);
-    return node && await trustedCliFile(node, record.node, signal) ? { ...trusted, node } : null;
+    if (!node || !await trustedCliFile(node, record.node, signal)) return null;
+    // Every file of the release folder, read again now: a changed, added, removed or linked file is not what was trusted.
+    const manifest = record.install ? await installManifest(install.release, { signal }) : null;
+    return manifest && manifest.sha256 === record.install?.sha256 ? { ...trusted, node } : null;
   }
 
   async function scan(): Promise<CliScan> {
@@ -132,8 +135,10 @@ export function createProviderCliHost(options: ProviderCliHostOptions) {
         const install = await resolveMiniMaxInstall(path);
         const node = install ? await miniMaxNode(install.root) : null;
         const nodeRecord = node ? await trustRecordFor(node) : null;
-        if (!nodeRecord) return { status: "checkFailed" };
-        record = { ...record, node: nodeRecord.record };
+        // The release folder as a whole is trusted with them; a folder that cannot be read whole (a link, too many files) is not.
+        const manifest = install ? await installManifest(install.release) : null;
+        if (!nodeRecord || !manifest) return { status: "checkFailed" };
+        record = { ...record, node: nodeRecord.record, install: manifest };
       }
       storeTrust(withTrust(readTrust(), provider, record));
       return "stored";

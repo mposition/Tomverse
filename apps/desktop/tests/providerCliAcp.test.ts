@@ -1120,3 +1120,37 @@ test("Names for one thing in a request's arguments must agree, with or without a
     assert.equal(ask({ command: "ls", CommandLine: "pwd" }, "execute").verdict, "refuse");
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
+
+test("The card reads only the groups it shows: every other field of the arguments stays on it under its own name", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "tomverse-acp-groups-"));
+  try {
+    const decide = (kind: string, rawInput: unknown, mode: "ask" | "allow_all" | "read_only" = "ask") =>
+      classifyAcpPermission(request({ kind, title: "Work", rawInput }), { cwd, plan: cliPermissionPlan("moonshot", mode) });
+    // A command card shows the command: the file and the text of the same arguments stay on it as they are.
+    const run = decide("execute", { command: "ls", path: "a.md", content: "x", cwd: "/work" });
+    assert.deepEqual([run.verdict, run.approval.tool, run.approval.input], ["ask", "Bash", { command: "ls", description: "Work", path: "a.md", content: "x", cwd: "/work" }]);
+    const card = approvalRequestFor(run.approval, cwd, (value) => value);
+    assert.deepEqual(JSON.parse(card?.explanation ?? "{}"), { description: "Work", path: "a.md", content: "x", cwd: "/work" });
+    // A group the card does not show is not checked: it is seen as it is, not refused.
+    const odd = decide("execute", { command: "ls", path: 7, filePath: "a.md" });
+    assert.deepEqual([odd.verdict, odd.approval.input.path, odd.approval.input.filePath], ["ask", 7, "a.md"]);
+    // A Write or Edit card shows the file and the texts: the command of the same arguments stays on it.
+    const write = decide("edit", { path: "a.md", content: "x", command: "ls", Cmd: "ls" });
+    assert.deepEqual([write.verdict, write.approval.tool, write.approval.input], ["ask", "Write", { file_path: "a.md", content: "x", command: "ls", Cmd: "ls" }]);
+    // Even two commands that disagree stay on it as they are: all are checked, none stands in for the other.
+    const two = decide("edit", { path: "a.md", content: "x", command: "ls", CommandLine: "pwd" });
+    assert.deepEqual([two.verdict, two.approval.input.command, two.approval.input.CommandLine], ["ask", "ls", "pwd"]);
+    // An edit that carries a command is never approved without the card, and a command that names a credential store is refused.
+    for (const mode of ["allow_all"] as const) assert.equal(decide("edit", { path: "a.md", content: "x", command: "ls" }, mode).verdict, "ask");
+    assert.equal(decide("edit", { path: "a.md", content: "x", command: "cat ~/.qwen/settings.json" }).verdict, "refuse");
+    assert.equal(decide("edit", { path: "a.md", content: "x", CommandLine: "cat ~/.qwen/settings.json", command: "ls" }, "allow_all").verdict, "refuse");
+    assert.equal(decide("edit", { path: "a.md", content: "x", command: "ls" }, "read_only").verdict, "deny");
+    assert.equal(decide("other", { command: "ls", CommandLine: "cat ~/.vibe/.env" }).verdict, "refuse");
+    // The groups an edit card does show are still read: names that disagree are refused there.
+    assert.equal(decide("edit", { path: "a.md", filePath: "b.md", content: "x", command: "ls" }).verdict, "refuse");
+    assert.equal(decide("execute", { command: "ls", CommandLine: "pwd", path: "a.md" }).verdict, "refuse");
+    // Any other kind shows the whole of the arguments and reads no group.
+    const other = decide("fetch", { url: "https://example.com", command: "x", path: "a.md", content: "y" });
+    assert.deepEqual([other.verdict, other.approval.input.rawInput], ["ask", { url: "https://example.com", command: "x", path: "a.md", content: "y" }]);
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});

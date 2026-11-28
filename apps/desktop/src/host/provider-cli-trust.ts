@@ -15,6 +15,8 @@ const trustedFileRecord = z.object({
 export const cliTrustRecord = trustedFileRecord.extend({
   /** MiniMax Code only: the Node executable that runs the entry file is trusted with it, by the same three values. */
   node: trustedFileRecord.optional(),
+  /** MiniMax Code only: the digest of the whole release folder (installManifest), with how many files and bytes it covered. */
+  install: z.object({ sha256: z.string().regex(/^[0-9a-f]{64}$/), files: z.number().int().nonnegative(), bytes: z.number().int().nonnegative() }).strict().optional(),
 }).strict();
 export type CliTrustRecord = z.infer<typeof cliTrustRecord>;
 export type CliTrustedFileRecord = z.infer<typeof trustedFileRecord>;

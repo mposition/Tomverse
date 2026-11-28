@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { appendFile, chmod, copyFile, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { appendFile, chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import test from "node:test";
-import { nodeExecutable, resolveMiniMaxInstall } from "../src/host/minimax-install";
+import { installManifest, nodeExecutable, resolveMiniMaxInstall } from "../src/host/minimax-install";
 import { createProviderCliHost } from "../src/host/provider-cli-host";
 import { cliPathStillMatches, supportsCliPath } from "../src/host/provider-cli-path";
 
@@ -43,8 +43,8 @@ test("An install folder is found from its root or from one release, and only whe
   try {
     const { root, entry } = await install(w.root);
     const found = await resolveMiniMaxInstall(root);
-    assert.deepEqual(found, { root: await realpath(root), entry: await realpath(entry) });
-    assert.deepEqual(await resolveMiniMaxInstall(join(root, "releases", "0.8.0")), { root: await realpath(join(root, "releases", "0.8.0")), entry: await realpath(entry) });
+    assert.deepEqual(found, { root: await realpath(root), entry: await realpath(entry), release: await realpath(join(root, "releases", "0.8.0")) });
+    assert.deepEqual(await resolveMiniMaxInstall(join(root, "releases", "0.8.0")), { root: await realpath(join(root, "releases", "0.8.0")), entry: await realpath(entry), release: await realpath(join(root, "releases", "0.8.0")) });
     // Not an install: an empty folder, a file, a missing path, a `current` file that names no version or a release that is not there.
     const empty = join(w.base, "empty");
     await mkdir(empty);
@@ -219,5 +219,107 @@ test("The Node that runs a MiniMax Code install is trusted with it: another Node
     const { path, size, sha256 } = JSON.parse(readFileSync(trustPath, "utf8")).trusted.minimax as { path: string; size: number; sha256: string };
     writeFileSync(trustPath, JSON.stringify({ trusted: { minimax: { path, size, sha256 } } }));
     assert.equal(await runs(host), null);
+  } finally { await rm(w.base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+});
+
+test("The release folder's digest covers every file, and a link, a change or a missing folder makes it unusable", async (t) => {
+  const w = await world();
+  try {
+    const { root, entry } = await install(w.root);
+    const release = (await resolveMiniMaxInstall(root))!.release;
+    const dependency = join(release, "node_modules", "left-pad", "index.js");
+    await mkdir(dirname(dependency), { recursive: true });
+    await writeFile(dependency, "module.exports = 1;");
+    await writeFile(join(release, "empty.bin"), "");
+    const first = await installManifest(release);
+    assert.ok(first);
+    assert.equal(first.files, 3);
+    assert.equal(first.bytes, (await readFile(entry)).length + "module.exports = 1;".length);
+    assert.match(first.sha256, /^[0-9a-f]{64}$/);
+    // The same files read one at a time or many at a time, and again, give the same digest.
+    assert.deepEqual(await installManifest(release, { concurrency: 1 }), first);
+    assert.deepEqual(await installManifest(release, { concurrency: 32 }), first);
+    // Any change to what the entry file can load changes it: a dependency's bytes, a new file, a removed file, a renamed file.
+    await appendFile(dependency, " ");
+    assert.notEqual((await installManifest(release))?.sha256, first.sha256);
+    await writeFile(dependency, "module.exports = 1;");
+    assert.deepEqual(await installManifest(release), first);
+    await writeFile(join(release, "added.js"), "x");
+    assert.notEqual((await installManifest(release))?.sha256, first.sha256);
+    await rm(join(release, "added.js"));
+    await rm(join(release, "empty.bin"));
+    assert.notEqual((await installManifest(release))?.sha256, first.sha256);
+    await writeFile(join(release, "empty.bin"), "");
+    assert.deepEqual(await installManifest(release), first);
+    await rename(dependency, join(dirname(dependency), "other.js"));
+    assert.notEqual((await installManifest(release))?.sha256, first.sha256);
+    await rename(join(dirname(dependency), "other.js"), dependency);
+    // Not a folder that can be read whole: missing, a file, relative.
+    assert.equal(await installManifest(join(w.base, "missing")), null);
+    assert.equal(await installManifest(entry), null);
+    assert.equal(await installManifest("releases/0.8.0"), null);
+    // A link or junction anywhere in it is refused whole, whatever it leads to; so is the folder reached through one.
+    const outside = join(w.base, "outside");
+    await mkdir(outside);
+    await writeFile(join(outside, "x.js"), "x");
+    try { await symlink(outside, join(release, "node_modules", "linked"), windows ? "junction" : "dir"); } catch { t.skip("This system does not allow links."); return; }
+    assert.equal(await installManifest(release), null);
+    await rm(join(release, "node_modules", "linked"), { recursive: false, force: true });
+    assert.deepEqual(await installManifest(release), first);
+    const through = join(w.base, "through");
+    await symlink(release, through, windows ? "junction" : "dir");
+    assert.equal(await installManifest(through), null);
+  } finally { await rm(w.base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+});
+
+test("A MiniMax Code install is trusted as a whole: a change anywhere in its release folder means it is trusted again", { timeout: 90_000, skip: !supportsCliPath("minimax") }, async () => {
+  const w = await world();
+  try {
+    const { root, entry } = await install(w.root);
+    const release = (await resolveMiniMaxInstall(root))!.release;
+    const dependency = join(release, "node_modules", "left-pad", "index.js");
+    await mkdir(dirname(dependency), { recursive: true });
+    await writeFile(dependency, "module.exports = 1;");
+    await copyNode(w.bin);
+    const trustPath = join(w.base, "trust.json");
+    const host = createProviderCliHost({
+      trustPath: () => trustPath, writeTrust: (file, text) => writeFileSync(file, text), hasSaved: () => true, typeIntoTerminal: () => "opened",
+      shell: () => (windows ? "powershell" : "posix"), scan: { env: { PATH: w.bin, HOME: w.home, USERPROFILE: w.home, SystemRoot: process.env.SystemRoot }, home: w.home },
+      run: async () => ({ code: 1, output: "", timedOut: false }),
+    });
+    const saved = { path: root, status: "userTrusted" } as const;
+    const candidate = async () => (await host.scan()).providers.find(({ provider }) => provider === "minimax")?.candidates[0];
+    const recorded = () => JSON.parse(readFileSync(trustPath, "utf8")).trusted.minimax as Record<string, unknown> & { install?: { sha256: string; files: number; bytes: number } };
+    assert.equal(await host.trust("minimax", root), "stored");
+    assert.deepEqual(recorded().install, await installManifest(release));
+    assert.equal(recorded().install?.files, 2);
+    assert.ok(await host.resolveSaved("minimax", saved));
+    assert.equal((await candidate())?.trusted, true);
+
+    // A dependency of the entry file changes, a file is added, a file is removed: not what was trusted.
+    await appendFile(dependency, "// changed");
+    assert.equal(await host.resolveSaved("minimax", saved), null);
+    assert.equal(await host.trustedFile("minimax", root), null);
+    assert.equal((await candidate())?.trusted, false);
+    await writeFile(dependency, "module.exports = 1;");
+    assert.ok(await host.resolveSaved("minimax", saved), "the same bytes again are the trusted ones");
+    await writeFile(join(release, "node_modules", "left-pad", "extra.js"), "x");
+    assert.equal(await host.resolveSaved("minimax", saved), null);
+    await rm(join(release, "node_modules", "left-pad", "extra.js"));
+    await rm(dependency);
+    assert.equal(await host.resolveSaved("minimax", saved), null);
+    // Trusting again records the folder as it is now.
+    await writeFile(dependency, "module.exports = 2;");
+    assert.equal(await host.trust("minimax", root), "stored");
+    assert.ok(await host.resolveSaved("minimax", saved));
+    // The entry file itself, as before.
+    await appendFile(entry, "// changed");
+    assert.equal(await host.resolveSaved("minimax", saved), null);
+    // A record from before this check (no digest of the folder) does not run.
+    assert.equal(await host.trust("minimax", root), "stored");
+    const { install: digest, ...withoutDigest } = recorded();
+    assert.ok(digest);
+    writeFileSync(trustPath, JSON.stringify({ trusted: { minimax: withoutDigest } }));
+    assert.equal(await host.resolveSaved("minimax", saved), null);
   } finally { await rm(w.base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 });

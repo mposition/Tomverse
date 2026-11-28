@@ -221,6 +221,12 @@ function commandOf(source: Json | undefined): string | undefined {
   return commands.length === 1 && commands[0] ? commands[0] : undefined;
 }
 
+/** Every command text any command field of the arguments holds, whatever the other fields say: all of them are checked. */
+function commandValuesOf(source: Json | undefined): string[] {
+  return unique(allFields(source, commandNames).flatMap((value) => typeof value === "string" ? [value]
+    : Array.isArray(value) && value.every((word) => typeof word === "string") ? [value.join(" ")] : []).filter((value) => value.trim() !== ""));
+}
+
 /** Collects the places a request's arguments name. False when it could not look at all of them (too many, or nested too deep). */
 function collectPaths(value: unknown, into: string[], depth = 0): boolean {
   if (!isRecord(value)) return true;
@@ -290,7 +296,7 @@ function streamedInput(tracked: TrackedCall | undefined): Json | undefined {
   return undefined;
 }
 
-type Facts = { kind?: string; title?: string; raw?: Json; paths: string[]; diffs: Diff[]; command?: string; named: boolean; limited: boolean };
+type Facts = { kind?: string; title?: string; raw?: Json; paths: string[]; diffs: Diff[]; command?: string; commandValues: string[]; named: boolean; limited: boolean };
 
 /** What one description of a tool call (the request's own, or the tracked one) says. `limited`: it holds more than is looked at in part. */
 function factsOf(call: Json, tracked?: TrackedCall): Facts {
@@ -318,10 +324,9 @@ function factsOf(call: Json, tracked?: TrackedCall): Facts {
   const kind = text(call.kind, 40);
   const title = text(call.title, 300);
   const command = commandOf(raw);
-  if (command !== undefined && commandWords(command).length > MAX_WORDS) limited = true;
-  // Command fields that disagree (command and CommandLine) are refused here, so nothing announced earlier can stand in for them.
-  if (command === undefined && allFields(raw, commandNames).length > 0) limited = true;
-  return { kind, title, raw, paths, diffs, command, named: kind !== undefined || title !== undefined || raw !== undefined || paths.length > 0, limited };
+  const commandValues = commandValuesOf(raw);
+  if (commandValues.some((value) => commandWords(value).length > MAX_WORDS)) limited = true;
+  return { kind, title, raw, paths, diffs, command, commandValues, named: kind !== undefined || title !== undefined || raw !== undefined || paths.length > 0, limited };
 }
 
 const unique = (values: readonly string[]) => [...new Set(values)];
@@ -380,19 +385,23 @@ function sameValue(a: unknown, b: unknown, depth = 0): boolean {
 }
 
 const listNames = ["paths", "files", "file_paths"];
+type Group = "command" | "path" | "after" | "before";
+
 /**
- * What the arguments say once each group of names for one thing is read as one: the file (`path`, `filePath`, `Path` ...), the new
- * text, the old text. Every value in a group must be a string and all must be the same string; a group that disagrees, or holds
- * something else, makes the arguments unreadable (`ok: false`) and the request is refused. The keys of a group that is read as
- * one are `consumed`: the card shows its value once, and every other field of the arguments goes on the card as it is.
- * A list of files (`paths`) next to a file must hold just that file (and is then folded into it); on its own it stays on the card.
+ * What the arguments say once each group of names for one thing is read as one: the command, the file (`path`, `filePath`,
+ * `Path` ...), the new text, the old text. Only the groups the card shows are read (`groups`): in each of them every value must be a
+ * string and all must be the same string, or the arguments are unreadable (`ok: false`) and the request is refused. The keys of a
+ * group that is read as one are `consumed`: the card shows its value once. Every other key of the arguments, those of a group the
+ * card does not show among them, stays on the card as it is. A list of files (`paths`) next to a file must hold just that file (and
+ * is then folded into it); on its own it stays on the card.
  */
-function aliasGroups(raw: Json | undefined): { ok: boolean; path?: string; after?: string; before?: string; consumed: Set<string> } {
+function aliasGroups(raw: Json | undefined, groups: ReadonlySet<Group>): { ok: boolean; path?: string; after?: string; before?: string; consumed: Set<string> } {
   const consumed = new Set<string>();
   if (!raw) return { ok: true, consumed };
   let ok = true;
   const keysOf = (names: readonly string[]) => Object.keys(raw).filter((key) => names.includes(key.toLowerCase()));
-  const group = (names: readonly string[]) => {
+  const group = (which: Group, names: readonly string[]) => {
+    if (!groups.has(which)) return undefined;
     const keys = keysOf(names);
     for (const key of keys) consumed.add(key);
     if (keys.length === 0) return undefined;
@@ -400,11 +409,11 @@ function aliasGroups(raw: Json | undefined): { ok: boolean; path?: string; after
     if (!values.every((value) => typeof value === "string") || new Set(values).size !== 1) { ok = false; return undefined; }
     return values[0] as string;
   };
-  for (const key of keysOf(commandNames)) consumed.add(key);
-  const path = group(pathNames);
-  const after = group(afterNames);
-  const before = group(beforeNames);
-  const lists = keysOf(listNames);
+  if (groups.has("command")) for (const key of keysOf(commandNames)) consumed.add(key);
+  const path = group("path", pathNames);
+  const after = group("after", afterNames);
+  const before = group("before", beforeNames);
+  const lists = groups.has("path") ? keysOf(listNames) : [];
   if (lists.length > 0) {
     const entries = lists.flatMap((key) => (Array.isArray(raw[key]) ? raw[key] as unknown[] : [raw[key]]));
     if (!entries.every((entry) => typeof entry === "string")) ok = false;
@@ -461,7 +470,8 @@ export function classifyAcpPermission(params: unknown, context: { cwd: string; p
   const diffs = own.diffs.length > 0 ? own.diffs : earlier?.diffs ?? [];
   const paths = unique([...own.paths, ...(earlier?.paths ?? [])]);
   const command = own.command ?? earlier?.command;
-  const commands = [own.command, earlier?.command].filter((value): value is string => value !== undefined);
+  // Every command text either description holds is checked, whether or not the card shows it as the command.
+  const commands = unique([...own.commandValues, ...(earlier?.commandValues ?? [])]);
   const commandMissing = kind === "execute" && command === undefined;
   const blank = !own.named && !earlier?.named;
   // More than is looked at in part is not judged in part, and a diff that is not the edit the arguments describe is not shown as if it were: both are refused.
@@ -473,7 +483,10 @@ export function classifyAcpPermission(params: unknown, context: { cwd: string; p
   const sameAction = (own.kind === undefined || earlier?.kind === undefined || own.kind === earlier.kind) &&
     (own.diffs.length === 0 || (earlier?.diffs.length ?? 0) === 0 || sameDiffs(own.diffs, earlier!.diffs, context.cwd)) &&
     (own.raw === undefined || earlier?.raw === undefined || sameValue(own.raw, earlier.raw));
-  const aliases = aliasGroups(raw);
+  // The card reads the groups it shows: a command card the command, a Write or Edit card the file and the texts. Any other field of the
+  // arguments, a group the card does not show among them, stays on it under its own name (and a group not shown is not checked: it is seen as it is).
+  const groups = new Set<Group>(kind === "execute" ? ["command"] : kind === "edit" ? ["path", "after", "before"] : []);
+  const aliases = aliasGroups(raw, groups);
   const limited = own.limited || earlier?.limited === true || !sameAction || !aliases.ok || !diffMatchesRaw(diffs, raw, context.cwd);
 
   // The card, from the arguments the CLI will run with; the title is a description and is never taken for them.
@@ -500,10 +513,10 @@ export function classifyAcpPermission(params: unknown, context: { cwd: string; p
   const inside = paths.every((path) => insideProject(path, context.cwd));
   const result = (verdict: AcpPermission["verdict"], marked = approval): AcpPermission => ({ verdict, approval: marked, allowOption, rejectOption });
   if (context.plan.approvals === "none") {
-    return result(!blank && !limited && !secret && !commandMissing && inside && readKinds.has(kind) && paths.length > 0 && !command && allowOption ? "allow" : "deny");
+    return result(!blank && !limited && !secret && !commandMissing && inside && readKinds.has(kind) && paths.length > 0 && commands.length === 0 && allowOption ? "allow" : "deny");
   }
   if (secret || commandMissing || blank || limited) return result("refuse", { ...approval, refused: true });
-  if (context.plan.grants === "allow_all" && kind === "edit" && paths.length > 0 && inside && !command && allowOption) return result("allow");
+  if (context.plan.grants === "allow_all" && kind === "edit" && paths.length > 0 && inside && commands.length === 0 && allowOption) return result("allow");
   return result("ask");
 }
 
