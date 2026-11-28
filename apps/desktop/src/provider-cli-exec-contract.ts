@@ -1,22 +1,85 @@
-import { claudeFixtureExecution, codexFixtureExecution, zaiClaudeExecution, type CliProvider } from "./code-execution";
+import { antigravityFixtureExecution, claudeFixtureExecution, cliUsesInstallationFolder, cliUsesReleaseArchive, codexFixtureExecution, grokFixtureExecution, kimiFixtureExecution,
+  miniMaxFixtureExecution, providerClis, qwenFixtureExecution, vibeFixtureExecution, zaiClaudeExecution, type CliProvider, type SavedCliPath } from "./code-execution";
 import type { PermissionModeId } from "./permission-contract";
 
 /**
  * Running a task with the provider's own CLI (the person's saved, trusted file) instead of the Tomverse API. The run
- * costs no Tomverse credits and calls no Tomverse coding API. Codex and Claude Code have an adapter; the other CLIs keep
- * their fixture-only routes. `zai` is Claude Code on the person's Z.ai Coding Plan: the same saved Claude Code file and
- * adapter, with its own settings folder and the Z.ai key, so the person's Claude sign-in is neither used nor changed.
+ * costs no Tomverse credits and calls no Tomverse coding API. Codex and Claude Code have an adapter of their own; Qwen Code,
+ * Grok Build, Kimi Code, Mistral Vibe, MiniMax Code and Antigravity share one "live ACP" adapter (Agent Client Protocol over stdio).
+ * `zai` is Claude Code on the person's Z.ai Coding Plan: the same saved Claude Code
+ * file and adapter, with its own settings folder and the Z.ai key, so the person's Claude sign-in is neither used nor changed.
  */
-export const liveCliProviders = ["openai", "anthropic", "zai"] as const;
+export const liveAcpProviders = ["qwen", "xai", "moonshot", "mistral", "minimax", "google"] as const;
+export type LiveAcpProvider = (typeof liveAcpProviders)[number];
+export const liveCliProviders = ["openai", "anthropic", "zai", ...liveAcpProviders] as const;
 export type LiveCliProvider = (typeof liveCliProviders)[number];
+export const isLiveAcpProvider = (provider: LiveCliProvider): provider is LiveAcpProvider => (liveAcpProviders as readonly string[]).includes(provider);
 
 /** The saved CLI file each route runs. */
-export const liveCliFile = { openai: "openai", anthropic: "anthropic", zai: "anthropic" } as const satisfies Record<LiveCliProvider, CliProvider>;
+export const liveCliFile = { openai: "openai", anthropic: "anthropic", zai: "anthropic", qwen: "qwen", xai: "xai", moonshot: "moonshot",
+  mistral: "mistral", minimax: "minimax", google: "google" } as const satisfies Record<LiveCliProvider, CliProvider>;
 /** The name the composer and the task show. */
-export const liveCliNames = { openai: "Codex", anthropic: "Claude Code", zai: "Z.ai CLI (via Claude Code)" } as const satisfies Record<LiveCliProvider, string>;
+export const liveCliNames = { openai: "Codex", anthropic: "Claude Code", zai: "Z.ai CLI (via Claude Code)", qwen: providerClis.qwen, xai: providerClis.xai,
+  moonshot: providerClis.moonshot, mistral: providerClis.mistral, minimax: providerClis.minimax, google: providerClis.google } as const satisfies Record<LiveCliProvider, string>;
+const liveAcpExecution = { qwen: qwenFixtureExecution, xai: grokFixtureExecution, moonshot: kimiFixtureExecution, mistral: vibeFixtureExecution,
+  minimax: miniMaxFixtureExecution, google: antigravityFixtureExecution } as const satisfies Record<LiveAcpProvider, unknown>;
 /** What a task run on the route says it ran with. */
 export const liveCliExecution = (provider: LiveCliProvider) =>
-  provider === "openai" ? codexFixtureExecution : provider === "zai" ? zaiClaudeExecution : claudeFixtureExecution;
+  isLiveAcpProvider(provider) ? liveAcpExecution[provider] : provider === "openai" ? codexFixtureExecution : provider === "zai" ? zaiClaudeExecution : claudeFixtureExecution;
+
+/**
+ * Whether the saved file of a route is something a task can start. A pinned release that was verified is the file itself for
+ * most CLIs, but for Qwen Code and Mistral Vibe it is the release archive and for MiniMax Code its installation folder: those
+ * run only from an executable the person trusted ("userTrusted").
+ */
+export function liveCliRunnable(provider: LiveCliProvider, saved: Pick<SavedCliPath, "status"> | undefined) {
+  if (!saved) return false;
+  if (saved.status === "userTrusted") return true;
+  const file = liveCliFile[provider];
+  return saved.status === "pathVerified" && !cliUsesReleaseArchive(file) && !cliUsesInstallationFolder(file);
+}
+
+/**
+ * What each ACP CLI does under its own rules, without sending Desktop a permission request (seen in real runs on the owner's computer,
+ * 2026-11-28). Desktop can only answer the requests it receives, so none of this can be refused: Qwen Code and Antigravity read
+ * project files, including a `.env`, and the content goes to the model; Antigravity and MiniMax Code edit project files in Ask
+ * too; Mistral Vibe and Qwen Code run commands they judge safe (`ls`, `echo`) in Read only. Grok Build: not checked yet, so nothing
+ * is claimed for it. Kimi Code asked for everything that was tried. A task on a CLI with any of these says so (`cliOwnRules`).
+ * Qwen Code's `--disallowed-tools` / `--tools` options exist, but their value format is not confirmed, so they are not used.
+ */
+export type AcpOwnRules = { readsWithoutAsking: boolean; editsWithoutAsking: boolean; safeCommandsWithoutAsking: boolean };
+export const acpOwnRules: Record<LiveAcpProvider, AcpOwnRules> = {
+  qwen: { readsWithoutAsking: true, editsWithoutAsking: false, safeCommandsWithoutAsking: true },
+  google: { readsWithoutAsking: true, editsWithoutAsking: true, safeCommandsWithoutAsking: false },
+  minimax: { readsWithoutAsking: false, editsWithoutAsking: true, safeCommandsWithoutAsking: false },
+  mistral: { readsWithoutAsking: false, editsWithoutAsking: false, safeCommandsWithoutAsking: true },
+  moonshot: { readsWithoutAsking: false, editsWithoutAsking: false, safeCommandsWithoutAsking: false },
+  xai: { readsWithoutAsking: false, editsWithoutAsking: false, safeCommandsWithoutAsking: false },
+};
+/**
+ * The mode that holds each CLI to reading and refusing in Read only, or null when it has none. Antigravity has none: in "default" it
+ * reads and edits without asking, and "plan" cannot read (measured), so a Read only task on it is not started. MiniMax Code
+ * edits without asking in "default" but has "plan", so it runs in that mode (whether plan blocks edits is the CLI's own rule,
+ * not something Desktop can check). Owner decision 2026-11-28 ("tell, then use"): in Ask, Auto review and Allow all, Antigravity
+ * (and MiniMax Code) still edit project files without a card; that is shown to the person as the `cliOwnRules` note, not blocked.
+ */
+export const acpReadOnlyHold: Record<LiveAcpProvider, string | null> = { qwen: "dontAsk", xai: "dontAsk", moonshot: "plan", mistral: "ask", minimax: "plan", google: null };
+/** Whether a Read only task on this CLI is refused before it starts: it edits without asking and has no mode that stops that. */
+export const cliReadOnlyRefused = (provider: LiveCliProvider, mode: PermissionModeId) =>
+  mode === "read_only" && isLiveAcpProvider(provider) && acpOwnRules[provider].editsWithoutAsking && acpReadOnlyHold[provider] === null;
+/** What the refused task says (the locale `cliNoReadOnly` has this text in English). */
+export const CLI_READ_ONLY_REFUSAL = "Antigravity cannot run a Read only task: it edits and reads without asking. Use Ask, or another CLI.";
+
+/** Whether a task on this route runs something under the CLI's own rules that Desktop cannot ask about. */
+export const cliRunsOwnRules = (provider: LiveCliProvider) => isLiveAcpProvider(provider) && Object.values(acpOwnRules[provider]).some(Boolean);
+
+/**
+ * The folders in a person's home where the provider CLIs keep their sign-in and settings. A live ACP run uses the person's
+ * real home, so these are the files a CLI could be asked to read or change on a model's say-so: a request naming anything
+ * under one is refused in every permission mode and never shown on an approval card. Names are matched as whole path
+ * segments, lower case, in any position (so a project's own `.qwen` folder counts too).
+ */
+export const providerConfigFolders = [".qwen", ".vibe", ".grok", ".kimi-code", ".kimi", ".minimax", ".minimax-code", ".codex", ".claude", ".gemini"] as const;
 /** Z.ai's Anthropic-compatible endpoint for the Coding Plan (docs.z.ai, Claude Code). */
 export const ZAI_ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic";
 
@@ -69,7 +132,19 @@ export const cliPermissionPlans: Record<LiveCliProvider, Record<PermissionModeId
     auto_review: { grants: "ask", approvals: "card", notice: "cliAutoReviewAsks" },
     allow_all: { grants: "allow_all", approvals: "card", notice: "cliAllowAllCommandsAsk" },
   },
+  // The ACP CLIs send each approval as `session/request_permission`, so they follow the Claude Code plan: Read only refuses
+  // every write or command request, Ask and Auto review use the card, and Allow all pre-approves only edits inside the project.
+  qwen: acpPlans(), xai: acpPlans(), moonshot: acpPlans(), mistral: acpPlans(), minimax: acpPlans(), google: acpPlans(),
 };
+
+function acpPlans(): Record<PermissionModeId, CliPermissionPlan> {
+  return {
+    read_only: { grants: "read_only", approvals: "none" },
+    ask: { grants: "ask", approvals: "card" },
+    auto_review: { grants: "ask", approvals: "card", notice: "cliAutoReviewAsks" },
+    allow_all: { grants: "allow_all", approvals: "card", notice: "cliAllowAllCommandsAsk" },
+  };
+}
 
 export const cliPermissionPlan = (provider: LiveCliProvider, mode: PermissionModeId): CliPermissionPlan => cliPermissionPlans[provider][mode];
 

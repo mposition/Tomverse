@@ -7,12 +7,19 @@ import { fileStamp, isLocalPath, localReadFlags } from "./provider-cli-path";
 // A file that does not match a pinned release can still be used when the person says they trust that exact file. The
 // record holds the file's real path, size and SHA-256. Any change to the file ends the trust, and the person is asked again.
 
-export const cliTrustRecord = z.object({
+const trustedFileRecord = z.object({
   path: z.string().min(1).max(4096),
   size: z.number().int().nonnegative(),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
 }).strict();
+export const cliTrustRecord = trustedFileRecord.extend({
+  /** MiniMax Code only: the Node executable that runs the entry file is trusted with it, by the same three values. */
+  node: trustedFileRecord.optional(),
+  /** MiniMax Code only: the digest of the whole release folder (installManifest), with how many files and bytes it covered. */
+  install: z.object({ sha256: z.string().regex(/^[0-9a-f]{64}$/), files: z.number().int().nonnegative(), bytes: z.number().int().nonnegative() }).strict().optional(),
+}).strict();
 export type CliTrustRecord = z.infer<typeof cliTrustRecord>;
+export type CliTrustedFileRecord = z.infer<typeof trustedFileRecord>;
 
 /** Stored once for each account: the trusted files and whether the first-run offer was answered. */
 export const cliTrustFile = z.object({

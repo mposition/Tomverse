@@ -106,8 +106,9 @@ test("The CLI scan finds a wrapper's program, offers it once, trusts an exact fi
     await expect(found("Claude Code")).toContainText("does not match a release Tomverse can verify");
     await expect(found("Grok Build")).toContainText("could not be determined");
     await expect(found("Antigravity")).toContainText("Not found on this computer");
-    // Release archives and installation folders are chosen by hand, so they are not scanned.
-    await expect(page.getByRole("group", { name: /Qwen Code · Found/ })).toHaveCount(0);
+    // Every provider CLI is scanned: the ACP CLIs (Qwen Code, Mistral Vibe, MiniMax Code ...) whose executable matches no pinned release are
+    // offered as "trust and use". What this computer has installed is not part of the test, so only the boxes are checked.
+    for (const name of ["Qwen Code", "Kimi Code", "Mistral Vibe", "MiniMax Code"]) await expect(found(name)).toBeVisible();
     await expect(page.locator(".provider-cli-list li")).toHaveCount(8);
     // A found box spans its row but does not size the row's columns: a long path would squeeze the name and status
     // to a letter a line and pull that row's button left. Every row keeps its button in the same column.

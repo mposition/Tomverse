@@ -33,7 +33,7 @@ import { createReviewWorker } from "./review-worker";
 import { createGitDraftWorker } from "./git-draft-worker";
 import { runProviderCli } from "./provider-cli-exec";
 import { approvalRequestFor, createTranscript, holdsText, withoutKey } from "./provider-cli-transcript";
-import { cliPermissionPlan, liveCliExecution } from "../provider-cli-exec-contract";
+import { cliPermissionPlan, cliReadOnlyRefused, cliRunsOwnRules, liveCliExecution } from "../provider-cli-exec-contract";
 import { startCodeSandbox } from "./code-sandbox";
 import { composeLaunch, type SandboxRuntime } from "../../../tomverse-cli/src/sandbox.js";
 import type { RemoteWorkspace } from "../../../tomverse-cli/src/remote-workspace.js";
@@ -589,6 +589,7 @@ async function executeProviderCli(command: Extract<WorkerCommand, { type: "start
   let unlockProject: (() => void) | undefined;
   let lock: string | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let refusedReadOnly = false;
   const transcript = createTranscript(clean);
   const leading: Task["entries"] = [...task.entries];
   const refresh = () => {
@@ -606,6 +607,14 @@ async function executeProviderCli(command: Extract<WorkerCommand, { type: "start
     unlockProject = lockProject(command.project);
     lock = claimNativeHistory(command.history);
     assertProjectRoot(command.project);
+    // A CLI that edits without asking and has no mode that stops it: a Read only task is not started, and the task says why.
+    if (cliReadOnlyRefused(command.provider, command.permission)) {
+      refusedReadOnly = true;
+      leading.push(desktopCodeNotice("cliNoReadOnly"));
+      task.status = "failed";
+      task.entries = [...leading];
+      return;
+    }
     let text = command.prompt;
     if (task.references?.length) {
       const workspace = new Workspace(command.project.path, protectedRoots(command.protectedRoot));
@@ -613,6 +622,7 @@ async function executeProviderCli(command: Extract<WorkerCommand, { type: "start
       text = withWorkspaceReferences(text, task.references);
     }
     if (plan.notice) leading.push(desktopCodeNotice(plan.notice));
+    if (cliRunsOwnRules(command.provider)) leading.push(desktopCodeNotice("cliOwnRules"));
     task.status = "running";
     refresh();
     const result = await runProviderCli({
@@ -623,7 +633,7 @@ async function executeProviderCli(command: Extract<WorkerCommand, { type: "start
         signal.throwIfAborted();
         // A request holding the Z.ai key is refused too: the card would show it removed, so the person could not see what they approve.
         const holdsKey = !!zaiKey && holdsText({ tool: approval.tool, input: approval.input }, zaiKey);
-        const request = holdsKey ? null : approvalRequestFor(approval, command.project.path, clean);
+        const request = holdsKey || approval.refused ? null : approvalRequestFor(approval, command.project.path, clean);
         // A request the card cannot show in full, or that names a credential file, is refused without asking.
         if (!request) {
           if (!leading.some((entry) => entry.role === "event" && entry.notice === "cliApprovalRefused")) leading.push(desktopCodeNotice("cliApprovalRefused"));
@@ -664,7 +674,7 @@ async function executeProviderCli(command: Extract<WorkerCommand, { type: "start
     try { if (lock) unlinkSync(lock); } catch { /* An unavailable lock cannot authorize another run. */ }
     unlockProject?.();
     if (task.status === "unknown") task.entries.push(desktopCodeNotice("runUnknown"));
-    if (task.status === "failed" && !task.entries.some((entry) => entry.role === "event" && entry.notice === "workspaceBusy")) {
+    if (task.status === "failed" && !refusedReadOnly && !task.entries.some((entry) => entry.role === "event" && entry.notice === "workspaceBusy")) {
       task.entries.push(desktopCodeNotice("runtimeFailed"));
     }
     active = undefined;

@@ -2,6 +2,7 @@ import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { posix, win32 } from "node:path";
 import { cliScanProviders, type CliLogin, type CliPathCheck, type CliProvider, type CliScanCandidate, type CliScanEntry } from "../code-execution";
+import { miniMaxInstallAt } from "./minimax-install";
 import { cliExecutableNames, cliPathStillMatches, inspectCliPath, localReadFlags } from "./provider-cli-path";
 
 // The scan only reads names, small wrapper files and file headers. It never starts a program: a wrapper is read as text
@@ -62,8 +63,15 @@ export function cliScanDirectories(platform: NodeJS.Platform, env: NodeJS.Proces
     const nvmHome = variable("NVM_HOME");
     add(nvmHome, nvmHome ? { pattern: versionFolder, max: SCAN_LIMITS.versionFolders, subpaths: [""] } : undefined);
     add(path.join(home, ".local", "bin"));
+    // The installers of Qwen Code (a folder named for the program), Grok Build and Kimi Code put a single executable under their own home folder.
+    add(path.join(home, ".qwen", "bin"));
+    add(path.join(home, ".qwen", "bin", "qwen"));
+    add(path.join(home, ".grok", "bin"));
+    add(path.join(home, ".kimi-code", "bin"));
+    add(path.join(home, ".minimax-code"));
     add(path.join(home, ".npm-global"));
     add(path.join(home, ".npm-global", "bin"));
+    add(path.join(localAppData, "agy", "bin"));
     add(path.join(localAppData, "Programs"), { max: SCAN_LIMITS.programFolders, subpaths: ["", "bin"] });
     add(path.join(localAppData, "Microsoft", "WinGet", "Links"));
     const programFiles = variable("ProgramFiles");
@@ -75,6 +83,11 @@ export function cliScanDirectories(platform: NodeJS.Platform, env: NodeJS.Proces
     add("/usr/local/bin");
     if (platform === "linux") add("/home/linuxbrew/.linuxbrew/bin");
     add(path.join(home, ".local", "bin"));
+    add(path.join(home, ".qwen", "bin"));
+    add(path.join(home, ".qwen", "bin", "qwen"));
+    add(path.join(home, ".grok", "bin"));
+    add(path.join(home, ".kimi-code", "bin"));
+    add(path.join(home, ".minimax-code"));
     add(path.join(home, ".npm-global", "bin"));
     const nvm = variable("NVM_DIR");
     add(path.join(nvm && isLocalAbsolute(nvm, platform) ? nvm : path.join(home, ".nvm"), "versions", "node"),
@@ -268,6 +281,11 @@ async function resolveEntryLink(provider: CliProvider, link: string, real: strin
 
 export async function resolveFoundFile(provider: CliProvider, file: string, platform: NodeJS.Platform, arch: string, files: ScanFileSystem = diskFileSystem): Promise<Resolution> {
   const path = pathFor(platform);
+  // MiniMax Code's launcher (`mcode.cmd`, `mcode`) is a script that starts an external Node; the install folder that holds it is what is saved.
+  if (provider === "minimax") {
+    for (const folder of [path.dirname(file), path.dirname(path.dirname(file))]) if (await miniMaxInstallAt(folder)) return { path: folder, via: file };
+    return { unresolved: file };
+  }
   try {
     if (platform === "win32") {
       const extension = path.extname(file).toLowerCase();

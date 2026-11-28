@@ -24,7 +24,7 @@ export const cliPathInput = z.object({ provider: cliProvider, path: cliFilePath 
 
 export type CliPathCheck =
   | { status: "pathVerified"; version: string }
-  | { status: "versionUnverified" | "userTrusted" | "invalidPath" | "fileMissing" | "wrongFile" | "windowsShim" | "checkFailed" | "unsupportedPlatform" };
+  | { status: "versionUnverified" | "userTrusted" | "invalidPath" | "fileMissing" | "wrongFile" | "windowsShim" | "modulesAbove" | "checkFailed" | "unsupportedPlatform" };
 export type SavedCliPath = { path: string } & (
   { status: "pathVerified"; version: string } | { status: "checkRequired" | "versionUnverified" | "userTrusted" }
 );
@@ -45,9 +45,10 @@ export const cliUsesReleaseArchive = (provider: CliProvider) => provider === "qw
 export const cliUsesInstallationFolder = (provider?: CliProvider) => provider === "minimax";
 export type CliProtocolProvider = (typeof cliProtocolProviders)[number];
 
-// The scan looks for executables that the pinned release check can verify file by file. Release archives and
-// installation folders are chosen by hand.
-export const cliScanProviders = cliProviders.filter((provider) => !cliUsesReleaseArchive(provider) && !cliUsesInstallationFolder(provider));
+// The scan looks for the executables a task can start. A file that does not match a pinned release (a newer build, a
+// Qwen Code or Mistral Vibe executable, MiniMax Code's `mcode`) is offered as "trust and use"; release archives and
+// installation folders are still chosen by hand.
+export const cliScanProviders = cliProviders;
 export const isCliScanProvider = (provider: CliProvider) => cliScanProviders.some((candidate) => candidate === provider);
 export type CliLogin = "loggedIn" | "loginRequired" | "unknown";
 export type CliScanCandidate = {

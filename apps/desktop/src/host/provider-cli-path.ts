@@ -4,6 +4,7 @@ import { lstat, open, realpath, type FileHandle } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, normalize } from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { CliProvider } from "../code-execution";
+import { resolveMiniMaxInstall } from "./minimax-install";
 import { miniMaxRuntimeSupported, miniMaxVersion, verifyMiniMaxRuntime } from "./minimax-runtime";
 
 const executableNames = {
@@ -108,11 +109,16 @@ async function matchesFileFormat(file: FileHandle, size: number, archive?: strin
     (header.toString("ascii", 0, 2) === "#!" || header.toString("hex", 0, 4) === "7f454c46");
 }
 
+async function isFolder(path: string) {
+  try { return (await lstat(await realpath(path))).isDirectory(); } catch { return false; }
+}
+
 export async function inspectCliPath(provider: CliProvider, selectedPath: string, signal?: AbortSignal): Promise<CliPathInspection> {
   if (!isLocalPath(selectedPath)) return { status: "invalidPath" };
   if (!supportsCliPath(provider)) return { status: "unsupportedPlatform" };
   if (windows && windowsShim.test(selectedPath)) return { status: "windowsShim" };
-  if (provider === "minimax") {
+  if (provider === "minimax" && await isFolder(selectedPath)) {
+    // The pinned installation folder. A MiniMax Code executable (`mcode`) a person trusts goes through the file checks below.
     try {
       const root = await realpath(selectedPath);
       if (!isLocalPath(root)) return { status: "invalidPath" };
@@ -173,7 +179,9 @@ export async function inspectCliPath(provider: CliProvider, selectedPath: string
 export async function cliPathStillMatches(provider: CliProvider, selected: string, checked: { file: string; fileStamp?: string; version?: string }, signal?: AbortSignal) {
   try {
     if (checked.fileStamp !== undefined) {
-      return await realpath(selected) === checked.file && fileStamp(await lstat(checked.file)) === checked.fileStamp;
+      // A MiniMax Code install is chosen as a folder; what was checked is its entry file.
+      const current = provider === "minimax" ? (await resolveMiniMaxInstall(selected))?.entry : await realpath(selected);
+      return current === checked.file && fileStamp(await lstat(checked.file)) === checked.fileStamp;
     }
     // Verify a multi-file installation once more with its watcher already active.
     const current = await inspectCliPath(provider, selected, signal);

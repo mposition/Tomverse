@@ -6,7 +6,7 @@ type Copy = {
   heading: string; intro: string; connection: string; details: string; path: string; browse: string; check: string; checking: string;
   configure: string; change: string; remove: string; unconfigured: string; credentials: string;
   checkRequired: string; pathVerified: string; versionUnverified: string; invalidPath: string; fileMissing: string;
-  wrongFile: string; windowsShim: string; checkFailed: string; userTrusted: string;
+  wrongFile: string; windowsShim: string; checkFailed: string; userTrusted: string; modulesAbove: string;
   unsupportedPlatform: string; localExecutionUnavailable: string;
 };
 
@@ -25,6 +25,7 @@ export const desktopProviderCliCopy = {
     invalidPath: "Enter the full path to a file on this computer.", fileMissing: "The selected file could not be found.",
     wrongFile: "Select the executable for this provider.", windowsShim: "Select the provider’s .exe file. Windows command wrappers are unsupported.",
     checkFailed: "The file or its settings could not be checked. Try again.",
+    modulesAbove: "This MiniMax Code install cannot be trusted: a node_modules folder or file exists above its release folder, and Node would load code from it. Remove it, or use an install without one.",
   },
   ko: {
     unsupportedPlatform: "이 OS 또는 아키텍처는 지원되지 않습니다", localExecutionUnavailable: "이 빌드에서는 로컬 CLI 작업을 실행할 수 없습니다.",
@@ -40,6 +41,7 @@ export const desktopProviderCliCopy = {
     invalidPath: "이 컴퓨터에 있는 파일의 전체 경로를 입력하세요.", fileMissing: "선택한 파일을 찾을 수 없습니다.",
     wrongFile: "이 공급자의 실행 파일을 선택하세요.", windowsShim: "공급자의 .exe 파일을 선택하세요. Windows 명령 래퍼는 지원되지 않습니다.",
     checkFailed: "파일 또는 설정을 확인하지 못했습니다. 다시 시도하세요.",
+    modulesAbove: "이 MiniMax Code 설치는 신뢰할 수 없습니다. 릴리스 폴더 위쪽에 node_modules가 있어 Node가 그곳의 코드를 불러올 수 있습니다. 그것을 없애거나 그런 것이 없는 설치를 사용하세요.",
   },
   zh: {
     unsupportedPlatform: "此平台不受支持", localExecutionUnavailable: "此版本无法运行本地 CLI 任务。",
@@ -55,6 +57,7 @@ export const desktopProviderCliCopy = {
     invalidPath: "请输入此计算机上文件的完整路径。", fileMissing: "找不到所选文件。",
     wrongFile: "请选择此供应商的可执行文件。", windowsShim: "请选择供应商的 .exe 文件。Windows 命令包装脚本不受支持。",
     checkFailed: "无法检查文件或相关设置。请重试。",
+    modulesAbove: "无法信任此 MiniMax Code 安装：其发布文件夹上级存在 node_modules，Node 可能从中加载代码。请移除它，或使用没有它的安装。",
   },
   "zh-Hant": {
     unsupportedPlatform: "此平台不受支援", localExecutionUnavailable: "此版本無法執行本機 CLI 工作。",
@@ -70,6 +73,7 @@ export const desktopProviderCliCopy = {
     invalidPath: "請輸入此電腦上檔案的完整路徑。", fileMissing: "找不到選取的檔案。",
     wrongFile: "請選擇此供應商的執行檔。", windowsShim: "請選擇供應商的 .exe 檔案。Windows 命令包裝指令碼不受支援。",
     checkFailed: "無法檢查檔案或相關設定。請再試一次。",
+    modulesAbove: "無法信任此 MiniMax Code 安裝：其發行資料夾上層存在 node_modules，Node 可能從中載入程式碼。請移除它，或使用沒有它的安裝。",
   },
   fr: {
     unsupportedPlatform: "Plateforme non prise en charge", localExecutionUnavailable: "Les tâches CLI locales sont indisponibles dans cette version.",
@@ -85,6 +89,7 @@ export const desktopProviderCliCopy = {
     invalidPath: "Saisissez le chemin complet d’un fichier sur cet ordinateur.", fileMissing: "Le fichier sélectionné est introuvable.",
     wrongFile: "Sélectionnez l’exécutable de ce fournisseur.", windowsShim: "Sélectionnez le fichier .exe du fournisseur. Les scripts intermédiaires Windows ne sont pas pris en charge.",
     checkFailed: "Impossible de vérifier le fichier ou ses paramètres. Réessayez.",
+    modulesAbove: "Cette installation de MiniMax Code ne peut pas être approuvée : un node_modules existe au-dessus de son dossier de version et Node pourrait y charger du code. Supprimez-le ou utilisez une installation sans cela.",
   },
   de: {
     unsupportedPlatform: "Auf dieser Plattform nicht unterstützt", localExecutionUnavailable: "Lokale CLI-Aufgaben sind in dieser Version nicht verfügbar.",
@@ -100,6 +105,7 @@ export const desktopProviderCliCopy = {
     invalidPath: "Geben Sie den vollständigen Pfad zu einer Datei auf diesem Computer ein.", fileMissing: "Die ausgewählte Datei wurde nicht gefunden.",
     wrongFile: "Wählen Sie die ausführbare Datei dieses Anbieters aus.", windowsShim: "Wählen Sie die .exe-Datei des Anbieters. Windows-Startskripte werden nicht unterstützt.",
     checkFailed: "Die Datei oder ihre Einstellungen konnten nicht geprüft werden. Versuchen Sie es erneut.",
+    modulesAbove: "Dieser MiniMax-Code-Installation kann nicht vertraut werden: Oberhalb ihres Release-Ordners gibt es ein node_modules, aus dem Node Code laden könnte. Entferne es oder nutze eine Installation ohne.",
   },
   es: {
     unsupportedPlatform: "Plataforma no compatible", localExecutionUnavailable: "Esta versión no puede ejecutar tareas locales de CLI.",
@@ -115,6 +121,7 @@ export const desktopProviderCliCopy = {
     invalidPath: "Introduce la ruta completa de un archivo en este equipo.", fileMissing: "No se encuentra el archivo seleccionado.",
     wrongFile: "Selecciona el ejecutable de este proveedor.", windowsShim: "Selecciona el archivo .exe del proveedor. Los scripts de inicio de Windows no son compatibles.",
     checkFailed: "No se pudo comprobar el archivo o su configuración. Inténtalo de nuevo.",
+    modulesAbove: "No se puede confiar en esta instalación de MiniMax Code: existe un node_modules por encima de su carpeta de versión y Node podría cargar código de él. Elimínalo o usa una instalación sin él.",
   },
   pt: {
     unsupportedPlatform: "Plataforma não suportada", localExecutionUnavailable: "Esta versão não pode executar tarefas locais da CLI.",
@@ -130,5 +137,6 @@ export const desktopProviderCliCopy = {
     invalidPath: "Introduza o caminho completo de um ficheiro neste computador.", fileMissing: "Não foi possível encontrar o ficheiro selecionado.",
     wrongFile: "Selecione o executável deste fornecedor.", windowsShim: "Selecione o ficheiro .exe do fornecedor. Os scripts de arranque do Windows não são suportados.",
     checkFailed: "Não foi possível verificar o ficheiro ou as respetivas definições. Tente novamente.",
+    modulesAbove: "Não é possível confiar nesta instalação do MiniMax Code: existe um node_modules acima da sua pasta de versão e o Node poderia carregar código dele. Remova-o ou use uma instalação sem ele.",
   },
 } satisfies Record<Language, Copy>;

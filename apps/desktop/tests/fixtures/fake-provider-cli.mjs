@@ -2,6 +2,7 @@
 // argv[2] is a JSON object { scenario, record?, pidFile? }; the rest of argv is what the adapter would pass the real CLI.
 // The scenario "auto" picks one from the prompt: "[hang]" waits (and starts a child), "[fail]" ends the turn badly, anything else succeeds.
 import fs from "node:fs";
+import path from "node:path";
 import readline from "node:readline";
 import { spawn } from "node:child_process";
 
@@ -125,5 +126,7 @@ function claude() {
   })();
 }
 
-if (options.scenario.startsWith("claude") || (options.scenario === "auto" && args.includes("--print"))) claude();
+// The copy of the Node binary saved as an ACP CLI (Mistral Vibe's `vibe-acp`) is a stand-in ACP agent.
+if (path.basename(process.execPath).toLowerCase().replace(/\.exe$/, "") === "vibe-acp") await import("./fake-acp-agent.mjs");
+else if (options.scenario.startsWith("claude") || (options.scenario === "auto" && args.includes("--print"))) claude();
 else void codex();

@@ -10,7 +10,7 @@ import { cliLoginArguments, cliProviders, cliUsesInstallationFolder, cliUsesRele
 
 type Copy = (typeof desktopProviderCliCopy)[Language];
 type ScanCopy = (typeof desktopProviderCliScanCopy)[Language];
-type Message = "scanFailed" | "wrapperUnresolved" | "signInOpened" | "signInTerminalOff" | "signInNoTask" | "signInUnavailable";
+type Message = "scanFailed" | "modulesAbove" | "wrapperUnresolved" | "signInOpened" | "signInTerminalOff" | "signInNoTask" | "signInUnavailable";
 const signInMessage: Record<CliLoginOpen, Message> = {
   opened: "signInOpened", terminalOff: "signInTerminalOff", noTask: "signInNoTask", unavailable: "signInUnavailable",
 };
@@ -176,10 +176,12 @@ function CliFound({ id, entry, saved, copy, busy, act, rescan, setMessage }: {
   const name = providerClis[id];
   const candidates = entry?.candidates ?? [];
   const use = (candidate: CliScanCandidate) => act(async () => {
-    await (candidate.status === "versionUnverified" && !candidate.trusted
+    const result = await (candidate.status === "versionUnverified" && !candidate.trusted
       ? window.desktop.trustCliPath({ provider: id, path: candidate.path })
       : window.desktop.saveCliPath({ provider: id, path: candidate.path }));
     await rescan();
+    // A MiniMax Code install that cannot be trusted says why, after the scan that clears the line.
+    if (result.status === "modulesAbove") setMessage("modulesAbove");
   });
   return <div className="provider-cli-found" role="group" aria-label={name + " · " + copy.foundHeading}>
     {candidates.length === 0 && <small>{copy.notFound}</small>}

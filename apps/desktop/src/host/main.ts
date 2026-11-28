@@ -60,7 +60,7 @@ import { readOsLocationStatus, WINDOWS_LOCATION_SETTINGS_URI, type OsLocationSta
 import { Journal, deleteSession, listSessions, Workspace, writeFileAtomic } from "../../../tomverse-cli/src/runtime.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
 import { permissionCommand, type PermissionModeId } from "../permission-contract";
-import { liveCliExecution, liveCliFile, liveCliProviderForModel, liveCliProviders, type LiveCliProvider } from "../provider-cli-exec-contract";
+import { liveCliExecution, liveCliFile, liveCliProviderForModel, liveCliProviders, liveCliRunnable, type LiveCliProvider } from "../provider-cli-exec-contract";
 import { subagentStopInput } from "../orchestrate-contract";
 import { DesktopPermissions } from "./permission-host";
 import { codePermissionProfile, codeReferenceKind, codeReferencePath, decisions, MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES,
@@ -639,8 +639,7 @@ function broadcast() {
   state.draftNamespace = workspaceNamespace();
   state.providerCliExec = state.capabilities?.providerCliExec && !signingOut
     ? liveCliProviders.filter((provider) => {
-      const status = state.cliPaths[liveCliFile[provider]]?.status;
-      return (status === "pathVerified" || status === "userTrusted") && (provider !== "zai" || zaiKey !== null);
+      return liveCliRunnable(provider, state.cliPaths[liveCliFile[provider]]) && (provider !== "zai" || zaiKey !== null);
     }) : [];
   state.handoff = currentHandoff();
   state.projectPermissionProfile = readProjectPermissionProfile();
@@ -1252,7 +1251,7 @@ async function startProviderCliTask(project: ProjectRoot, draft: Pick<z.infer<ty
   try {
     send({ type: "start-provider-cli", runId, project, provider, file: resolved.file, prompt: draft.prompt, permission,
       protectedRoot: app.getPath("userData"), references, ...(home && id ? { history: { id, directory: nativeSessionDirectory(home, id) } } : {}),
-      ...(providerCliExecFixture ? { argsPrefix: providerCliExecFixture.argsPrefix } : {}), ...(zai ? { zai } : {}) });
+      ...(providerCliExecFixture ? { argsPrefix: providerCliExecFixture.argsPrefix } : resolved.args ? { argsPrefix: resolved.args } : {}), ...(zai ? { zai } : {}) });
   } catch {
     runId = null;
     state.busy = false;

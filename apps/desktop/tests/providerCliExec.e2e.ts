@@ -46,6 +46,7 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
   const exe = process.platform === "win32" ? ".exe" : "";
   const codex = join(bin, `codex${exe}`);
   const claude = join(bin, `claude${exe}`);
+  const vibe = join(bin, `vibe-acp${exe}`);
   // The Tomverse coding API is the tripwire: a provider CLI task must not reach it.
   const gateway = await new FakeGateway({ script: () => ({ text: "Unexpected Tomverse API execution." }) }).start();
   let app: ElectronApplication | undefined;
@@ -54,7 +55,7 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
     await Promise.all([mkdir(root), mkdir(profile), mkdir(bin)]);
     await writeFile(join(profile, "language.txt"), "en");
     await writeFile(join(root, "notes.txt"), "Project notes\n");
-    for (const file of [codex, claude]) {
+    for (const file of [codex, claude, vibe]) {
       await copyFile(process.execPath, file);
       await chmod(file, 0o755);
     }
@@ -172,6 +173,8 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
     await expect(denyWindow.getByRole("button", { name: "Allow always" })).toHaveCount(0);
     await decide(denyWindow, "Deny");
     await expect(page.getByText("denied: The person declined this action in Tomverse Desktop.")).toBeVisible({ timeout: 30_000 });
+    // The note about a CLI's own rules is for the ACP CLIs that have some; Claude Code has none.
+    await expect(page.locator("summary", { hasText: "under its own rules" })).toHaveCount(0);
     run = await seen();
     assert.equal(run.response?.response.response.behavior, "deny");
     assert.ok(run.args.includes("--restricted") && run.args.includes("--no-session-persistence"));
@@ -233,8 +236,43 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
     assert.ok(await dead(pids.child), "its child stopped");
     await rm(pidFile);
 
+    // Mistral Vibe (an ACP CLI): its own installed executable, trusted by the person, runs a task in the project. Ask puts the CLI's
+    // request on the same approval card, a denial reaches the CLI, and Read only denies without a card.
+    await expect.poll(async () => (await state()).busy, { timeout: 30_000 }).toBe(false);
+    assert.deepEqual(await page.evaluate((input) => window.desktop.trustCliPath(input), { provider: "mistral" as const, path: vibe }), { status: "userTrusted" });
+    await expect.poll(async () => (await state()).providerCliExec).toEqual(["openai", "anthropic", "mistral"]);
+    await chooseCodeModel(page, { model: "provider-cli:mistral" });
+    await expect(codeModelControl(page)).toContainText("Mistral Vibe");
+    const outcomes = async () => (JSON.parse(await readFile(record, "utf8")) as { args: string[]; env: string[]; cwd: string; outcomes: Array<{ outcome: { optionId?: string } }>;
+      initialize: { clientCapabilities: unknown } });
+    await setPermission("ask");
+    await rm(record, { force: true });
+    const [vibeDeny] = await Promise.all([app.waitForEvent("window", { timeout: 30_000 }), send("Run the tool [simple]")]);
+    await expect(vibeDeny.getByText("echo hi")).toBeVisible();
+    await expect(vibeDeny.getByRole("button", { name: "Allow always" })).toHaveCount(0);
+    await decide(vibeDeny, "Deny");
+    await expect(page.getByText("I will work. denied it", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator("summary", { hasText: "under its own rules" })).toBeAttached();
+    const vibeRun = await outcomes();
+    assert.equal(vibeRun.outcomes[0]!.outcome.optionId, "reject");
+    assert.deepEqual(vibeRun.args, []);
+    assert.ok(vibeRun.env.every((name) => !/^TOMVERSE_|^ELECTRON|TOKEN|KEY/i.test(name)), "no Tomverse or secret variable reaches the CLI");
+    assert.deepEqual(vibeRun.initialize.clientCapabilities, { fs: { readTextFile: false, writeTextFile: false }, terminal: false });
+    await expect.poll(async () => (await state()).busy, { timeout: 30_000 }).toBe(false);
+    const [vibeAllow] = await Promise.all([app.waitForEvent("window", { timeout: 30_000 }), send("Run the tool again [simple]")]);
+    await decide(vibeAllow, "Allow once");
+    await expect(page.getByText("I will work. ran it", { exact: true })).toBeVisible({ timeout: 30_000 });
+    assert.equal((await outcomes()).outcomes[0]!.outcome.optionId, "allow");
+    await expect.poll(async () => (await state()).busy, { timeout: 30_000 }).toBe(false);
+    await setPermission("read_only");
+    await send("Run the tool in read only [simple]");
+    await expect(page.getByText("I will work. denied it", { exact: true }).last()).toBeVisible({ timeout: 30_000 });
+    assert.equal((await outcomes()).outcomes[0]!.outcome.optionId, "reject");
+    await expect.poll(async () => (await state()).busy, { timeout: 30_000 }).toBe(false);
+
     // Closing the app while a task runs ends the CLI tree too.
     await expect.poll(async () => (await state()).busy, { timeout: 30_000 }).toBe(false);
+    await chooseCli("Codex");
     await send("Wait again [hang]");
     await expect.poll(async () => { try { return JSON.parse(await readFile(pidFile, "utf8")).child as number; } catch { return 0; } }, { timeout: 30_000 }).toBeGreaterThan(0);
     const open = JSON.parse(await readFile(pidFile, "utf8")) as { parent: number; child: number };

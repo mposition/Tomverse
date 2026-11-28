@@ -1,7 +1,7 @@
 import type { Language } from "../lib/language";
 
 type Copy = {
-  found: string; notFound: string; scanning: string; rescan: string; scanFailed: string; foundHeading: string;
+  found: string; notFound: string; scanning: string; rescan: string; scanFailed: string; modulesAbove: string; foundHeading: string;
   inUse: string; use: string; trustAndUse: string; cancel: string; trustDetail: string; via: string;
   loginSignedIn: string; loginRequired: string; loginUnknown: string;
   wrapperUnresolved: string;
@@ -13,6 +13,7 @@ export const desktopProviderCliScanCopy = {
   en: {
     found: "Found", notFound: "Not found on this computer", scanning: "Looking for installed CLIs…", rescan: "Scan again",
     scanFailed: "The scan could not finish. Try again.", foundHeading: "Found on this computer",
+    modulesAbove: "This MiniMax Code install cannot be trusted: a node_modules folder or file exists above its release folder, and Node would load code from it. Remove it, or use an install without one.",
     inUse: "In use", use: "Use", trustAndUse: "Trust this file and use", via: "Through",
     trustDetail: "This file does not match a release Tomverse can verify. Trust it only if you installed it yourself.",
     loginSignedIn: "Signed in", loginRequired: "Sign-in required", loginUnknown: "Sign-in status unknown",
@@ -28,6 +29,7 @@ export const desktopProviderCliScanCopy = {
   ko: {
     found: "발견됨", notFound: "이 컴퓨터에서 찾지 못했습니다", scanning: "설치된 CLI를 찾는 중…", rescan: "다시 찾기",
     scanFailed: "검색을 끝내지 못했습니다. 다시 시도하세요.", foundHeading: "이 컴퓨터에서 발견됨",
+    modulesAbove: "이 MiniMax Code 설치는 신뢰할 수 없습니다. 릴리스 폴더 위쪽에 node_modules가 있어 Node가 그곳의 코드를 불러올 수 있습니다. 그것을 없애거나 그런 것이 없는 설치를 사용하세요.",
     inUse: "사용 중", use: "사용", trustAndUse: "이 파일 신뢰하고 사용", via: "경유",
     trustDetail: "이 파일은 Tomverse가 확인할 수 있는 릴리스와 일치하지 않습니다. 직접 설치한 파일일 때만 신뢰하세요.",
     loginSignedIn: "로그인됨", loginRequired: "로그인 필요", loginUnknown: "로그인 상태 모름",
@@ -43,6 +45,7 @@ export const desktopProviderCliScanCopy = {
   zh: {
     found: "已找到", notFound: "在此计算机上未找到", scanning: "正在查找已安装的 CLI…", rescan: "重新查找",
     scanFailed: "查找未能完成。请重试。", foundHeading: "在此计算机上找到",
+    modulesAbove: "无法信任此 MiniMax Code 安装：其发布文件夹上级存在 node_modules，Node 可能从中加载代码。请移除它，或使用没有它的安装。",
     inUse: "使用中", use: "使用", trustAndUse: "信任此文件并使用", via: "经由",
     trustDetail: "此文件与 Tomverse 能够验证的发布版本不一致。仅当它是您自己安装的文件时才信任它。",
     loginSignedIn: "已登录", loginRequired: "需要登录", loginUnknown: "登录状态未知",
@@ -58,6 +61,7 @@ export const desktopProviderCliScanCopy = {
   "zh-Hant": {
     found: "已找到", notFound: "在此電腦上找不到", scanning: "正在尋找已安裝的 CLI…", rescan: "重新尋找",
     scanFailed: "尋找未能完成。請再試一次。", foundHeading: "在此電腦上找到",
+    modulesAbove: "無法信任此 MiniMax Code 安裝：其發行資料夾上層存在 node_modules，Node 可能從中載入程式碼。請移除它，或使用沒有它的安裝。",
     inUse: "使用中", use: "使用", trustAndUse: "信任此檔案並使用", via: "經由",
     trustDetail: "此檔案與 Tomverse 能夠驗證的發行版本不一致。只有在這是您自行安裝的檔案時才信任它。",
     loginSignedIn: "已登入", loginRequired: "需要登入", loginUnknown: "登入狀態未知",
@@ -73,6 +77,7 @@ export const desktopProviderCliScanCopy = {
   fr: {
     found: "Trouvé", notFound: "Introuvable sur cet ordinateur", scanning: "Recherche des CLI installées…", rescan: "Rechercher à nouveau",
     scanFailed: "La recherche n’a pas pu se terminer. Réessayez.", foundHeading: "Trouvé sur cet ordinateur",
+    modulesAbove: "Cette installation de MiniMax Code ne peut pas être approuvée : un node_modules existe au-dessus de son dossier de version et Node pourrait y charger du code. Supprimez-le ou utilisez une installation sans cela.",
     inUse: "Utilisé", use: "Utiliser", trustAndUse: "Faire confiance à ce fichier et l’utiliser", via: "Via",
     trustDetail: "Ce fichier ne correspond à aucune version que Tomverse peut vérifier. Ne lui faites confiance que si vous l’avez installé vous-même.",
     loginSignedIn: "Connecté", loginRequired: "Connexion requise", loginUnknown: "État de connexion inconnu",
@@ -88,6 +93,7 @@ export const desktopProviderCliScanCopy = {
   de: {
     found: "Gefunden", notFound: "Auf diesem Computer nicht gefunden", scanning: "Installierte CLIs werden gesucht…", rescan: "Erneut suchen",
     scanFailed: "Die Suche konnte nicht abgeschlossen werden. Versuchen Sie es erneut.", foundHeading: "Auf diesem Computer gefunden",
+    modulesAbove: "Dieser MiniMax-Code-Installation kann nicht vertraut werden: Oberhalb ihres Release-Ordners gibt es ein node_modules, aus dem Node Code laden könnte. Entferne es oder nutze eine Installation ohne.",
     inUse: "In Verwendung", use: "Verwenden", trustAndUse: "Dieser Datei vertrauen und verwenden", via: "Über",
     trustDetail: "Diese Datei entspricht keiner Version, die Tomverse prüfen kann. Vertrauen Sie ihr nur, wenn Sie sie selbst installiert haben.",
     loginSignedIn: "Angemeldet", loginRequired: "Anmeldung erforderlich", loginUnknown: "Anmeldestatus unbekannt",
@@ -103,6 +109,7 @@ export const desktopProviderCliScanCopy = {
   es: {
     found: "Encontrado", notFound: "No se encontró en este equipo", scanning: "Buscando las CLI instaladas…", rescan: "Buscar de nuevo",
     scanFailed: "No se pudo terminar la búsqueda. Inténtalo de nuevo.", foundHeading: "Encontrado en este equipo",
+    modulesAbove: "No se puede confiar en esta instalación de MiniMax Code: existe un node_modules por encima de su carpeta de versión y Node podría cargar código de él. Elimínalo o usa una instalación sin él.",
     inUse: "En uso", use: "Usar", trustAndUse: "Confiar en este archivo y usarlo", via: "A través de",
     trustDetail: "Este archivo no coincide con una versión que Tomverse pueda verificar. Confía en él solo si lo instalaste tú.",
     loginSignedIn: "Sesión iniciada", loginRequired: "Requiere iniciar sesión", loginUnknown: "Estado de sesión desconocido",
@@ -118,6 +125,7 @@ export const desktopProviderCliScanCopy = {
   pt: {
     found: "Encontrado", notFound: "Não encontrado neste computador", scanning: "A procurar as CLI instaladas…", rescan: "Procurar novamente",
     scanFailed: "Não foi possível concluir a procura. Tente novamente.", foundHeading: "Encontrado neste computador",
+    modulesAbove: "Não é possível confiar nesta instalação do MiniMax Code: existe um node_modules acima da sua pasta de versão e o Node poderia carregar código dele. Remova-o ou use uma instalação sem ele.",
     inUse: "Em utilização", use: "Utilizar", trustAndUse: "Confiar neste ficheiro e utilizá-lo", via: "Através de",
     trustDetail: "Este ficheiro não corresponde a uma versão que o Tomverse consiga verificar. Confie nele apenas se o instalou você mesmo.",
     loginSignedIn: "Sessão iniciada", loginRequired: "Início de sessão necessário", loginUnknown: "Estado da sessão desconhecido",
