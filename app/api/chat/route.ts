@@ -2825,13 +2825,16 @@ async function handleChatPost(
           have had. Only a Chat conversation can hold one: Review, continuation
           and Deep Research turns never claim an attempt.
         */
+        // A failed read is not evidence that no attempt exists: the early
+        // storage check is skipped and the durable claim and the write decide.
         let attemptAlreadyBound = false;
+        let attemptPeekFailed = false;
         if (session?.user?.id && conversationId && assistantMessageId && conversationRouting?.productKey === "chat") {
             try {
                 attemptAlreadyBound =
                     (await peekChatResponseAttempt(session.user.id, assistantMessageId))?.conversationId === conversationId;
             } catch (error) {
-                // Advisory like the check it serves: the durable claim decides.
+                attemptPeekFailed = true;
                 logRequestError("chat_attempt_peek_failed", traceId, error, requestedModelId);
             }
         }
@@ -2842,9 +2845,10 @@ async function handleChatPost(
           routed, charged, streamed and then lost at the Message write
           (docs/policy/credit-and-cost-limits.md, "완료 분기의 정산").
           "Certainly" and nothing more: the message count is already at its
-          limit, or the bytes left are fewer than the smallest answer row (one
-          byte): this turn's own message is already stored and counted when the
-          answer is written, so it is not added again. No answer size is assumed -- the
+          limit, or the account's bytes are already over theirs. The answer
+          row is counted as zero bytes -- a file-only answer or a failed
+          artifact card is stored with an empty body -- and this turn's own
+          message is already stored and counted, so it is not added again. No answer size is assumed -- the
           model is not chosen yet, and an image turn stores one line -- so a
           long answer that overflows is still the Message write's own locked
           check to refuse, as it always was. The conversation's own count only
@@ -2853,14 +2857,14 @@ async function handleChatPost(
           there. Only the storage refusal stops the turn, and if the check
           itself fails, the write decides as it always has.
         */
-        if (session?.user?.id && conversationId && assistantMessageId && !attemptAlreadyBound) {
+        if (session?.user?.id && conversationId && assistantMessageId && !attemptAlreadyBound && !attemptPeekFailed) {
             try {
                 await checkMessageCapacity(
                     prisma,
                     session.user.id,
                     conversationRouting ? conversationId : null,
                     1,
-                    1
+                    0
                 );
             } catch (error) {
                 if (apiSecurityResponse(error)) throw error;

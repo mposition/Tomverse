@@ -715,10 +715,9 @@ const { ApiSecurityError } = realApiSecurity as {
 
 test("an account at its message storage limit is refused before the turn is reserved or sent", async () => {
   const prior = process.env.API_MAX_MESSAGE_BYTES_PER_USER;
-  // The store is full: the question already written fills the account's bytes,
-  // so not even a one-byte answer row fits.
+  // The store is over its bytes already: nothing more can be written.
   process.env.API_MAX_MESSAGE_BYTES_PER_USER = "1";
-  storedMessageTotals = { count: BigInt(1), bytes: BigInt(1) };
+  storedMessageTotals = { count: BigInt(1), bytes: BigInt(2) };
   // A fresh turn, as `start` makes one: no attempt left from the last test for
   // the pre-Router peek to find.
   row = null;

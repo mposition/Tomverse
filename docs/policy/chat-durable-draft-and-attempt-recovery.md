@@ -214,8 +214,8 @@ settlement or the Message write, and a storage refusal
 (`MESSAGE_STORAGE_QUOTA_EXCEEDED`) at that write -- are this application's: they
 are classified with the stream-failure `completion` phase (never a fallback)
 and are not recorded as provider or model failures. A turn whose answer
-certainly cannot be stored (the message count at its limit, or not one byte left
-for the answer row; the question is already stored) is refused before anything is reserved
+certainly cannot be stored (the message count at its limit, or the account's
+bytes already over theirs; the question is already stored) is refused before anything is reserved
 (docs/policy/credit-and-cost-limits.md, "완료 분기의 정산"); the write's own check
 remains the authority for a long answer that overflows and for the concurrent
 case.

@@ -1057,6 +1057,7 @@ let durableTerminalFails = false;
 /** The conversation a pre-Router peek finds an attempt bound in; null is none. */
 let peekedAttemptConversationId: string | null = null;
 let durablePeekCalls = 0;
+let peekFails = false;
 /**
  * When set, the claim decides as the real one does: the stored identity's
  * fingerprint from lib/chatResponseAttemptCore.ts, compared by
@@ -1097,6 +1098,7 @@ mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
     ChatAttemptScopeError: class extends Error { readonly code = "CHAT_ATTEMPT_SCOPE_NOT_FOUND"; },
     peekChatResponseAttempt: async (_userId: string, assistantMessageId: string) => {
       durablePeekCalls += 1;
+      if (peekFails) throw new Error("attempt peek unavailable");
       if (realClaimStore) return realClaimStore.get(assistantMessageId) ?? null;
       return peekedAttemptConversationId === null
         ? null
@@ -2423,8 +2425,8 @@ test("a repeat of a turn is routed again and reattaches through the real identit
   }
 });
 
-/** The one-byte smallest answer row: the turn's own message is already stored. */
-const TURN_MESSAGE_BYTES = 1;
+/** The answer row counts as zero bytes (a file-only answer is stored empty); the turn's own message is already stored. */
+const TURN_MESSAGE_BYTES = 0;
 
 /*
   Review finding (B3, 2026-11-28, third pass): the storage check ran after the
@@ -2479,6 +2481,21 @@ test("a full message store refuses a new answer but lets a POST reattach to the 
   } finally {
     messageStoreFull = false;
     peekedAttemptConversationId = null;
+  }
+});
+
+test("a failed attempt peek skips the early storage check, so a reattach on a full store still reaches the claim", async () => {
+  messageStoreFull = true;
+  peekFails = true;
+  try {
+    messageCapacityChecks.length = 0;
+    const reattach = await ask("answers", "reattach", 200, false);
+    assert.equal(reattach.response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
+    assert.equal(messageCapacityChecks.length, 0, "an unknown attempt state is not read as no attempt");
+    assert.equal(durableClaimCalls, 1);
+  } finally {
+    messageStoreFull = false;
+    peekFails = false;
   }
 });
 

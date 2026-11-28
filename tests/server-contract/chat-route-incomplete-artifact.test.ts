@@ -1238,8 +1238,8 @@ test("a follow-up that carries a held Refiner decision still gets the image clas
 /*
   B3 review, sixth pass: the storage precheck refuses only a turn whose answer
   certainly cannot be stored -- the message count at its limit, or fewer bytes
-  left than a one-byte answer row (the turn's own message is already stored and
-  counted, so it is not added again). It assumes no answer
+  the account already over its bytes (the answer row counts as zero bytes, since a
+  file-only answer is stored empty, and the turn's own message is already stored). It assumes no answer
   size: a long answer that overflows is the Message write's locked check to
   refuse, as before. Runs the real checkMessageCapacity.
 */
@@ -1278,9 +1278,9 @@ test("an account at its message count limit is refused before the Router", async
   });
 });
 
-test("an account with no byte left for an answer row is refused; one byte left is not", async () => {
+test("an account already over its bytes is refused; one exactly at them is not", async () => {
   const prompt = "Why is snow white?";
-  const needed = 1;
+  const needed = 0;
   await withStorageLimits({ API_MAX_MESSAGE_BYTES_PER_USER: "100000" }, async () => {
     accountMessageTotals = { count: BigInt(10), bytes: BigInt(100_000 - needed + 1) };
     const refused = await ask({}, { prompt, expectedStatus: 409 });
