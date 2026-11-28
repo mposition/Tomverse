@@ -1,0 +1,8 @@
+{
+  "name": "tw-expression-eval",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

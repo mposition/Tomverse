@@ -231,6 +231,69 @@ export async function cancelImport(importId: string): Promise<void> {
     }
 }
 
+export type ImportDocumentUpload = {
+    filename: string;
+    mime: string;
+    bytes: Uint8Array;
+};
+
+/**
+ * The calls from step 7 on, as one value a host can replace.
+ *
+ * The web runs them as `fetch` calls against its own routes. Another host --
+ * the Desktop app, whose account session lives in its main process -- supplies
+ * its own implementation of the same five operations and gets the same wizard:
+ * the order of the run, the safety steps before it and the digest after it do
+ * not move with the transport. A failure is always an `ImportRequestError`.
+ *
+ * `uploadDocument` is the three web calls (prepare, put, finalize) as one
+ * operation, because a host that keeps its network in a separate process has no
+ * reason to send the storage address back and forth through the window.
+ */
+export type AssistantPackageImportRequests = {
+    createImport: (
+        body: CreateImportBody
+    ) => Promise<{ id: string; profileId: string; mode: string; status: string }>;
+    uploadDocument: (
+        importId: string,
+        file: ImportDocumentUpload
+    ) => Promise<{ id: string }>;
+    readImport: (importId: string) => Promise<ImportSnapshot>;
+    publishImport: (importId: string, body: PublishBody) => Promise<PublishResponse>;
+    cancelImport: (importId: string) => Promise<void>;
+};
+
+/** One document: reserve the key, put the object, then register it. */
+export async function uploadImportDocument(
+    importId: string,
+    file: ImportDocumentUpload
+): Promise<{ id: string }> {
+    const prepared = await prepareImportUpload(importId, {
+        filename: file.filename,
+        mime: file.mime,
+        bytes: file.bytes.byteLength,
+    });
+    await putImportObject({
+        uploadUrl: prepared.uploadUrl,
+        uploadHeaders: prepared.uploadHeaders,
+        bytes: file.bytes,
+        mime: file.mime,
+    });
+    return finalizeImportUpload(importId, {
+        uploadKey: prepared.uploadKey,
+        filename: file.filename,
+        mime: file.mime,
+    });
+}
+
+export const webImportRequests: AssistantPackageImportRequests = {
+    createImport,
+    uploadDocument: uploadImportDocument,
+    readImport,
+    publishImport,
+    cancelImport,
+};
+
 /** SHA-256 as lowercase hex, over the platform's own primitive. */
 export async function sha256Hex(input: string): Promise<string> {
     const bytes = new TextEncoder().encode(input);

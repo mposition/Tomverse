@@ -55,12 +55,22 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     withheldReason: "Encryption envelopes and internal version fences are withheld. Unexpired pending arguments are decrypted for their owner; terminal arguments are erased." },
   {domain:"codeTaskReservation",publicName:"code_credit_usage",prismaModel:"CodeTaskReservation",state:"included_filtered",
     withheldReason:"Provider cost basis, pricing snapshots, idempotency digests and internal lease data are withheld."},
+  // Desktop cloud execution (docs/ops/desktop-cloud-execution.md).
+  {domain:"codeCloudJob",publicName:"code_cloud_tasks",prismaModel:"CodeCloudJob",state:"included_filtered",
+    withheldReason:"The task's instruction, models, credit cap, state, progress lines, summary and times are included. Withheld: the runner's claim token digest and runner name, the storage keys and digests of the uploaded repository snapshot and the patch, the catalogue hash and the reservation link (the credits are in code_credit_usage). The patch itself is offered in Desktop until the task is removed seven days after it ends."},
   // --- wholly the user's own data ------------------------------------------
   { domain: "userSettings", publicName: "settings", prismaModel: "UserSettings", state: "included" },
   {
     domain: "userMemorySettings",
     publicName: "memory_settings",
     prismaModel: "UserMemorySettings",
+    state: "included",
+  },
+  // The owner's own words and chosen answer style, wholly theirs.
+  {
+    domain: "userPersonalization",
+    publicName: "personal_instructions",
+    prismaModel: "UserPersonalization",
     state: "included",
   },
   // The account's GA4 User-ID and when it was created: an identifier held
@@ -98,6 +108,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     domain: "comparisonReviewItemFeedback",
     publicName: "ai_review_item_feedback",
     prismaModel: "ComparisonReviewItemFeedback",
+    state: "included",
+  },
+  // The person's thumbs up or down on an answer, its optional closed reason,
+  // and the model that answered -- which they could see on the answer.
+  {
+    domain: "chatAnswerRating",
+    publicName: "answer_ratings",
+    prismaModel: "ChatAnswerRating",
     state: "included",
   },
   // Registered on 2026-08-27 having escaped the sweep entirely: both carry
@@ -457,6 +475,17 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "included_filtered",
     withheldReason:
       "The visible partial response, model and provider attribution, status, revision and terminal metadata are the user's recovery record. Held back: the request fingerprint and the worker owner and lease fields, which are concurrency and execution internals rather than user content.",
+  },
+  // What the account asked to be run on a schedule: the question, model,
+  // schedule, state and the per-run credits it approved.
+  { domain: "scheduledTask", publicName: "scheduled_tasks", prismaModel: "ScheduledTask", state: "included" },
+  {
+    domain: "scheduledTaskRun",
+    publicName: "scheduled_task_runs",
+    prismaModel: "ScheduledTaskRun",
+    state: "included_filtered",
+    withheldReason:
+      "When each occurrence ran, how it ended, the conversation it answered into and the credits it reserved and was charged are included. The run id, the one-in-flight slot, the lease, the derived message identities and the internal credit reservation id are execution internals and are withheld.",
   },
   {
     domain: "researchPreviewRun",
@@ -1354,6 +1383,41 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "included_filtered",
     withheldReason:
       "The devices the person signed in on: the name they gave each one, whether it is an iPhone or an Android, the app version, when it was registered, when it was last used and whether it has been removed. Withheld: the server-issued device id, which is the value a live refresh token is bound to. Nothing else about the device is collected -- no model name, OS build, advertising identifier, IDFV or ANDROID_ID -- so what is missing from this export is mostly missing from the database.",
+  },
+  // Desktop remote control (docs/ops/desktop-remote-control.md). Both rows hold the person's own words for a few
+  // minutes: task titles and progress lines, the command line or paths of a request, the text of a follow-up. Owner
+  // decision 2026-11-26: neither is part of the account export. The lasting record is on the person's own PC.
+  {
+    domain: "desktopRemoteDevice",
+    publicName: "desktop_remote_devices",
+    prismaModel: "DesktopRemoteDevice",
+    state: "excluded",
+    exclusionReason:
+      "Owner decision 2026-11-26: not exported. The latest report one signed-in PC sent about its own Code tasks (task titles, states, a few progress lines and the summary of the request on its screen), kept for a few minutes as a mirror of what is on the person's own PC, where the lasting record is.",
+  },
+  {
+    domain: "desktopRemoteCommand",
+    publicName: "desktop_remote_commands",
+    prismaModel: "DesktopRemoteCommand",
+    state: "excluded",
+    exclusionReason:
+      "Owner decision 2026-11-26: not exported. One answer, stop or follow-up the person sent from the web to their own PC, kept for a few minutes until the PC has picked it up; the task it acted on, with the follow-up in it, is on the person's own PC.",
+  },
+  {
+    domain: "desktopRemotePasskey",
+    publicName: "desktop_remote_passkeys",
+    prismaModel: "DesktopRemotePasskey",
+    state: "excluded",
+    exclusionReason:
+      "Not exported: a passkey the person registered to confirm remote approvals is a public key and a credential id, security material that identifies nothing the person can use elsewhere. The person sees its name and dates on the same screen where they remove it.",
+  },
+  {
+    domain: "desktopRemotePasskeyChallenge",
+    publicName: "desktop_remote_passkey_challenges",
+    prismaModel: "DesktopRemotePasskeyChallenge",
+    state: "excluded",
+    exclusionReason:
+      "Not exported: a random single-use challenge that lives two minutes, with the digest of the one command it is bound to.",
   },
   {
     domain: "mobileTokenFamily",

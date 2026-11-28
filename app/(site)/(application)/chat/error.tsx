@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect } from "react";
 import { WorkspaceErrorScreen } from "@/components/WorkspaceErrorScreen";
+import { reportClientError } from "@/lib/clientErrorReporter";
 
 /**
  * Error boundary for the chat workspace.
@@ -34,6 +36,9 @@ export default function ChatWorkspaceError({
   error: Error & { digest?: string };
   retry: () => void;
 }) {
+  useEffect(() => {
+    reportClientError(error, "react-boundary", { digest: error.digest });
+  }, [error]);
   return (
     <WorkspaceErrorScreen
       titleKey="chat.workspaceError.title"

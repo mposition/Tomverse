@@ -4,10 +4,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { Camera, Download } from "lucide-react";
-import { parseStudioAnalysis, studioAnalysisPrompt, type StudioAnalysisReport } from "@/lib/studioCreativeAnalysis";
+import { studioCheekBoxes, studioSkinColor } from "@/lib/studioColorSeason";
+import { parseStudioAnalysis, studioAnalysisPrompt, studioColorReport, type StudioAnalysisReport } from "@/lib/studioCreativeAnalysis";
+import { STUDIO_CHARACTER_PRESETS, studioCharacterPrompt, type StudioCharacterPresetId } from "@/lib/studioCharacterPrompt";
 import { STUDIO_EXPORT_FORMATS, studioArtworkPath, type StudioCreativeTool } from "@/lib/studioTools";
 import { studioOutputLanguage } from "@/locales/studio";
-import { makeStudioImageReference, makeStudioStyleReference, readStudioBlob, renderStudioImage, saveStudioFile, studioStyleReferenceDirection } from "./studioCanvas";
+import { makeStudioImageReference, readStudioBlob, readStudioRegion, renderStudioImage, saveStudioFile } from "./studioCanvas";
 import { StudioImageShare } from "./StudioImageShare";
 import { captureStudioDraftImage, useStudioCheckoutDraft, type StudioDraftImage } from "./studioCheckoutDraft";
 import { StudioFileButton, StudioStatus, useStudioCopy, useStudioTask, useStudioUrls } from "./StudioControls";
@@ -17,39 +19,8 @@ import { createStudioImageRunner, generateStudioText, StudioGenerationError, use
 import { renderStudioPortraitReport } from "./studioPortraitReport";
 import styles from "./studio.module.css";
 
-const characterPresets = [
-  { id: "fantasy", label: "fantasyCharacter", artwork: "character-fantasy.webp", photoreal: true,
-    direction: "A fantasy mage turning toward an unseen sound, raising a lit brass lantern. The lantern casts warm light across their face, hand and forest-green embroidered cloak." },
-  { id: "knight", label: "knightCharacter", artwork: "character-knight.webp", photoreal: true,
-    direction: "A royal knight with one gauntleted hand resting on a stone parapet, looking across the courtyard. Overcast daylight reflects softly from decorated steel armor and settles into the folds of a crimson cape." },
-  { id: "pilot", label: "pilotCharacter", artwork: "character-pilot.webp", photoreal: true,
-    direction: "A retro-future pilot leaning forward in a white and cobalt flight suit, glancing toward the cockpit window. Cold light from a distant planet brushes one side of their face; dim instrument light reaches the other." },
-  { id: "courier", label: "courierCharacter", artwork: "character-courier.webp", photoreal: true,
-    direction: "A cyberpunk courier glancing back mid-stride from an elevated walkway, one hand securing a messenger bag. Dusk and magenta signage reflect consistently on one cheek, the damp purple techwear and the railing." },
-  { id: "explorer", label: "explorerCharacter", artwork: "character-explorer.webp", photoreal: true,
-    direction: "A desert explorer looks up from a half-folded map inside an ochre canyon. The brim of their hat casts a natural shadow on their face and the sun picks out the weathered linen at one shoulder." },
-  { id: "detective", label: "detectiveCharacter", artwork: "character-detective.webp", photoreal: true,
-    direction: "A noir detective tugs the collar of a rain-damp trench coat and looks across a midcentury street. A single streetlamp grazes their face and fedora, with softer reflected light rising from the pavement." },
-  { id: "pirate", label: "pirateCharacter", artwork: "character-pirate.webp", photoreal: true,
-    direction: "A pirate captain braces against a wooden rail while scanning the horizon. Wind lifts the loose edge of the weathered burgundy coat and low sea light grazes the captain's face and tricorne." },
-  { id: "fairy", label: "fairyCharacter", artwork: "character-fairy.webp", photoreal: true,
-    direction: "A woodland fairy bends toward a fern with a small curious smile, in a practical moss-green costume and botanical crown. Dappled woodland light falls across cheek, fabric and translucent lavender wings in the same direction." },
-  { id: "anime", label: "animeCharacter", artwork: "preset-anime.webp",
-    direction: "An original hand-drawn animation protagonist with a windswept scarf and an atmospheric painted setting." },
-  { id: "3d", label: "threeDCharacter", artwork: "preset-3d.webp",
-    direction: "A stylized 3D character with expressive proportions, tactile clay-like materials and soft studio lighting." },
-  { id: "comic", label: "comicHeroCharacter", artwork: "character-comic.webp",
-    direction: "An original retro comic hero in scarlet and navy, with hand-inked lines, halftone shading and a sunburst." },
-  { id: "pixel", label: "pixelCharacter", artwork: "character-pixel.webp",
-    direction: "A 16-bit pixel-art RPG adventurer in an embroidered teal hood, with chunky pixels and a limited palette." },
-  { id: "paper", label: "paperCharacter", artwork: "character-paper.webp",
-    direction: "A cheerful paper-cut character with layered colored cardstock, visible cut edges and a geometric setting." },
-  { id: "felt", label: "feltCharacter", artwork: "character-felt.webp",
-    direction: "A handmade felt stop-motion character in a coral sweater, with visible wool fibers and a soft blue background." },
-  { id: "chibi", label: "chibiCharacter", artwork: "character-chibi.webp",
-    direction: "A clean chibi character with an oversized head, expressive eyes and a warm peach and pink palette." },
-] as const;
-type CharacterPreset = (typeof characterPresets)[number]["id"];
+const characterPresets = STUDIO_CHARACTER_PRESETS;
+type CharacterPreset = StudioCharacterPresetId;
 const shareFormats = STUDIO_EXPORT_FORMATS.filter(format => format.id !== "poster");
 
 type CreativeDraft = {
@@ -78,7 +49,9 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
   const [story, setStory] = useState(false);
   const [creditError, setCreditError] = useState<StudioGenerationError | null>(null);
   const [draftSaved, setDraftSaved] = useState(false);
-  const imageQuote = useStudioImageQuote("1024x1024", true, character);
+  const photoreal = "photoreal" in preset;
+  const imageQuote = useStudioImageQuote("1024x1024", true, character, undefined,
+    photoreal ? "live-action-character" : "stylized-character");
   const checkout = useStudioCheckoutDraft<CreativeDraft>(id, saved => {
     urls.release(photo);
     urls.release(result);
@@ -119,19 +92,9 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
       try {
         if (character) {
           if (!imageQuote.quote) return;
-          const photoreal = "photoreal" in preset;
-          const identity = "Cast the person in the reference as this character. Preserve their recognizable face shape, facial features, skin tone and hairline.";
-          const look = photoreal ? [
-            "Photograph one live-action scene from scratch, with a candid three-quarter pose, an in-scene eyeline and a natural expression. The reference establishes identity; do not copy its front-facing pose, expression, crop, original lighting or pixels.",
-            "Unify face, neck, hands, wardrobe and environment under the same lens, exposure, depth of field, light direction and color grade. Keep natural pores, hair and fabric, believable contact shadows at hairline, collar and accessories, and proportions consistent across the frame. Avoid face swaps, hard mask edges and studio headshot lighting.",
-          ].join(" ") : "Draw the person anew in the described style, using a pose and expression that carry the character.";
-          const prompt = [
-            photoreal ? studioStyleReferenceDirection : "", identity, look,
-            "Compose a square portrait with no text or watermark.", `Scene: ${preset.direction}`,
-          ].filter(Boolean).join(" ");
           const output = await runImage({
-            inputKey: photo, prompt, size: imageQuote.quote.size, quote: imageQuote.quote,
-            reference: () => photoreal ? makeStudioStyleReference(photo, studioArtworkPath(preset.artwork)) : makeStudioImageReference(photo),
+            inputKey: photo, prompt: studioCharacterPrompt(preset), size: imageQuote.quote.size, quote: imageQuote.quote,
+            reference: () => makeStudioImageReference(photo),
             signal,
           });
           signal.throwIfAborted();
@@ -142,12 +105,25 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
           const digest = await crypto.subtle.digest("SHA-256", await image.arrayBuffer());
           const key = `${id}/${lang}/${new Uint8Array(digest).join(",")}`;
           let next: StudioAnalysisReport | null = previousReports.current.get(key) ?? null;
-          if (!next) {
+          // The answer is JSON written as free text: one that does not parse is asked for once more.
+          for (let attempt = 0; !next; attempt++) {
             const text = await generateStudioText(studioAnalysisPrompt(id, studioOutputLanguage[lang]), signal, image);
             signal.throwIfAborted();
             try {
-              next = parseStudioAnalysis(id, text);
+              const answer = parseStudioAnalysis(id, text);
+              if (!answer) break;
+              if ("score" in answer) next = answer;
+              else {
+                // The model boxes the face; both cheeks are sampled here, and the season follows from the sample.
+                const cheeks = await Promise.all(studioCheekBoxes(answer.face, answer.features.eyes.region).map(box => readStudioRegion(photo, box)));
+                const skin = studioSkinColor(cheeks.flatMap(pixels => [...pixels]));
+                const [left, right] = cheeks.map(studioSkinColor);
+                if (!skin || !left || !right) break;
+                // Light that differs sharply between the two cheeks leaves the undertone undecided.
+                next = studioColorReport(answer, skin, copy, Math.abs(left.lab[0] - right.lab[0]) >= 10);
+              }
             } catch {
+              if (attempt === 0) continue;
               report(copy.analysisIncomplete, true);
               return;
             }
@@ -157,9 +133,9 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
             interpretation: copy.photoInterpretation,
             color: {
               title: [copy.colorReportTitleLead, copy.colorReportTitleRest],
-              season: copy.colorSeason, recommended: copy.colorSuggestions, comparison: copy.avoidColors,
+              season: copy.colorSeason, alsoClose: copy.colorAlsoClose, recommended: copy.colorSuggestions, comparison: copy.avoidColors,
               features: [copy.hairColor, copy.eyeColor, copy.skinColor],
-              profile: [copy.colorUndertone, copy.colorContrast, copy.colorOverallTone],
+              profile: [copy.colorUndertone, copy.colorValue, copy.colorChroma],
               palettes: [copy.recommendPalette, copy.comparePalette], basis: copy.colorReportBasis,
             },
             face: {
@@ -261,7 +237,7 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
           {(result || !busy) && <img className={styles.characterArt} src={result || studioArtworkPath(preset.artwork)}
             alt={copy[preset.label]} />}
           <div className={styles.creativeGenerate}>{generateButton}</div>
-          <StudioQuoteHint {...imageQuote} />
+          <StudioQuoteHint error={imageQuote.error} />
           <StudioStatus status={status} />
         </> : <>
           {!result && <figure className={styles.sampleReport}>
@@ -283,7 +259,8 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
                 <ul>{analysis.tips.map((tip, index) => <li key={index}>{tip.label}. {tip.note}</li>)}</ul>
               </> : <>
                 <p>{copy.hairColor} {analysis.features.hair.name} · {copy.eyeColor} {analysis.features.eyes.name} · {copy.skinColor} {analysis.features.skin.name}</p>
-                {analysis.profile && <p>{copy.colorUndertone} {analysis.profile.undertone.name} · {copy.colorContrast} {analysis.profile.contrast.name} · {copy.colorOverallTone} {analysis.profile.tone.name}</p>}
+                {analysis.alternative && <p>{copy.colorAlsoClose} {analysis.alternative}</p>}
+                {analysis.profile && <p>{copy.colorUndertone} {analysis.profile.undertone.name} · {copy.colorValue} {analysis.profile.contrast.name} · {copy.colorChroma} {analysis.profile.tone.name}</p>}
                 <p>{copy.colorSuggestions} · {analysis.recommended.map(item => item.name + " " + item.color).join(", ")}</p>
                 <p>{copy.avoidColors} · {analysis.comparison.map(item => item.name + " " + item.color).join(", ")}</p>
               </>}

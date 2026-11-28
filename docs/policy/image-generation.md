@@ -112,8 +112,9 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 - **유도식**: 크레딧 팩의 최저 funded-cost 예산은 1,500µUSD/credit
   (Starter·Power)이다. 이미지의 크레딧당 최악 원가(출력비 + 1,000토큰
   입력비, 올림)를 900 이하로 유지하면 최저 lot에서도 예산의 40% 이상이
-  남는다. 현재 최악값은 Final 정사각 864µUSD/credit — 여유는 4.2%뿐이며,
-  provider 가격이 그 이상 오르면 검사가 **의도적으로** 실패한다.
+  남는다. 생성 프리셋의 최악값은 Final 정사각 864µUSD/credit(여유 4.2%)이고, 편집과 사진 도구까지
+  포함하면 GPT Image 2.6 편집 887.5, Bria 배경 제거 885가 더 빡빡하다. provider 가격이 그 여유 이상
+  오르면 검사가 **의도적으로** 실패한다.
 - 검사 실패 시 조용히 완화·배포하지 않는다. 다음 중 하나를 명시적으로
   승인해야 한다:
   1. 해당 프리셋의 크레딧 인상
@@ -170,6 +171,24 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   `ChatCreditReservation`처럼 대화 삭제에 cascade되지 않고 금융 감사
   snapshot(pricingVersion, provider request ID, lot별 예약 내역
   `reservationPayload`)을 보존한다. 대화 삭제 시 prompt·자산 연결만 끊는다.
+- **삭제된 대화의 미종결 예약도 환급한다.** 생성 중에 대화를 지우면
+  generation 행은 cascade로 사라지고 예약은 `reserved`로 남는다. generation
+  행에서 출발하는 정산 경로(`finalizeFailure`, stale sweep, 성공 정산)는 이
+  예약에 닿지 못하므로, 15분 sweep의 고아 예약 arm
+  (`refundOrphanedImageCreditReservations`)이 generation이 없는 `reserved`
+  예약의 **사용자 크레딧**(플랜 사용량 bucket, 구매 크레딧 lot)을 돌려주고
+  `settled`/`failed`로 닫는다(`lastError: "generation_missing"`). 단건·전체
+  삭제를 포함한 모든 삭제 경로와 이미 고아가 된 행을 같은 arm이 처리한다.
+  - exactly-once는 정산 경로와 같은 예약의 `reserved → settling` claim이
+    보장한다. 먼저 커밋된 정산이 있으면 예약은 이미 `settled`다.
+  - **provider budget은 되돌리지 않는다.** 삭제 전에 provider가 호출됐을 수
+    있으므로(살아 있는 실행자는 계속 돈다) 예약의 hold를 지출로 기록한다.
+  - 계정이 삭제돼 `userId`가 없는 예약은 돌려줄 크레딧이 없으므로 건드리지
+    않고, invariant audit의 `orphanedReservations`에 남는다.
+  - 삭제 transaction 안에서 환급하는 방식은 택하지 않았다. 대화 삭제
+    transaction에 credit 계정 lock을 더하지 않고, 모든 삭제 경로와 기존
+    고아 행을 한 곳에서 닫기 위해서다. 대가로 환급은 다음 sweep(최대 15분)에
+    도착한다.
 - ledger idempotency key: `image-credit-reservation:{generationId}:v1` + DB
   unique constraint. 사용자 요청 idempotency는 `(userId, idempotencyKey)`
   unique — race의 패자는 오류가 아니라 승자의 현재 상태를 멱등 반환한다.
@@ -197,7 +216,8 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
     회수된 stranded 정산은 `IMAGE_SETTLEMENT_STRANDED`로 보고하고 Admin
     Console의 invariant 줄에 별도 수치로 노출한다.
 - 전액 환급 조건: provider 거절, moderation 차단, provider 오류, 원본 저장
-  실패, 처리 시간 초과, stale 작업 reconciliation. 크레딧과 funded cost를
+  실패, 처리 시간 초과, stale 작업 reconciliation(시작된 `processing`·
+  `settling` 행과 재구동이 맡지 않는 `pending` 행, §7). 크레딧과 funded cost를
   ledger 규칙(`settleAddOnCredits`)대로 함께 복원하고 플랜 사용량도
   되돌린다.
 - 원본 저장이 성공했으면 응답 전달 실패만으로는 환급하지 않는다 — 저장된
@@ -253,19 +273,63 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   claim이 조건부라서 15분 reconciliation sweep이나 미래의 전용 worker
   서비스와 안전하게 공존한다(저장소에 장기 실행 worker 선례가 없어 별도
   Railway 서비스 신설은 운영 PR에서 실측 후 결정). 프로세스 종료로 죽은
-  실행은 정확히 stale 케이스이며 sweep이 `failed` 처리 후 전액 환급한다.
+  실행은 정확히 stale 케이스다. 아직 claim되지 않은 `pending` 행은 재구동
+  스위치가 켜져 있으면 sweep이 한 번 재구동하고 꺼져 있으면(기본) 환급한다.
+  이미 시작된 `processing` 행은 `failed` 처리 후 전액 환급한다(아래
+  "`pending` 재구동").
 - **`after()`의 실행 시간은 그 route의 max duration이다**(Next `after`
   레퍼런스). proxy timeout이 아니라 이쪽이 실제 제약이므로 실행자를
   구동하는 route는 예산을 명시한다. 값은
   `IMAGE_EXECUTOR_MAX_DURATION_SECONDS`이고, provider timeout·재시도
   backoff·그룹 상한·provider job 하한에서 유도한다
   (`lib/imageGenerationStateCore.ts`). 잘린 실행자는 지연이 아니다 —
-  `pending` 생성을 다시 구동하는 것은 없고 sweep은 환급만 하므로 요청
-  자체가 사라진다. stale 임계값이 한 시도의 최악 소요보다 크다는 조건과
-  함께 `npm run check:image-executor-budget`이 PR Fast Gate에서 강제한다.
-- 배포·프로세스 종료로 회수 불가능해진 stale 작업은 reconciliation이
-  `failed` 처리하고 전액 환급한다. Railway graceful shutdown 유예
-  (`RAILWAY_DEPLOYMENT_DRAINING_SECONDS`)를 함께 설정한다.
+  실행 중이던 시도는 `processing`에 남고 sweep은 그것을 환급만 하므로 그
+  요청은 사라진다(시작하지 못한 target은 `pending`으로 남아, 재구동
+  스위치가 켜져 있으면 재구동되고 꺼져 있으면 환급된다).
+  stale 임계값이 한 시도의 최악 소요보다 크다는 조건과 함께
+  `npm run check:image-executor-budget`이 PR Fast Gate에서 강제한다.
+- 배포·프로세스 종료로 실행 도중 멈춘(`processing`) stale 작업은
+  reconciliation이 `failed` 처리하고 전액 환급한다. provider가 이미
+  호출됐을 수 있어 결과를 모르므로 다시 실행하지 않는다. Railway graceful
+  shutdown 유예(`RAILWAY_DEPLOYMENT_DRAINING_SECONDS`)를 함께 설정한다.
+- **`pending` 재구동**: claim되지 않은 `pending` 행은 provider가 호출되지
+  않은 것이 확실하므로(claim이 호출보다 먼저다) 15분 sweep이 환급 대신
+  한 번 실행한다. 사용자는 요청을 잃지 않는다.
+  - **스위치: `IMAGE_PENDING_REDRIVE_ENABLED`, 기본 꺼짐.** 값이 정확히
+    `on`일 때만 돈다(`imagePendingRedriveEnabled`). 재구동은 sweep이 스스로
+    유료 provider 호출을 시작하는 동작이므로 배포만으로 켜지지 않고, 켜는
+    시점은 운영자가 정한다. 꺼져 있으면 sweep은 이 기능 이전과 같다 —
+    `reconciledAt`을 표시하지 않고, stale 창(12분)이 지난 `pending` 행을
+    모두 환급한다. 켰다가 끄면 표시만 되고 claim되지 않은 행도 같은 12분
+    규칙으로 환급되므로, 환급도 재구동도 되지 않고 남는 행은 없다.
+  - 대상: `IMAGE_PENDING_REDRIVE_AFTER_MS`(2분) 넘게 claim되지 않았고
+    `IMAGE_PENDING_REDRIVE_MAX_AGE_MS`(1시간)보다 젊으며, 같은 그룹에
+    살아 있는(stale 창 안의) `processing`·`settling` 시도가 없고, 예약이
+    아직 `reserved`인 행. 정상 실행자는 202 뒤 수 초 안에 claim한다. 더
+    오래 기다리는 정상 경우는 provider job 상한 뒤에 줄 선 같은 그룹의
+    target뿐이고, 형제 조건이 그것을 건너뛴다.
+  - **한 번**: 재구동은 예약의 `ImageCreditReservation.reconciledAt`을
+    `null → now`로 조건부 update한 sweep만 한다. 이미지 예약에서 이 필드를
+    쓰는 다른 경로는 없다. 새 컬럼은 없다.
+  - **이중 실행·이중 과금 없음**: 재구동도 정상 실행자와 같은
+    `pending → processing` 조건부 claim을 거친다. 느린 정상 실행자와 sweep
+    중 한쪽만 provider를 호출하고 정산한다.
+  - 실행 위치와 예산: maintenance route
+    (`/api/internal/maintenance/credit-reservations`)의 `after()`에서 응답
+    뒤에 실행한다. 예산은 그 route의 maxDuration(300초)이고 이미지 route의
+    968초가 아니다. 그래서
+    sweep당 `IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP`(8건)만 표시하고, 그룹마다
+    자기 provider job 상한으로 병렬 실행한다. 남은 행은 표시하지 않고 다음
+    sweep으로 넘긴다.
+  - 잘린 경우: 실행 중이던 시도는 `processing`에 남아 stale 창 뒤 환급된다.
+    시작하지 못한 행은 재구동이 이미 소진됐으므로 표시 시각부터 stale
+    창(12분)이 지나면 환급된다. 어느 쪽도 다시 실행되지 않는다.
+  - 환급으로 넘어가는 `pending` 행: 표시 후 stale 창 동안 claim되지 않은
+    행, 1시간보다 오래된 행, `reserved` 예약이 없는 행, 그리고 스위치가
+    꺼졌거나 재구동을 실행할 수 없는 호출자(scheduler 없음)의 sweep에서는
+    stale 창이 지난 모든 `pending` 행. 1시간 상한은 예약 때의
+    일·월 provider budget 창에 잡힌 지출이 나중에 실제로 나가는 양을
+    제한하고, 너무 늦은 결과로 사용자를 놀라게 하지 않기 위해서다.
 - 동시 실행은 entitlement·guardrail과 별개인 concurrency 층이며 v2에서
   **두 층으로 분리한다**. 그룹 하나 = lease 하나로 끝내면 모델 fan-out이
   작업량 증폭 통로가 되기 때문이다.
@@ -366,6 +430,12 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   → 성공 후 행 삭제/완료 처리. 실패는 같은 tombstone으로 재시도하고 15분
   reconciliation이 회수한다. R2를 먼저 지우고 DB 삭제가 실패하는 순서는
   금지한다.
+- 실행자가 원본을 R2에 쓴 뒤 원본 asset 행을 만들지 못하면(실행 중 대화가
+  삭제돼 generation이 사라졌거나 쓰기가 실패한 경우) 그 key를 가리키는 행이
+  없음을 확인하고 방금 쓴 원본 key를 `storage_rollback` tombstone으로 넣는다.
+  삭제 transaction의 tombstone은 그때 존재한 행에서만 나오므로, 이 경로가
+  없으면 원본이 R2에 영원히 남는다. 행이 있는지 확인하지 못하면 넣지 않는다
+  — 커밋됐을 수 있는 원본을 지우지 않기 위해서다.
 - v1 retention: 대화가 존재하는 동안 무기한 보존. 숨은 TTL·사용자별 용량
   상한 금지. 저장량·전송량 지표를 상시 관측하고, 비용 임계 초과 시 고지된
   retention 등 대안을 이 문서 개정으로 결정한다.
@@ -559,8 +629,86 @@ Recraft는 `RECRAFT_API_TOKEN`을 사용한다. 두 API 모두 요청당 한 번
 [BytePlus 가격](https://ai.byteplus.com/ark/region:ap-southeast-1/docs/model-pricing) · [Recraft 가격](https://www.recraft.ai/docs/api-reference/pricing)
 
 Ideogram은 서버의 `IDEOGRAM_API_KEY`로 4.6 생성 API에 `quality`를 보내며,
-Tomverse에서는 1024×1024 텍스트 생성 한 장을 제공한다. 결과 파일은 인증 키 없이 내려받는다.
+1024×1024 텍스트 생성 한 장을 제공한다. `IMAGE_IDEOGRAM_EDIT_ENABLED`가 켜졌을 때는
+같은 API에 참조 사진 한 장을 multipart로 보내 1K Medium 편집을 제공한다.
+공개 가격은 Medium 생성·편집 모두 $0.06이므로 기존 90크레딧을 유지한다.
+High 편집은 $0.22로 별도이며 현재 편집 옵션에서 제외한다.
+결과 파일은 인증 키 없이 내려받는다. 사진 편집의 기본값은 꺼짐이며, 공급자 계정의
+입력 사진 보존 조건을 확인한 다음 활성화한다.
 [Ideogram 4.6 API](https://developer.ideogram.ai/api-reference/images/generate/ideogram-4-6) · [Ideogram 가격](https://ideogram.ai/pricing/)
+
+`IMAGE_RECRAFT_EDIT_ENABLED`가 켜졌을 때는 Recraft V4 Pro의 `imageToImage`에
+사진 한 장의 비율을 유지해 2048×2048 캔버스에 맞춰 인라인으로 전달하고, `zdr: true`와 `b64_json`을 사용한다.
+기존 $0.25·350크레딧 2K Medium 옵션만 허용하고, 반환된 PNG가 2048×2048인지 검사한다.
+사진 편집의 기본값은 꺼짐이며, 활성화 전에 dev 테스트에서 과금 단위와 출력 크기를 확인한다.
+2026-11-25 도형 편집 실측에서 1024×1024 입력은 1024×1024 PNG를, 2048×2048 입력은
+2048×2048 PNG를 반환했다. 공급자는 각각 250단위(US$0.25)를 보고했다.
+[Recraft 편집 API](https://www.recraft.ai/docs/api-reference/tools/image-to-image) · [Recraft 데이터 보존](https://www.recraft.ai/docs/api-reference/zero-data-retention)
+
+**배경 제거는 이미지 생성 모델이 아니라 사진 도구다**(`lib/imagePhotoTools.ts`). 사진 한 장을 받아 같은
+픽셀에서 배경만 지운 PNG를 돌려준다. 프롬프트는 보내지 않는다. 도구는 둘이고, 각자의 스위치로 켠다.
+둘 다 기본값은 꺼짐이다.
+
+| 도구 | 스위치 | 공급자 원가 | 판매가 | 하한 |
+|---|---|---|---|---|
+| Recraft `removeBackground` | `IMAGE_RECRAFT_BACKGROUND_REMOVAL_ENABLED` | 요청당 US$0.01 | 20크레딧(750µUSD/크레딧) | 17 |
+| Bria RMBG 3.0 (fal `bria/rmbg-3`) | `IMAGE_FAL_BRIA_BACKGROUND_REMOVAL_ENABLED` | 장당 US$0.018 | 26크레딧(885µUSD/크레딧) | 26 |
+
+- 원가에는 다른 옵션과 같은 프롬프트 예산 5,000µUSD를 더해 계산한다. 가격은 2026-11-26에 각 공급자의
+  가격 페이지에서 읽었다. Bria의 직접 API도 장당 US$0.018로 같아, 이미 연결된 fal을 쓴다.
+- **둘을 함께 부르는 것은 운영자 결정이다(2026-11-26).** 같은 합성 사진 9장을 두 도구에 보낸 결과,
+  일반 피사체는 차이가 없었고 갈린 곳은 취향의 문제였다. Recraft는 앞쪽 물건을 함께 남기고(머그잔 옆
+  운동화, 유리잔 받침), Bria는 주 피사체 하나만 남긴다. 역광 곱슬머리는 Recraft의 가장자리가 더 깨끗했다.
+  Studio 투명 PNG는 켜져 있는 도구마다 요청을 따로 보내 결과를 나란히 보여 주고 사용자가 고른다.
+  둘 다 켜지면 합계 46크레딧이고, 한쪽만 켜져 있으면 그 도구만 견적한다.
+  **도구마다 독립된 단일 모델 요청이고, 차례로 보낸다.** 각 요청이 자기 예약과 정산을 따로 가지므로, 한 도구의
+  예약이 거절되거나 실패해도 다른 도구는 영향을 받지 않고 사용자는 성공한 도구의 가격만 낸다. 동시에 보내지
+  않는 이유는 사용자당 동시 이미지 요청 한도(`IMAGE_USER_CONCURRENT_GROUPS`, 기본 1) 때문이다. 앞 요청의
+  자리는 결과를 읽을 수 있게 된 직후에 반납되므로, 뒤 요청이 한도 초과로 거절되면 2초 간격으로 두 번까지
+  다시 보낸다. 둘 중 하나만 만들어졌으면 화면이 그 사실을 알리고, 다시 누르면 빠진 도구만 요청한다.
+  이미 받은 결과는 사진이 바뀔 때까지 화면이 보관하고(결제 화면에 다녀올 때는 초안과 함께 저장),
+  두 결과가 모두 보관돼 있고 화면에도 떠 있을 때 다시 누르는 것만 둘 다 새로 만드는 요청으로 본다.
+  받았지만 화면에 못 올린 결과는 다시 자르기만 한다. 새로 요청하는 도구의 이전 결과는 버리지 않고
+  "다시 요청 중"으로 표시해 두어, 그 요청이 실패하면 다음에는 그 도구만 요청하고, 그사이 결제 화면에
+  다녀와도 이전에 결제한 결과를 잃지 않는다. 새 결과를 받지 못한 도구는 실행이 끝난 뒤 이전 결과를 화면에
+  다시 올린다. 버튼 아래의 가격은 다음에 누를 때 실제로 요청할 도구의 합계다. 어느 도구든 크레딧 부족이나 견적 변경으로
+  거절되면 다른 기능과 같이 크레딧 충전 안내나 견적 새로 고침으로 이어지고, 이 둘은 다른 오류보다 먼저 처리한다.
+  한 도구의 요청이 끝나지 않은 채 실패하면(만들어졌지만 결과를 읽지 못함, 응답 유실) 그 요청은 이미 결제됐을 수
+  있고 같은 요청 키로만 이어받을 수 있으므로, 다음 도구를 시작하지 않는다. 다시 누르면 그 요청부터 이어받는다.
+  크레딧 부족이나 견적 변경으로 거절된 뒤에도 다음 도구는 보내지 않는다(두 도구 모두에 해당하는 사유다).
+  끝나지 않은 요청이 하나라도 남아 있는 동안에는 크레딧 부족을 충전 안내로 보내지 않고 일반 실패로 알린다.
+  결제 화면에 다녀오면 그 요청을 이어받을 수단이 사라지기 때문이다. 그래서 다시 누를 때는 끝나지 않은 요청을
+  새 요청보다 먼저 이어받는다. 이어받고 나면 남은 것이 없으므로 그 뒤의 크레딧 부족은 충전 안내로 이어진다.
+  충전 안내로 갈 때 저장하는 초안은 그 순간 화면에 떠 있는 결과, 보관 중인 도구별 결과와 그 표시,
+  고른 도구를 담고, 돌아오면 도구별 결과를 다시 잘라 각자의 이름으로 보여 주며 같은 것을 골라 둔다.
+  복원이 끝나기 전에 사진을 바꾸거나 다시 누르면 복원 결과는 버리고, 초안이 저장소에서 읽히기 전에
+  이미 그렇게 했다면 초안을 적용하지 않는다.
+  사진을 바꾸면 이전 사진의 결과와 끝나지 않은 요청은 이어받지 않는다. 다른 Studio 도구와 같은 동작이다.
+- 사진은 비율을 유지해 흰색 1024×1024 정사각형에 맞춰 data URL로 보낸다. Recraft에는 `zdr: true`·
+  `b64_json`·`image_format: "png"`를 쓰고, fal에는 다른 fal 요청과 같은 플랫폼 헤더(재시도 없음, 요청 미보관,
+  결과 15분 만료)를 쓰며 결과 파일은 fal CDN 주소에서만 내려받는다.
+- 반환된 PNG가 1024×1024이고 알파 채널이 있을 때만 결과로 받는다. 그 밖의 응답은 과금된 실패로 처리한다.
+  저장하는 원본은 §9대로 공급자가 준 바이트 그대로이며 서버는 다시 인코딩하지 않는다.
+  Bria는 피사체 안쪽의 대부분을 투명도 240~254로 돌려주므로, 화면이 사진 영역을 잘라 낼 때 240 이상을
+  255로 올린다. 내려받는 파일은 그 결과다.
+- 도구는 `IMAGE_MODEL_REGISTRY`에 넣지 않는다(`IMAGE_PHOTO_TOOLS`). 그래서 Chat의 모델 선택, 자동 라우팅,
+  비교, Admin 카탈로그에 나오지 않는다. 목록에서 빠진 것은 입장 검사가 아니므로, 생성 서비스는 도구를
+  소유한 기능(Studio 투명 PNG)이 서버에서 지정한 요청만 받고, 클라이언트가 보낸 모델 ID로는 사진이 있어도
+  거절한다. 가격 검사(`check:image-pricing`)는 사진 도구도 함께 본다.
+- 2026-11-26 실측(운영자 요청): Recraft는 dev 토큰으로 9건(US$0.09), 모든 응답이 `image.b64_json`에
+  1024×1024 알파 PNG를 담았고 10단위를 보고했으며 장당 2~5초였다. Bria는 fal 키로 9건(약 US$0.16),
+  `image.url`이 fal CDN의 1024×1024 알파 PNG였고 장당 6~11초였다. 두 도구 모두 불투명 영역의 픽셀이
+  입력과 같았다.
+- 공급자가 보고한 비용이 판매 시점의 원가보다 크면 초과분을 공급자 예산에 더 청구한다
+  (`reportedEditOverageMicroUsd`). 보고 비용이 있는 다른 편집 경로에도 같은 규칙이 적용된다. 과금된 뒤
+  결과를 받지 못했거나 저장하지 못한 실패도 같다. 실패는 예약액을 그대로 남기므로, 보고 비용이 예약액을
+  넘는 만큼만 더 청구한다(`failureReportedOverageMicroUsd`). fal은 비용을 보고하지 않으므로 Bria는 고정
+  가격으로 정산한다.
+- 실패한 사진 도구 대상의 재시도는 저장된 대상의 모델 ID로만 다시 요청한다. 호출자가 보낸 ID는 쓰지 않는다.
+- Recraft V4 Pro의 생성·편집도 응답이 보고한 단위를 그림을 검사하기 전에 읽어, 과금된 뒤 거절된 응답의
+  비용이 실패 정산에 전달된다.
+
+[Recraft 배경 제거 API](https://www.recraft.ai/docs/api-reference/tools/remove-background) · [Recraft 가격](https://www.recraft.ai/docs/api-reference/pricing) · [fal Bria RMBG 3.0](https://fal.ai/models/bria/rmbg-3)
 
 **`disabledReason` 세 값은 서로 다른 사실을 말하며 `check:image-pricing`이
 각각을 강제한다.** `price_unverified`는 `verifiedAt`이 비어 있어야 하고,
@@ -901,8 +1049,11 @@ Alibaba Cloud Model Studio International(싱가포르) 동기 endpoint
   `.aliyuncs.com`에는 `-internal` 내부망 endpoint와 본토·홍콩 리전도 있다) redirect는
   따르지 않는다. 본문은 선언 길이와 무관하게 읽는 동안 16 MiB로 제한하고, 파일의 MIME이
   프로필 저장 허용 목록에 있고 헤더가 1024×1024여야 저장한다.
-- **생성만이다.** 편집은 `IMAGE_EDIT_PRICING`의 승인된 할증(3.0은 입력 이미지 장당
-  $0.003)이 없어 adapter가 거절한다.
+- `IMAGE_ALIBABA_EDIT_ENABLED`가 켜져 있으면 Qwen Image 3.0·Pro와 Wan 2.7·Pro는
+  1K 정사각 사진 편집을 지원한다. Qwen Image 3.0은 입력 사진당 $0.003을 예약한다.
+  Wan 2.7 편집 API는 `prompt_extend`를 지원하지 않으며, 요청은 `enable_sequential: false`,
+  `n: 1`로 고정한다. 두 모델의 싱가포르 편집은 출력 장당 과금이다.
+  [Wan 편집 API](https://www.alibabacloud.com/help/en/model-studio/wan-image-edit)
 
 **미확인 — 활성화 전에 유료 smoke로 확인한다.** API 레퍼런스의 결과 URL 예시는 3.0·2.1 모두
 `dashscope-result-sz.oss-cn-shenzhen.aliyuncs.com`, 즉 **중국 본토 버킷**이고, 싱가포르
@@ -941,7 +1092,8 @@ Klein **20크레딧**(low, 700µUSD). Grok Imagine(733)·Nano Banana 2(725)와 �
 - 요청 고정: `resolution: "1k"`, `aspect_ratio: "1:1"`(기본 `auto`는 프롬프트가 모양을
   고른다), `safety_tolerance: 2`. FLUX 3 Image는 `grounding: false`(기본 true는 프롬프트를
   웹·이미지 검색에 보낸다)와 `version: "latest"`(현재 유일한 값), Klein은
-  `output_format: "png"`. `seed`·`images`·`user`는 보내지 않는다.
+  `output_format: "png"`. `seed`와 `user`는 보내지 않는다. 편집 요청만 `images`에
+  인라인 사진 한 장을 보내며, 생성과 같은 출력 가격을 사용한다.
 - 가격표: 해상도 등급별 장당 과금이고 "prompts are included at no extra charge"이며 거절·
   실패·moderation으로 보류된 출력은 과금하지 않는다. 그래서
   `IMAGE_PROVIDER_THINKING_BILLING.bfl = "not_billed"`이고 최악 원가는 출력가 + 프롬프트
@@ -957,7 +1109,7 @@ Klein **20크레딧**(low, 700µUSD). Grok Imagine(733)·Nano Banana 2(725)와 �
 - 파일은 프로필 저장 허용 MIME(기본 JPEG·PNG), 16 MiB 이하, 1024×1024여야 저장한다.
   BFL이 응답에 주는 `cost`·`output_mp`는 `providerUsage`에 기록만 하고 가격 계산에 쓰지
   않는다.
-- **생성만이다.** 편집은 승인된 할증이 없어 adapter가 거절한다.
+- 사진 편집은 `IMAGE_BFL_EDIT_ENABLED`로 제어하며, 공급자 예산과 기존 크레딧 한도를 적용한다.
 
 **개인정보 고지.** 켜는 diff에서 `lib/providerDataDestinations.ts`에 BFL 행을 넣었다
 (같은 이유로 그동안 빠져 있던 fal 행도). 행의 provider 타입이 채팅 공급자만 받던 것을
@@ -1162,10 +1314,17 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
     팔지 않으면(Grok Imagine, Nano Banana 2는 1K 정사각만 판다) 정사각으로 편집한다.
     실행기는 사진을 EXIF 방향대로 세우고 1024px 안으로 줄여 PNG로 만든 뒤 모델의 편집
     요청으로 보낸다: OpenAI `/v1/images/edits`(multipart), xAI `/v1/images/edits`(data URL),
-    fal `fal-ai/nano-banana-2/edit`(`image_urls` data URI, 생성과 같은 가격 필드). 감사
-    기록에는 사진의 형식·크기·sha256만 남고 바이트는 남지 않는다. 사용자 파일은 지우거나
-    고치지 않는다. Google 직접 호출은 생성 자체가 `worst_case_cost_unbounded`로 막혀 있어
-    편집 adapter를 두지 않는다. 같은 Google 모델은 fal의 Nano Banana 2로 편집한다.
+    fal `fal-ai/nano-banana-2/edit`(`image_urls` data URI), Seedream 5.5(참조 사진 한 장),
+    Alibaba Qwen Image 3.0·3.0 Pro·Wan 2.7·2.7 Pro(싱가포르 동기 API),
+    BFL FLUX 3·Klein(인라인 base64 한 장)을 지원한다. Alibaba와 BFL 경로는 1K 정사각이며
+    각각 `IMAGE_ALIBABA_EDIT_ENABLED`와 `IMAGE_BFL_EDIT_ENABLED`로 제어한다. 둘 다 기본 꺼짐이다.
+    감사 기록에는 사진의 형식·크기·sha256만 남고 바이트는 남지 않는다. 사용자 파일은 그대로 보존한다.
+    Nano Banana 2·2 Lite·2.1 직접 편집은 `IMAGE_GOOGLE_EDIT_ENABLED`가 켜졌을 때만
+    1K 정사각형 한 장을 요청하고, Interactions 요청에 `store: false`를 설정한다.
+    GPT Image 2.6 Flare·Sunburst는 `IMAGE_OPENAI_2_6_EDIT_ENABLED`가 켜졌을 때만
+    실측한 1K 정사각형 Medium 옵션으로 편집한다. 기본 꺼짐이다.
+    Ideogram 4.6과 Recraft V4 Pro는 위 공급자별 설정과 Medium 옵션을 따르며,
+    Recraft는 단독 모델 편집과 Studio의 명시적 기능 라우팅에서 2K 정사각형을 선택한다.
   - **편집 가격은 모델별이다**(`lib/imageGenerationPricing.ts`의 편집 가격 표). 각 모델은
     가산 크레딧, 입력 사진 예산, 토큰 과금이면 단가와 최대 토큰, 그리고 근거
     (`verification`)를 가진다. 근거가 없거나, 토큰 과금 모델의 실측 최댓값이 예산을 넘으면
@@ -1176,6 +1335,11 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
       32×32 픽셀당 1토큰이었다. 정산은 예약 snapshot의 단가로 보고된 이미지 입력 토큰을
       계산하고, 사용량이 없으면 사진 예산 전체로 정산하며, 예산을 넘으면
       `image_edit_input_over_budget`을 남긴다.
+    - GPT Image 2.6 Flare·Sunburst: 2026-11-25 dev 자격증명으로 1024×1024 PNG
+      한 장씩 편집했으며 두 응답 모두 사진 입력 1,024토큰, 이미지 출력 1,449토큰을 보고했다.
+      공개 이미지 입력 단가 US$8/M, 사진 예산 1,152토큰을 적용하면
+      (43,470 출력 + 5,000 프롬프트 + 9,216 사진) / 65 = 887.5µUSD/크레딧이다.
+      기존 판매가를 사용하며 실측한 provider·API 모델·크기·품질과 출력 원가 하한을 확인한다.
     - Nano Banana 2(fal): fal 가격 API가 2026-10-29 생성과 편집 엔드포인트 모두 출력 1장당
       US$0.08로 답했고, 모델 페이지에 입력 사진 요금이 없다. 그래서 가산 0, 사진 예산 0이다.
       2026-10-29 운영자 승인 실측에서 1024×768 사진을 data URI로 보내 fal CDN의 1024×1024
@@ -1188,6 +1352,28 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
     - xAI·fal 실측은 `node --import tsx scripts/measure-image-edit-providers.mjs --confirm-paid`
       (유료 약 US$0.25 이하, 운영자 승인 필요). 실측은 adapter와 같은 요청 빌더를 쓴다.
       2026-10-29 실행의 실제 지출은 약 US$0.20(xAI 2장 US$0.12, fal 1장 US$0.082)이다.
+    - Alibaba Qwen Image 3.0·3.0 Pro는 입력 사진당 US$0.003을 예산에 더한다.
+      Wan 2.7·2.7 Pro는 출력 장당 과금한다. BFL FLUX 3·Klein은 1K 생성과 편집의
+      가격이 같고 참조 장당 추가 요금이 없다. 활성 모델의 가격과 기존 크레딧 한도가 그대로 적용된다.
+    - Nano Banana 2·2 Lite·2.1 직접 편집은 공급자의 모델별 입력 단가와 2,048토큰
+      예산을 쓴다. 1K 정사각 Medium 편집의 출력 원가 하한은 각각 67,200·33,600·33,600µUSD다. 2026-11-25 dev의
+      공개 사진 편집 실측은 모델별 1,120 이미지 토큰이었다. 사용량을 모달리티별로
+      받으면 이미지 토큰을 텍스트와 분리한다. 분리값이 없으면 사진과 프롬프트는
+      각각의 예약 한도로 정산한다.
+    - Studio는 기능 키(예: `real-sticker-pack`, `live-action-character`, `poster`)로 모델을 고른다.
+      `STUDIO_IMAGE_ROUTE_PREFERENCES`는 기능별로 검증한 모델 ID를 우선순위 순서로 나열하는 JSON이다.
+      DB 카탈로그에서 활성 상태이며 크기·작업·비용 조건을 통과한 후보만 고르고, 제출 시 같은 견적을 다시 확인한다.
+      반실사·캐릭터 이모티콘 팩과 개별 재생성은 GPT Image 2.6 Sunburst의 1024×1024 Medium 사진 편집 견적을 사용할 수 있을 때만 생성한다.
+      투명 PNG(`transparent-png`)는 배경 제거 도구의 견적만 받는다. 이미지 생성 모델은 피사체를
+      다시 그리므로 기능별 우선순위 설정으로도 대신할 수 없고, 도구가 모두 꺼져 있으면 이 기능은 제공하지 않는다.
+      견적은 켜진 도구 각각의 가격(`targets`)과 합계를 담고, 제출은 도구 하나씩 그 도구의 가격으로 한다.
+      견적에 없는 모델이나 합계 금액으로는 제출할 수 없다.
+      화면은 도구별 결과를 도착하는 대로 나란히 보여 주고, 사용자가 고른 결과에서 사진 영역만 잘라 내려받게 한다.
+      Studio 화면은 생성 모델 이름과 요청의 크레딧 가격을 표시하지 않는다(운영자 결정 2026-11-26). 견적은 서버가 제출을 검증하는 데만 쓰고,
+      크레딧이 부족할 때의 안내는 그대로 둔다.
+      Studio 도구의 생성은 1회성 실행이라 대화 기록에 넣지 않는다(운영자 결정 2026-11-26). 실행마다 이미지 대화 행은
+      그대로 만들되 요청 문구를 그 대화의 메시지로 남기고(`lib/studioImageReference.ts`), 대화 목록과 메시지 검색은 메시지가
+      있는 이미지 대화를 제외한다(`STUDIO_RUN_CONVERSATION`, `lib/conversationProduct.ts`). 이미지 workspace의 대화는 메시지가 없으므로 목록에 남는다.
     - 토큰 과금이 아닌 사진은 snapshot의 사진 예산으로 정산한다. 사진이 없거나 읽을 수
       없으면 provider를 부르기 전에 `edit_source_unavailable`로 실패하고 전부 반납한다.
       재시도는 같은 사진의 편집으로 남는다. Review는 편집하지 않는다.

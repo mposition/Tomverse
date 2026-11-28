@@ -36,6 +36,16 @@ export const getModelBrand = (provider: AiProvider | string): ModelBrand => {
       // Black Forest Labs (FLUX). The monochrome mark from @lobehub/icons-static-png
       // 2.5.0 (MIT), light variant: the frame is near-white in both themes.
       return { mark: "BFL", className: "from-white to-zinc-100", image: "/model-icons/bfl.png" };
+    case "ideogram":
+      // https://ideogram.ai/favicon.svg?v=new-brand-20261020
+      return { mark: "ID", className: "from-white to-zinc-100", image: "/model-icons/ideogram.svg" };
+    case "byteplus":
+      // Seedream's direct provider. Icon published on the official BytePlus ModelArk product page.
+      // https://sf-bpcms.bytepluscdn.com/obj/byteplus-public-aiso/portal/assets/apple-touch-icon.png
+      return { mark: "BP", className: "from-white to-sky-50", image: "/model-icons/byteplus.png" };
+    case "recraft":
+      // https://www.recraft.ai/apps/icon.png
+      return { mark: "R", className: "from-white to-zinc-100", image: "/model-icons/recraft.png" };
     case "minimax":
       // MiniMax has no local image asset, so the letter mark needs a real
       // brand-colour surface. A near-white gradient makes the shared white

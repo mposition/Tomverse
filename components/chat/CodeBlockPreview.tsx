@@ -1,0 +1,107 @@
+"use client";
+
+import { Eye } from "lucide-react";
+import { Children, isValidElement, useCallback, useMemo, useState, type ReactNode, type RefObject } from "react";
+
+import { ArtifactPreviewPanelShell } from "@/components/chat/ArtifactPreviewPanelShell";
+import { useChatArtifactWorkspace, useCodeBlockStreaming } from "@/components/chat/ChatArtifactWorkspaceContext";
+import { HtmlArtifactPreviewFrame, usePreviewDocumentLabels } from "@/components/chat/HtmlArtifactPreviewPanel";
+import { useLanguage } from "@/components/LanguageProvider";
+import {
+  buildCodePreviewDocument,
+  codeLanguageFromClassName,
+  codePreviewKindForLanguage,
+  type CodePreviewKind,
+} from "@/lib/chatArtifactPreview";
+
+/**
+ * The "Preview" button on a code block in an answer, and the panel it opens.
+ *
+ * Policy: docs/policy/generated-artifacts.md section 9. A page the model wrote
+ * straight into its answer (no file) runs in the same isolated frame as a
+ * generated HTML file. It is a button on the block, not something that runs by
+ * itself: nothing executes until the user presses it.
+ *
+ * It renders nothing unless the workspace switch is on, the fence's language
+ * is one that can be previewed, and the answer has finished -- a block still
+ * arriving is unfinished code.
+ */
+
+const languageOfCode = (children: ReactNode): string | null => {
+  for (const child of Children.toArray(children)) {
+    if (isValidElement(child)) {
+      const className = (child.props as { className?: string }).className;
+      const language = codeLanguageFromClassName(className);
+      if (language) return language;
+    }
+  }
+  return null;
+};
+
+type Opened = { kind: CodePreviewKind; language: string; code: string };
+
+export function CodeBlockPreview({ children, preRef }: { children: ReactNode; preRef: RefObject<HTMLPreElement | null> }) {
+  const { t } = useLanguage();
+  const workspace = useChatArtifactWorkspace();
+  const streaming = useCodeBlockStreaming();
+  const labels = usePreviewDocumentLabels();
+  const [opened, setOpened] = useState<Opened | null>(null);
+  const close = useCallback(() => setOpened(null), []);
+
+  const language = languageOfCode(children);
+  const kind = codePreviewKindForLanguage(language);
+
+  const built = useMemo(
+    () => (opened ? buildCodePreviewDocument(opened.kind, opened.code, { language: opened.language, labels, assetOrigin: window.location.origin }) : null),
+    [opened, labels]
+  );
+
+  const { fillComposer } = workspace;
+  const revise = useMemo(
+    () =>
+      opened && fillComposer
+        ? async (request: string) => {
+            fillComposer(t("chat.artifactWorkspaceRevisePrompt").replaceAll("{request}", request));
+            return null;
+          }
+        : undefined,
+    [opened, fillComposer, t]
+  );
+
+  if (!workspace.enabled || streaming || !kind || !language) return null;
+
+  const open = () => {
+    // The rendered text, as the copy button reads it. mdast ends every block with the one newline that closes it.
+    const code = (preRef.current?.textContent ?? "").replace(/\r?\n$/, "");
+    setOpened({ kind, language, code });
+  };
+
+  const title = t("chat.artifactWorkspaceCodeTitle").replaceAll("{language}", language.toUpperCase());
+
+  return (
+    <>
+      <button
+        type="button"
+        data-testid="chat-code-preview-button"
+        onClick={open}
+        title={t("chat.artifactPreviewOpen")}
+        aria-label={`${t("chat.artifactPreviewOpen")}: ${language.toUpperCase()}`}
+        className="absolute right-11 top-2 inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-semibold text-zinc-400 transition-colors before:absolute before:-inset-y-2 before:content-[''] hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+      >
+        <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+        {t("chat.artifactPreviewOpen")}
+      </button>
+      {opened && built && (
+        <ArtifactPreviewPanelShell title={title} heading={title} onClose={close} onRevise={revise}>
+          {built.ok ? (
+            <HtmlArtifactPreviewFrame html={built.html} title={title} />
+          ) : (
+            <p role="alert" data-testid="html-artifact-preview-notice" className="p-4 text-sm text-zinc-600 dark:text-zinc-300">
+              {t(built.reason === "too_large" ? "chat.artifactWorkspaceCodeTooLarge" : "chat.artifactWorkspaceCodeEmpty")}
+            </p>
+          )}
+        </ArtifactPreviewPanelShell>
+      )}
+    </>
+  );
+}

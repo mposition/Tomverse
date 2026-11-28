@@ -1,7 +1,7 @@
-import { Barlow_Semi_Condensed, Bricolage_Grotesque, Fraunces, Huninn, Jua, Nunito, Rubik, ZCOOL_QingKe_HuangYou } from "next/font/google";
+import { Bagel_Fat_One, Barlow_Semi_Condensed, Bricolage_Grotesque, Fraunces, Huninn, Nunito, Rubik, ZCOOL_QingKe_HuangYou } from "next/font/google";
 import type { Language } from "@/lib/language";
 
-const jua = Jua({ weight: "400", preload: false, adjustFontFallback: false });
+const bagel = Bagel_Fat_One({ weight: "400", preload: false, adjustFontFallback: false });
 const bricolage = Bricolage_Grotesque({ weight: "800", preload: false, adjustFontFallback: false });
 const qingke = ZCOOL_QingKe_HuangYou({ weight: "400", preload: false, adjustFontFallback: false });
 const huninn = Huninn({ weight: "400", preload: false, adjustFontFallback: false });
@@ -11,7 +11,7 @@ const rubik = Rubik({ weight: "800", preload: false, adjustFontFallback: false }
 const nunito = Nunito({ weight: "900", preload: false, adjustFontFallback: false });
 
 const faces = {
-  ko: jua,
+  ko: bagel,
   en: bricolage,
   zh: qingke,
   "zh-Hant": huninn,
@@ -19,7 +19,7 @@ const faces = {
   de: barlow,
   es: rubik,
   pt: nunito,
-} satisfies Record<Language, typeof jua>;
+} satisfies Record<Language, typeof bagel>;
 
 export async function loadStudioStickerFont(language: Language, text: string) {
   const primary = faces[language].style;

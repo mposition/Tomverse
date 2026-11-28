@@ -650,7 +650,7 @@ test("a value a number cannot hold exactly stays the text the user wrote", async
   const sheet = new TextDecoder().decode(unzipSync(result.bytes)["xl/worksheets/sheet1.xml"]);
   // Numbers that print back as themselves are numbers...
   for (const value of ["1200.5", "-3", "0.1"]) {
-    assert.match(sheet, new RegExp(`<v>${value.replace(".", "\.")}</v>`), value);
+    assert.match(sheet, new RegExp(`<v>${value.replace(".", "\\.")}</v>`), value);
   }
   // ...and the two that would change are not.
   assert.equal(sheet.includes("<v>1000000000000000</v>"), false);
@@ -732,6 +732,35 @@ test("the first row is written as it was read: no invented header, no trimming",
     files
   );
   assert.equal(pdf.format, "pdf");
+});
+
+test("a table with hanja converts to PDF; a character the font lacks is reported rather than fatal", async () => {
+  const pdfSpec = { operation: "convert_spreadsheet", filename: "contract", targetFormat: "pdf", sources: [{ attachment: "att_1" }] };
+  const clean = await convert(pdfSpec, attachments([
+    ["clean.csv", "text/csv", csvBytes("항목,금액\n甲 ㈜톰버스,1000\n乙 홍길동,2000\n这个们说时为经发,3000\n")],
+  ]));
+  assert.equal(clean.format, "pdf");
+  assert.equal(clean.notices, undefined);
+  assert.ok((await PDFDocument.load(clean.bytes)).getPageCount() >= 1);
+
+  const stray = await convert(pdfSpec, attachments([
+    ["stray.csv", "text/csv", csvBytes("항목,금액\n甲 ㈜톰버스 계약 체결 완료,1000\n乙 홍길동 계약 체결 🚀,2000\n")],
+  ]));
+  assert.equal(stray.notices?.length, 1);
+  assert.match(stray.notices[0], /^The PDF font has no glyph for 1 character of this document \(🚀\)/);
+  assert.match(stray.parts, /3 rows, 2 columns.*1 page/);
+
+  // Mostly a writing system the font does not carry: still refused, and the
+  // refusal names what could not be drawn so the model can say so.
+  const files = attachments([
+    ["arabic.csv", "text/csv", csvBytes("العنوان,القيمة\nمرحبا بكم,مرحبا\nتقرير الربع الأول,شكرا\n")],
+  ]);
+  const admission = admitFileConversionSpec({ ...pdfSpec, filename: "arabic" });
+  assert.ok(admission.ok);
+  await assert.rejects(
+    async () => (await prepareFileConversion(admission.spec, files)).render(),
+    (error) => error.name === "PdfGenerationError" && error.code === "UNSUPPORTED_CHARACTERS" && /م/u.test(error.message)
+  );
 });
 
 test("third review: a workbook number keeps its digits, and a long PDF cell runs onto more pages", async () => {

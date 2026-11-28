@@ -52,9 +52,9 @@ test("an operator scope is the upper bound for the user's choice", () => {
 test("policy digests stay compatible with default-scope connections and bind each choice", () => {
   const [linear] = mcpServers(env("linear"));
   // A pre-scope-choice policy: the same OAuth object without the selectable bound.
-  const legacyOAuth = { ...linear.oauth! };
-  delete legacyOAuth.selectableScopes;
-  const legacy = createHash("sha256").update(JSON.stringify({ ...linear, oauth: legacyOAuth })).digest("hex");
+  const legacyPolicy = JSON.parse(JSON.stringify(linear)) as typeof linear;
+  delete legacyPolicy.oauth!.selectableScopes;
+  const legacy = createHash("sha256").update(JSON.stringify(legacyPolicy)).digest("hex");
   assert.equal(mcpPolicyDigest(linear), legacy);
   assert.equal(mcpPolicyDigest(linear, ["write", "read"]), legacy);
   assert.notEqual(mcpPolicyDigest(linear, ["read"]), legacy);

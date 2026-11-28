@@ -12,8 +12,10 @@
  */
 
 export {
+  INTERRUPTED_FINISH_REASONS,
   LENGTH_RAW_FINISH_REASONS,
   isChatCompletionStatus,
+  isChatIncompleteReason,
   isLengthRawFinishReason,
   resolveChatCompletionOutcome,
   type ChatCompletionOutcome,

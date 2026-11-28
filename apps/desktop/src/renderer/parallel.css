@@ -1,0 +1,51 @@
+.activity-dialog { width: min(1040px, 96vw); max-height: 88vh; overflow: auto; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px; }
+.activity-dialog::backdrop { background: #0a10204d; }
+.activity-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.activity-dialog h2 { margin: 0; font-size: 16px; }
+.activity-dialog h3 { margin: 14px 0 6px; font-size: 13px; }
+.activity-tabs { display: inline-flex; gap: 4px; }
+.activity-tabs button[aria-selected="true"] { background: var(--action); color: #fff; }
+.activity-badge { margin-left: 4px; font-size: 11px; min-width: 16px; text-align: center; border-radius: 8px; background: var(--action); color: #fff; padding: 0 4px; }
+.activity-icon { position: relative; }
+.activity-limit { display: flex; align-items: center; gap: 8px; margin: 12px 0 4px; font-size: 12px; flex-wrap: wrap; }
+.activity-limit small, .activity-hint { color: var(--muted); }
+.activity-list { list-style: none; padding: 0; margin: 10px 0; display: grid; gap: 8px; }
+.activity-row { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: center; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--raised); }
+.activity-row[data-state="approval"] { border-color: var(--action); }
+.activity-row .row-title { font-weight: 600; overflow-wrap: anywhere; }
+.activity-row small, .activity-row .row-detail { display: block; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.activity-row .row-actions { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.activity-row .row-actions button { min-height: 28px; padding: 3px 8px; font-size: 12px; }
+.activity-start { display: grid; gap: 8px; border-top: 1px solid var(--line); margin-top: 12px; padding-top: 6px; }
+.activity-start textarea, .schedule-form textarea, .schedule-form input:not([type="checkbox"]), .schedule-form select, .activity-start select { min-width: 0; border: 1px solid var(--line); border-radius: 7px; background: var(--raised); color: var(--text); padding: 8px; font: inherit; }
+.activity-start textarea, .schedule-form textarea { min-height: 64px; resize: vertical; }
+.activity-start label, .schedule-form label { display: grid; gap: 4px; font-size: 12px; }
+.activity-start label.inline, .schedule-form label.inline { display: flex; align-items: center; gap: 6px; }
+.activity-notice { margin: 8px 0 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.activity-notice[role="alert"] { color: light-dark(#a31535, #f09ab0); }
+.split-panes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 8px; }
+.split-panes:has(> :only-child) { grid-template-columns: minmax(0, 1fr); }
+.lane-view { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-width: 0; max-height: 56vh; overflow: auto; background: var(--surface); }
+.lane-view > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.lane-view small { display: block; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.lane-entries { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 8px; }
+.lane-entries p, .lane-streaming { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.lane-entries li[data-role="event"] p { color: var(--muted); font-size: 12px; }
+.lane-view ul { list-style: none; margin: 0; padding: 0; font-size: 12px; }
+.schedule-warning { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--raised); margin: 12px 0; }
+.schedule-list { list-style: none; padding: 0; margin: 10px 0; display: grid; gap: 8px; }
+.schedule-item { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--raised); display: grid; gap: 4px; }
+.schedule-item[data-enabled="false"] { opacity: .75; }
+.schedule-item small { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.schedule-item .row-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+.schedule-item .row-actions button { min-height: 28px; padding: 3px 8px; font-size: 12px; }
+.schedule-form { display: grid; gap: 8px; border-top: 1px solid var(--line); margin-top: 12px; padding-top: 8px; }
+.schedule-form fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.schedule-form .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
+.run-list { list-style: none; padding: 0; margin: 6px 0; display: grid; gap: 6px; font-size: 12px; }
+.run-list li { border-bottom: 1px solid var(--line); padding: 6px 0; display: grid; gap: 2px; }
+.run-list li[data-status="failed"] .run-status { color: light-dark(#a31535, #f09ab0); }
+.run-list li[data-status="completed"] .run-status { color: light-dark(#11664f, #89d2b8); }
+.run-list li[data-status="missed"] .run-status, .run-list li[data-status="skipped"] .run-status { color: var(--muted); }
+.task-window { padding: 16px; max-width: 900px; margin: 0 auto; }
+.approval-origin { margin: 0 0 8px; font-size: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--raised); overflow-wrap: anywhere; }

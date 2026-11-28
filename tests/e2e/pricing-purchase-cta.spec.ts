@@ -420,28 +420,42 @@ test.describe("pricing plan CTAs by authentication state and plan", { tag: "@ui-
     await expect(ctaState(page, "free")).toBeEmpty();
   });
 
-  test("a subscription with no known interval is handed to support, not to a refusal", async ({
+  test("a subscription with no known interval still opens the change screen", async ({
     page,
   }) => {
-    // A change only ever happens on the interval already being billed. Without
-    // one, opening the flow would show a price and then refuse the confirm.
+    // The stored interval is null for a subscription synced before the field
+    // existed. The screen leaves it out of the quote request and the server
+    // quotes on the interval Stripe reports (docs/policy/plan-change.md §9).
     await preparePricingPage(page, {
       plan: "Pro",
       hasActiveSubscription: true,
       billingInterval: null,
     });
+    const previewBodies: Record<string, unknown>[] = [];
+    await page.route("**/api/billing/plan-change/preview", async (route) => {
+      previewBodies.push(route.request().postDataJSON() as Record<string, unknown>);
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ code: "PLAN_CHANGE_ALREADY_PENDING" }),
+      });
+    });
+    await page.route("**/api/billing/plan-change", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ reservation: null }),
+      })
+    );
     await gotoPricing(page);
 
     const maxCta = ctaState(page, "max");
-    await expect(maxCta).toHaveAttribute("data-cta-state", "manage_plan");
-    await expect(maxCta).toContainText("not supported yet");
+    await expect(maxCta).toHaveAttribute("data-cta-state", "change_plan");
+    await page.getByTestId("pricing-change-plan-max").click();
 
-    await maxCta.getByRole("link", { name: "Ask support to change plan" }).click();
-
-    await page.waitForURL(/\/support/);
-    // Landing on a generic contact page would make this a redirect, not a
-    // handoff: the visitor would have to re-explain what they were doing.
-    await expect(page.getByLabel("Request type")).toHaveValue("billing");
+    await expect(page.getByTestId("plan-change-modal")).toBeVisible();
+    await expect.poll(() => previewBodies.length).toBe(1);
+    expect(previewBodies[0]).toEqual({ targetTier: "Max" });
   });
 
   test("a Max subscriber is never told that Pro is an upgrade", async ({

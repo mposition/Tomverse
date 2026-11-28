@@ -45,8 +45,12 @@ export function selectedMcpProviderPolicies(env: ProviderEnvironment = process.e
     if (!clientId && !registrationUrl) return [];
     if (clientId && oauth.tokenAuthMethod !== "none" && !env[clientSecretEnv]) return [];
     if (!clientId && env[clientSecretEnv]) return [];
+    // Present only on profiles that declare it, so every other policy (and its
+    // connection digest) is unchanged.
+    const authorizationParams = "authorizationParams" in oauth ? oauth.authorizationParams : undefined;
     return [{ ...base, oauth: { issuer: oauth.issuer, authorizationUrl: oauth.authorizationUrl,
       tokenUrl: oauth.tokenUrl, tokenAuthMethod: oauth.tokenAuthMethod, scope,
+      ...(authorizationParams ? { authorizationParams } : {}),
       ...(tokenScope === undefined ? {} : { tokenScope }), ...(selectableScopes.length ? { selectableScopes } : {}),
       ...(clientId ? { clientId, ...(oauth.tokenAuthMethod === "none" ? {} : { clientSecretEnv }) } : { registrationUrl }) } }];
   });

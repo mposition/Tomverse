@@ -208,7 +208,11 @@ const checks = [
     file: "app/api/chat/route.ts",
     test: (source) =>
       source.includes('"MODEL_RETIRED"') &&
-      source.includes("const isEmptyResponse = !generatedText.trim()") &&
+      // A response is empty when it delivered neither text nor a file; a
+      // file-only answer is not an empty provider stream.
+      source.includes("const answerHasText = Boolean(generatedText.trim())") &&
+      source.includes("const answerDelivered = answerHasText || deliveredFiles") &&
+      source.includes("const isEmptyResponse = !answerDelivered") &&
       source.includes('"AI_EMPTY_RESPONSE"') &&
       source.indexOf("if (isEmptyResponse)") <
         source.indexOf("await recordProviderSuccess"),
@@ -1247,16 +1251,16 @@ const checks = [
     },
   },
   {
-    name: "A request audit snapshot strips every provider's prompt field",
+    name: "Image request audit snapshots omit prompts and reference photos",
     file: "lib/imageProviderAdapter.ts",
-    test: (source) =>
-      // OpenAI and xAI name it `prompt`; Google's Interactions API names it
-      // `input`. Filtering only `prompt` was correct until it silently stopped
-      // being: the Google body would have copied the user's prompt into the
-      // stored audit blob, a second place every deletion path has to reach.
-      source.includes('PROMPT_FIELD_NAMES = new Set(["prompt", "input"])') &&
-      source.includes("!PROMPT_FIELD_NAMES.has(key)") &&
-      !source.includes('([key]) => key !== "prompt"'),
+    test: (source) => {
+      // Google uses input for request content, and FLUX uses images for edit
+      // references. The audit scrubber must cover both as well as prompt.
+      const declaration = source.match(/const REQUEST_CONTENT_FIELDS\s*=\s*new Set\(\[([^\]]*)\]\)/);
+      const fields = Array.from((declaration?.[1] ?? "").matchAll(/"(\w+)"/g), ([, name]) => name);
+      return ["prompt", "input", "images"].every((name) => fields.includes(name)) &&
+        source.includes("!REQUEST_CONTENT_FIELDS.has(key)");
+    },
   },
   {
     name: "A CSP violation is excused only for extension schemes",
@@ -2437,13 +2441,21 @@ const checks = [
   {
     name: "Checkout discloses renewal and links paid users to legal policies",
     file: "components/marketing/UpgradeInterestButton.tsx",
-    test: (source) =>
-      source.includes('href="/terms"') &&
-      source.includes('href="/refund"') &&
-      source.includes("automatic renewal") &&
-      source.includes("자동 갱신") &&
-      source.includes("discount period") &&
-      !source.includes("Discounts apply to the first month of Pro and Max"),
+    test: (source) => {
+      // The notice text lives in the shared copy module, which Desktop's plan
+      // screen renders too; the links stay in the dialog.
+      const copy = read("components/billing/checkoutCopy.ts");
+      return (
+        source.includes('href="/terms"') &&
+        source.includes('href="/refund"') &&
+        source.includes('from "@/components/billing/checkoutCopy"') &&
+        copy.includes("automatic renewal") &&
+        copy.includes("자동 갱신") &&
+        copy.includes("discount period") &&
+        !copy.includes("Discounts apply to the first month of Pro and Max") &&
+        !source.includes("Discounts apply to the first month of Pro and Max")
+      );
+    },
   },
   {
     name: "Chat model picker retains catalogue pricing while the composer omits credit estimates",

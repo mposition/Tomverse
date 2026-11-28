@@ -1,27 +1,75 @@
 /** Headless entry: no CLI main, terminal input, config or environment reads on import. */
-import { readFileSync, statSync } from "node:fs";
 import { viewChanges } from "./changes.js";
 import { Journal, type JournalIo, type SessionState } from "./session.js";
 import { Gateway, type Receipt, type CatalogModel } from "./gateway.js";
-import { Workspace, normalizeRoot, same } from "./workspace.js";
+import { normalizeRoot, same } from "./workspace.js";
+import { catalogProviderFor } from "./transmission.js";
 import type { Endpoint } from "./config.js";
-export { Runner, SMART_ADAPTIVE, EXIT_CODES } from "./agent.js";
+export { Runner, SMART_ADAPTIVE, EXIT_CODES, VIEW_IMAGE_MARK, MAX_PERSON_PICTURES } from "./agent.js";
+export { IMAGE_MAX_BYTES } from "./tools.js";
+export type { ImageAttachment } from "./tools.js";
 export type { ApprovalView, ApprovalDecision, Prompter, RunnerOptions, Outcome } from "./agent.js";
 export { Gateway, GatewayError } from "./gateway.js";
 export type { CatalogModel, Receipt } from "./gateway.js";
+export { ProjectMemory, memoryFileFor } from "./memory.js";
+export type { MemoryEntry } from "./memory.js";
 export { Journal, listSessions, deleteSession, canonicalDigest, sha256, writeFileAtomic } from "./session.js";
 export type { JournalIo, SessionState } from "./session.js";
-export { Workspace, normalizeRoot, same, isSecretPath } from "./workspace.js";
+export { Workspace, normalizeRoot, same, isSecretPath, withWorkspaceReferences } from "./workspace.js";
+export type { WorkspaceReference } from "./workspace.js";
 export { resolveEndpoint, DEFAULT_ENDPOINT } from "./config.js";
 export type { Endpoint } from "./config.js";
 export { ApprovalMemory } from "./approvals.js";
-export { viewChanges, undoChange } from "./changes.js";
+export { PermissionGate, PERMISSION_MODES, DEFAULT_PERMISSION_MODE, isPermissionMode, checkBoundaries, evaluate, ruleProblem, describeRule, ruleForApproval, RULE_TOOLS } from "./permissions.js";
+export type { PermissionMode, PermissionRule, ScopedRule, RuleEffect, RuleScope, Boundary, BoundaryCode, PolicyNote, GateResult } from "./permissions.js";
+export { PermissionRuleStore, RuleFileError } from "./permission-rules.js";
+export type { ProjectTrust } from "./permission-rules.js";
+export { browserAgentReply, browserAgentRequest, elementPickId } from "./browser-tools.js";
+export type { BrowserAgentReply, BrowserAgentRequest, BrowserApproval } from "./browser-tools.js";
+export { computerAgentReply, computerAgentRequest, parseComputerKey } from "./computer-tools.js";
+export type { ComputerAgentReply, ComputerAgentRequest, ComputerApproval, ComputerWindowInfo } from "./computer-tools.js";
+export { viewChange, viewChanges, renderChange, undoChange, canUndoChange, UndoError } from "./changes.js";
 export { safeText, safeLine } from "./display.js";
 export type { Output } from "./display.js";
 export { planPatchCall } from "./tools.js";
 export { currentDigest } from "./patch.js";
 export type { PlannedEdit } from "./patch.js";
+export { estimateTokens } from "./agent.js";
+export { SUBAGENT_LIMITS } from "./subagent.js";
+export { ORCHESTRATION_BOUNDS, ORCHESTRATION_DEFAULTS, describeOrchestration, normalizeOrchestration } from "./orchestrate-config.js";
+export type { OrchestrationLimits } from "./orchestrate-config.js";
+export { RewindError, forkSession, historyBlockReason, listTurns, planRewind, rewindSession } from "./rewind.js";
+export type { RewindCommand, RewindFile, RewindMode, RewindOutcome, RewindPlan, RewindTurn } from "./rewind.js";
+export type { SubagentRecord, SubtaskRecord, CheckpointRecord, RewindRecord } from "./session.js";
 export const DEFAULTS = { maxRequests: 20, timeoutMinutes: 15, commandTimeoutSeconds: 120 } as const;
+
+/**
+ * Named limit sets for one task. standard is the long-standing default.
+ * unlimited has no request count or time limit of its own: the user stopping
+ * it, the server refusing (key cap, quota), or the model finishing ends it.
+ */
+export type LimitProfile = NonNullable<SessionState["limits"]["profile"]>;
+export const LIMIT_PROFILES = ["standard", "extended", "unlimited"] as const satisfies readonly LimitProfile[];
+export const isLimitProfile = (value: unknown): value is LimitProfile => LIMIT_PROFILES.includes(value as LimitProfile);
+/** Stands for "no limit" in a saved task: far above any real count or duration, and still plain JSON. */
+export const NO_LIMIT = Number.MAX_SAFE_INTEGER;
+const PROFILE_LIMITS = {
+    standard: { maxRequests: DEFAULTS.maxRequests, timeoutMs: DEFAULTS.timeoutMinutes * 60_000 },
+    extended: { maxRequests: 200, timeoutMs: 120 * 60_000 },
+    unlimited: { maxRequests: NO_LIMIT, timeoutMs: NO_LIMIT },
+} as const satisfies Record<LimitProfile, { maxRequests: number; timeoutMs: number }>;
+/** A profile with the more specific numbers (a flag such as --max-requests) laid over it. */
+export const resolveLimits = (
+    profile: LimitProfile = "standard",
+    overrides: { maxRequests?: number; timeoutMs?: number; commandTimeoutMs?: number } = {},
+): SessionState["limits"] => ({
+    maxRequests: overrides.maxRequests ?? PROFILE_LIMITS[profile].maxRequests,
+    timeoutMs: overrides.timeoutMs ?? PROFILE_LIMITS[profile].timeoutMs,
+    commandTimeoutMs: overrides.commandTimeoutMs ?? DEFAULTS.commandTimeoutSeconds * 1000,
+    profile,
+});
+/** Goal mode: automatic continuations in a row before it stops and says so. */
+export const GOAL_MAX_CONTINUATIONS = 10;
 export const createSession = (
     home: string | null,
     options: {
@@ -32,6 +80,12 @@ export const createSession = (
         model: CatalogModel;
         readOnly: boolean;
         limits: SessionState["limits"];
+        goal?: SessionState["goal"];
+        orchestrate?: SessionState["orchestrate"];
+        sessionId?: string;
+        codeContinuation?: SessionState["codeContinuation"];
+        codeMode?: SessionState["codeMode"];
+        codePermission?: SessionState["codePermission"];
     },
     io?: JournalIo,
 ) =>
@@ -43,6 +97,9 @@ export const createSession = (
             endpointBase: options.endpoint.base,
             keyPrefix: options.keyPrefix,
             ...(options.keyIdentity ? { keyIdentity: options.keyIdentity } : {}),
+            ...(options.codeContinuation ? { codeContinuation: options.codeContinuation } : {}),
+            ...(options.codeMode ? { codeMode: options.codeMode } : {}),
+            ...(options.codePermission ? { codePermission: options.codePermission } : {}),
             readOnly: options.readOnly,
             model: {
                 requested: options.model.id,
@@ -52,8 +109,11 @@ export const createSession = (
                 maxOutputTokens: options.model.maxOutputTokens,
             },
             limits: options.limits,
+            ...(options.goal ? { goal: options.goal } : {}),
+            ...(options.orchestrate ? { orchestrate: options.orchestrate } : {}),
         },
         io,
+        options.sessionId,
     );
 export const validateSession = (journal: Journal, endpoint: Endpoint, keyPrefix: string, catalog?: CatalogModel[]) => {
     const state = journal.state;
@@ -68,7 +128,7 @@ export const validateSession = (journal: Journal, endpoint: Endpoint, keyPrefix:
     return root;
 };
 /** This session's own receipts, summed. Never the key's total before and after. */
-export const sessionCost = async (gateway: Gateway, journal: Journal) => {
+export const sessionCost = async (gateway: Gateway, journal: Journal, catalog?: CatalogModel[]) => {
     const generations = journal.state.generations;
     const byId = new Map<string, Receipt>();
     try {
@@ -99,17 +159,23 @@ export const sessionCost = async (gateway: Gateway, journal: Journal) => {
         .sort((x, y) => (x.lookupAt ?? "").localeCompare(y.lookupAt ?? ""))
         .slice(0, 40);
     for (const g of open) {
+        g.lookup = undefined;
         try {
             const found = await gateway.requestStatus(g.requestId ? { requestId: g.requestId } : { idempotencyKey: g.idempotencyKey });
-            g.lookup = found.found ? "found" : "not_found";
-            g.receipt = found.found ? found.receipt : null;
-            if (found.found) g.requestId = found.receipt.requestId;
+            if (!found.found || !g.requestId || found.receipt.requestId === g.requestId) {
+                g.lookup = found.found ? "found" : "not_found";
+                g.receipt = found.found ? found.receipt : null;
+                if (found.found) g.requestId = found.receipt.requestId;
+            }
         } catch {
             // left as it was: unknown
         }
         g.lookupAt = new Date().toISOString();
     }
     try {
+        if (catalog) for (const generation of generations) {
+            if (generation.state === "complete") generation.catalogProvider = catalogProviderFor(generation, catalog);
+        }
         journal.commit();
     } catch {
         // the totals below are still right for this process
@@ -125,20 +191,11 @@ export const sessionCost = async (gateway: Gateway, journal: Journal) => {
     return { requests: generations.length, charged, held, unknown };
 };
 
-export const readInstructions = (workspace: Workspace) => {
-    // Through the same real-path check as every read: an AGENTS.md that is a
-    // link out of the folder is not sent.
-    let path: string;
-    try {
-        const resolved = workspace.resolve("AGENTS.md", "read");
-        if (!resolved.exists || !statSync(resolved.absolute).isFile()) return null;
-        path = resolved.absolute;
-    } catch {
-        return null;
-    }
-    const text = readFileSync(path, "utf8");
-    return text.length > 32_000 ? `${text.slice(0, 32_000)}\n[AGENTS.md continues; read the file for the rest]` : text;
-};
+export { readProjectInstructions, readInstructions, NestedInstructions } from "./instructions.js";
+export { discoverExtensions, expandInvocation, slashEntries, ExtensionError } from "./extensions.js";
+export type { ExtensionRegistry, SlashEntry, Invocation } from "./extensions.js";
+export { collectImport, applyImport } from "./extension-import.js";
+export type { ImportItem, ImportResult } from "./extension-import.js";
 
 /**
  * After a crash: what the journal says was under way. A write whose end was
@@ -152,9 +209,62 @@ export const reconcile = (journal: Journal) => {
         change.state = view?.current === "as_written" ? "applied" : "failed";
         notes.push(`A write of ${change.path} was under way: it is ${change.state === "applied" ? "complete" : "not complete (the file was left as it is)"}.`);
     }
+    for (const record of (journal.state.background ?? []).filter((b) => b.state === "running")) {
+        // The CLI that started it is gone: it was ended with its task if that ended cleanly, otherwise it is no longer tracked.
+        record.state = "exited";
+        record.endReason ??= "task_ended";
+        record.endedAt ??= new Date().toISOString();
+        notes.push(`Background command ${record.handle} (${record.display.slice(0, 80)}) was running when the CLI stopped; it is no longer tracked.`);
+    }
+    for (const record of (journal.state.subagents ?? []).filter((r) => r.state === "running")) {
+        record.state = "unknown";
+        record.endedAt ??= new Date().toISOString();
+        notes.push(`Subagent ${record.id} (${record.kind}: ${record.task.slice(0, 80)}) was running when the CLI stopped; what it did is not known.`);
+    }
+    for (const record of (journal.state.subtasks ?? []).filter((r) => r.state === "queued" || r.state === "running" || r.state === "verifying")) {
+        record.state = "failed";
+        record.reason ??= "The CLI stopped while this subtask was under way.";
+        record.endedAt ??= new Date().toISOString();
+        notes.push(`Subtask ${record.id} (${record.title.slice(0, 80)}) was under way when the CLI stopped; its result is not known.`);
+    }
     for (const tool of journal.state.tools.filter((t) => t.state === "started")) {
         notes.push(`${tool.toolName} (${tool.toolCallId}) had started and its outcome is unknown; it was not run again.`);
     }
     if (notes.length) journal.commit();
     return notes;
 };
+
+/** A known exit code does not settle a command with an unconfirmed process tree. */
+export function hasUnconfirmedToolOutcome(tool: SessionState["tools"][number]): boolean {
+    const result = tool.output as { processTreeChecked?: boolean; residualProcesses?: number[] } | undefined;
+    return tool.state === "started" || result?.processTreeChecked === false || Boolean(result?.residualProcesses?.length);
+}
+
+// MCP servers and hooks (see extensions.ts): Desktop lists them, asks the person about the project's own, and starts them for a task.
+export { startLocalExtensions } from "./local-extensions.js";
+export type { LocalExtensionSetup } from "./local-extensions.js";
+export { loadMcpServers, describeMcpServer, userMcpFile, projectMcpFile } from "./mcp-config.js";
+export type { McpServerDef } from "./mcp-config.js";
+export type { McpServerStatus, McpState } from "./mcp-client.js";
+export { McpManager } from "./mcp-client.js";
+export { loadHooks, HOOK_EVENTS } from "./hooks.js";
+export type { HookDef, HookEvent } from "./hooks.js";
+export { openProjectTrust, mcpGate, hookGate } from "./project-trust.js";
+export type { ProjectTrust as ExtensionTrust } from "./project-trust.js";
+export { tomverseHome } from "./config.js";
+
+// Plugins (see plugin-manager.ts): Desktop lists, installs, updates and removes them; the main process confirms what was shown.
+export { PluginError } from "./plugin-fs.js";
+export { stagePlugin, commitStaged, discardStaged, removePlugin, listInstalledPlugins, describeOrigin } from "./plugin-manager.js";
+export type { StagedPlugin, StageResult, InstalledPlugin, PluginRequest, SourceOptions, StageOptions } from "./plugin-manager.js";
+export type { PluginInspection, PluginDiff, HookSummary, McpSummary } from "./plugin-inspect.js";
+export { addMarketplace, refreshMarketplace, removeMarketplace, listMarketplaces, classifyMarketplaceInput, marketplacePath } from "./plugin-marketplace.js";
+export type { Catalog, CatalogEntry, MarketplaceListing, MarketplaceInput, MarketplaceOptions } from "./plugin-marketplace.js";
+export { setPluginEnabled, setPluginEnabledIn, pluginApproved, setOfficialMarketplaceDeclined, pluginsDir } from "./plugin-store.js";
+export type { PluginOrigin } from "./plugin-store.js";
+export { forgetPluginTrust } from "./project-trust.js";
+export { readPluginState, rootKey as pluginFolderKey } from "./plugin-store.js";
+export { readMarketplace } from "./plugin-marketplace.js";
+export { maskUrl, isGithubHttps } from "./plugin-git.js";
+export type { GitAuth } from "./plugin-git.js";
+export { shownUrl } from "./plugin-download.js";

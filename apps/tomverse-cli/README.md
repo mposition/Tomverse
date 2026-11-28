@@ -76,7 +76,7 @@ use the npm package.
 
 Revoke or limit a key in Settings > API keys; the CLI has no key management.
 
-The CLI talks only to Tomverse's coding API, `https://tomverse.app/api/code/v1`,
+The CLI talks to Tomverse's coding API, `https://tomverse.app/api/code/v1`,
 unless you set another endpoint with `tomverse config set endpoint <url>` (or
 `TOMVERSE_ENDPOINT`). An endpoint saved before the CLI moved to the coding API
 ends in `/api/v1`; it is read as `/api/code/v1` on the same server.
@@ -84,7 +84,9 @@ It must be https; plain http is accepted only for a loopback development
 server after `tomverse config set allow-insecure-localhost true`. Redirects
 are never followed, so the key cannot be carried to another address. Nothing
 in a repository (AGENTS.md, scripts, model output) can change the endpoint, the
-key or any permission.
+key or any permission. The only other host the CLI itself ever contacts is a
+public web page you approved, through `web_fetch` (below); the key is never
+sent there.
 
 ## Use
 
@@ -96,20 +98,21 @@ tomverse exec --json "explain src/index.ts" --read-only
 
 | Command | What it does |
 |---|---|
-| `tomverse [task]` | Interactive session. `/help`, `/diff`, `/usage`, `/compact`, `/model`, `/effort [level]`, `/approvals [clear]`, `/exit` inside. |
+| `tomverse [task]` | Interactive session. `/help`, `/diff`, `/usage`, `/compact`, `/rewind`, `/fork [turn]`, `/model`, `/effort [level]`, `/approvals [clear]`, `/exit` inside. |
 | `tomverse exec <task> [--json]` | One task, no prompts. Stops with exit code 3 at the first action that needs approval. |
 | `tomverse resume <session> [task]` | Continue a saved session (and answer pending approvals in a terminal). |
 | `tomverse models` | Models this key can use. |
 | `tomverse usage [--session <id>]` | Key cap, committed and held credits; or one session's own receipts. |
 | `tomverse sessions list` / `sessions delete <id>` | Local sessions. Delete asks first (or `--yes`). |
+| `tomverse sessions fork <id> [--turn <n>]` | Copy a session's conversation (through turn n) into a new session; no file is touched. |
 | `tomverse diff [--session <id>]` | Changes this CLI made, and only those. |
 | `tomverse undo <change-id>` | Undo one of them (see below). |
 | `tomverse doctor` | Node, folder, key, API and recovery lookup checks. Makes no model request. |
 | `tomverse trust [folder]` | Allow the CLI to work in a folder (asked once in interactive mode). |
 | `tomverse config show/set/unset` | `endpoint`, `model`, `allow-insecure-localhost`, `command-env`. |
 
-Options: `--cwd`, `--model`, `--effort low|default|high`, `--read-only`, `--max-requests <n>`,
-`--timeout <minutes>`, `--command-timeout <seconds>`, `--no-persist`, `--json`.
+Options: `--cwd`, `--model`, `--effort default|<level>`, `--read-only`, `--limits <profile>`, `--goal`,
+`--max-requests <n>`, `--timeout <minutes>`, `--command-timeout <seconds>`, `--no-persist`, `--json`.
 
 ### Limits
 
@@ -119,9 +122,30 @@ Options: `--cwd`, `--model`, `--effort low|default|high`, `--read-only`, `--max-
 | Active time per task | 15 min (`--timeout`) | Time spent waiting for your approval does not count. |
 | Per command | 120 s (`--command-timeout`) | The model can ask for another value; the approval shows it. Maximum 30 min. |
 
+`--limits <profile>` picks the request and time limits of a task as a set; it is saved with the
+session and kept when you resume it. `--max-requests` and `--timeout` are more specific and win
+over the profile.
+
+| Profile | Requests per task | Active time per task |
+|---|---|---|
+| `standard` (default) | 20 | 15 min |
+| `extended` | 200 | 120 min |
+| `unlimited` | none | none |
+
+`unlimited` has no limit of its own: the task ends when you stop it, when the API refuses a request
+(a key credit limit or quota), or when the model is done. Approvals, the per-command time limit and
+the key's credit limit work as before.
+
+`--goal` turns on goal mode for the session. When the model says it is done, one more request of
+the same model answers whether the goal is verified (for code: a relevant check was run and its
+result shown). If not, its next action is sent to the model as your instruction and the task
+continues, at most 10 automatic continuations in a row; it then stops as "limit reached" and says
+the goal is not verified. Goal mode needs a session that can change files, counts every check as a
+request, and never answers an approval for you.
+
 Use `--effort high` for one task or `/effort low` to set the next interactive task.
 `default` uses the model's existing setting. The coding API advertises the
-available levels for each model. A task keeps its requested level across steps
+available levels for each model; `--effort` takes `default` or any level `tomverse models` lists. A task keeps its requested level across steps
 and resume. Each response records the applied level. A model that does not
 support the request uses its own default.
 
@@ -142,6 +166,15 @@ per task".
   of the folder, `..`, Windows UNC/device paths and alternate data streams are
   refused. Nothing is uploaded in bulk; only what the model asks to read, in
   bounded pieces.
+- **Images (`view_image`):** for a model whose catalogue entry says it takes
+  images, the model can look at a PNG, JPEG, WebP or GIF file of the folder (up
+  to 3 MB; the type is checked on the file's first bytes). It needs no approval
+  and follows the same rules as `read_file`: only inside the folder, never a
+  credential file. The image reaches the model as image data in the next request,
+  so it is part of what the transmission record counts; the newest three
+  images stay attached and older ones are replaced by a note. A model that does
+  not take images is not offered the tool, and an image you select as a
+  reference in Desktop is looked at the same way.
 - **Every change asks:** `apply_patch` shows the full diff of every file in the
   batch. Edits are exact text replacements; an edit whose text is not found
   exactly once is refused, not guessed. BOM and CRLF line endings are kept.
@@ -153,7 +186,10 @@ per task".
   shell line and the shell), the folder, the time limit and the environment
   variable names. **A command runs with your own operating-system permissions.
   The folder is where it starts, not a sandbox: it can change files elsewhere
-  and use the network.** A test script is a command like any other; the CLI
+  and use the network** unless you turn the OS sandbox on
+  (`tomverse config set sandbox workspace-write` or `read-only`; off by default.
+  What it does and does not enforce on each system, and the host list a sandboxed
+  command may reach, are in `docs/ops/desktop-sandbox.md`). A test script is a command like any other; the CLI
   does not judge commands as safe. Commands get a small environment (PATH,
   HOME, temp folders, locale, …) plus names you add with
   `tomverse config set command-env NAME1,NAME2`; Tomverse variables are never
@@ -163,6 +199,110 @@ per task".
   including descendants that moved to their own session — and anything that
   survived is reported. A program that detaches itself after the command has
   already finished is outside what the CLI can see.
+- **Permission rules and modes:** `tomverse permissions` keeps allow, ask and
+  deny rules for file edits (a path glob), commands (a command prefix) and web
+  hosts, in `<home>/permissions.json` (all projects) and
+  `<project>/.tomverse/permissions.json` (this project). Deny beats ask beats
+  allow, and the two files are merged. **A repository cannot widen what the
+  agent may do:** the project's deny and ask rules apply at once, but its allow
+  rules apply only after you run `tomverse permissions trust` (which shows them);
+  if the file changes, you are asked again. The file tools cannot touch either
+  file. Desktop has modes on top of the same rules: read only, ask (default),
+  auto review (a separate, charged model request judges each approval; three
+  denials in a row hand it back to you; anything it cannot parse is yours to
+  decide) and allow all (never saved; asks you to confirm). **Whatever the mode,
+  rule or model answer, these stay a person's call or are refused:** files
+  outside the work folder and credential files (refused); a command that sends
+  something out of the computer (git push, gh, curl, npm publish, a network
+  address in the command), names a credential file or the app's own data folder;
+  a web host nobody approved. This is a check of the command's text, not a
+  sandbox: a script that does these things on its own is not seen.
+- **Web pages (`web_fetch`):** the model can read a public web page, for
+  documentation. **Every site (host) is asked about first**, with the host and the
+  full address shown; `a` allows that host for the rest of this run, and a
+  redirect to another host is never followed without its own question. The
+  address is judged by fixed rules that no answer or model text changes: https
+  only, port 443, no user name or password, no IP address in any notation, no
+  `localhost`, single-label or internal name (`.local`, `.internal`, …); the
+  name is resolved by the CLI, every address it resolves to must be public (a
+  private, loopback, link-local or reserved one, also inside an IPv6 form, refuses
+  it), and the connection goes to the address that was checked. Every redirect
+  is judged again. The request is a plain GET with no cookies, no login and
+  nothing from your folder; the answer is limited to 2 MB and 20 seconds, only
+  text, HTML, JSON and XML are read, and the text given to the model is marked
+  as untrusted reference material, never instructions. The page text is part of
+  the next model request, and the transmission record lists the address. A
+  `--read-only` session has no `web_fetch` (it has no approvals at all, and the
+  address of a request can itself carry information out), and neither do
+  `exec` runs without a terminal.
+- **Web search (`web_search`), off by default:** `tomverse config set web-search on`
+  (Desktop: only where the server offers it) gives the model a search through
+  Tomverse's own web search (`POST /api/code/v1/web-search` on the same endpoint
+  and key). One call holds up to five independent queries and is charged to the
+  account like Chat's web search: one flat price per call, nothing when no search
+  could be served, listed with the key's receipts. **Every call is asked about**
+  with its queries shown (the permission mode and a `web_search` rule decide as for
+  a command), is sent once with its own Idempotency-Key and never again, and a
+  query that contains your key is refused. Results come back as titles, addresses
+  and short extracts marked as untrusted; the addresses are shown to you as the
+  tool's sources. Not in a `--read-only` or plan session, and not for subagents.
+- **Background commands:** a command can be approved to keep running after the call
+  returns (a dev server, a watcher). The approval says "background" and "no
+  time limit", and is bound to that: approving a foreground command never
+  approves the same one in the background (an `a` answer does not carry over
+  either). The model gets a handle and can read what it printed since its last
+  read (bounded, stdout and stderr together), check its state and stop it,
+  without a further approval, because only handles the task itself started
+  exist. At most four run at once. They belong to the task: when it ends, is
+  stopped or cancelled, or the CLI exits, every process tree still running is
+  ended the way a timed-out command is (a hard kill of the CLI itself cannot
+  run that cleanup). The session records them; a resumed session tells the
+  model that its earlier background commands are no longer running.
+- **Subagents (`delegate`):** the model can hand self-contained work to subagents that
+  each start with a fresh context of their own and give back only a written report,
+  so a wide search does not fill the main conversation. `explore` subagents can only
+  list, search and read (the same path rules as the model's own reads, `view_image`
+  when the model takes images); up to three run in parallel and need no approval.
+  A `worker` subagent can also change files and run commands, one at a time, and
+  every change and command is asked the same way, through the same prompt and the same
+  "always" answers, as the main agent's own; a worker is not offered in
+  `--read-only`, plan mode or `exec`. A subagent uses the model and reasoning effort of
+  the task (the CLI never picks a cheaper model on its own), cannot start subagents of
+  its own, and is stopped when the task is. Its requests are recorded in the session and
+  in `tomverse usage` like any other and count against the task's request limit: a
+  call that cannot fit what is left starts nothing, and a task starts at most 12. The
+  report is handed to the main agent as unverified information. The session keeps a
+  short record of each run (the task, kind, requests and how it ended, not its
+  conversation); a resumed session tells the model about a run that never reported back.
+- **Orchestration (off by default):** `tomverse config set orchestrate on` lets new sessions
+  split a large job into **subtasks** of one `delegate` call. It extends `delegate`: the
+  same runs, gateway, session records and request limit, no new price or billing path.
+  Turning it on, and each run, says "up to N subagents at once, M requests in all"
+  (`orchestrate-max-subagents`, default 3, 1 to 6; `orchestrate-max-requests`, default 90,
+  6 to 400). Each subtask has a `title`, a `goal`, and for a worker the exact `paths` it
+  may change, a `done_when` (completion criteria) and optionally a `check` command.
+  - **Write scopes.** A worker's `apply_patch` is refused outside its paths before anyone
+    is asked (resolved paths, never a model's say-so). Workers whose paths overlap run one
+    after the other in the order given; read-only subtasks have no scope. A worker with
+    paths has no `run_command`, because a command cannot be confined to a path; its
+    `check` is how it is tested. The plain `kind` + `tasks` form still works: a worker
+    then has the whole workspace and commands, so it runs alone among writers.
+  - **Verification.** A finished subtask with `done_when` is checked by a read-only
+    subagent that answers with a JSON verdict (`met`, `reason`); the model judges the
+    meaning, an invalid answer is asked for once more. A declared `check` runs through the
+    same approval path as any command, and a failing check cannot be overruled by the
+    verdict. A subtask that fails is handed back **once**, with the reason; then it is
+    reported failed. A check that was declined or could not run, or an outcome that is not
+    known, is never retried.
+  - **Budget and approvals.** The subtasks share `orchestrate-max-requests` (and what is
+    left of the task's own limit), each with an equal slice that its work, check and retry
+    draw from; subtasks that do not fit are rejected. A subtask runs on the session's
+    model (an agent definition's model only with `agent-models` on). Their approval
+    questions are asked one at a time and say which subagent asks. Read-only and plan
+    sessions get no worker subtasks and no `check`.
+  - **Result.** The main agent gets one summary per subtask: status (`success`, `failed`,
+    `rejected`, `cancelled`), files changed, the verification verdict and a short report.
+    Stopping the task stops every run; one failing subtask does not stop the others.
 - `argv` (a program and its arguments) runs without a shell, so what you
   approve is exactly what runs. On Windows, batch programs such as `npm`/`npx`
   cannot run that way (cmd.exe would re-read the arguments); they run as a
@@ -181,13 +321,191 @@ per task".
   makes everything ask again. The session records which approvals came from
   an earlier `a`.
 - `--read-only` gives the model no patch or command tool at all.
-- Without a terminal (`exec`, pipes, CI) nothing can be approved: the run stops
-  with exit code 3 and the pending actions in the output. Review them with
-  `tomverse resume <session>` in a terminal. There is no flag that approves
-  everything.
-- `AGENTS.md` at the folder root is given to the model as project
-  information. It cannot grant permissions, and the CLI never runs commands or
+- Without a terminal (`exec`, pipes, CI) nobody can be asked, and the rules still
+  apply: a deny rule, a boundary that refuses (a credential file, a path outside
+  the folder) and a mode that refuses are answered as refusals, not held, and an
+  allow rule runs what it names. What needs a person (no rule names it, a command
+  that leaves the computer, a web host nobody approved, an MCP tool no rule names)
+  stops the run with exit code 3 and the pending actions in the output; if one
+  call of a batch needs a person, the whole batch waits and is decided again when
+  you review it with `tomverse resume <session>` in a terminal. There is no flag
+  that approves everything.
+- **Project instructions:** the folder's `AGENTS.md`, its `CLAUDE.md` (a whole-line
+  `@file` in it pulls that file in, inside the folder only, and each file is
+  given once) and the unconditional rules of `.claude/rules/*.md` (a rule whose
+  front matter names `paths` is left out) are given to the model as project
+  information, at most 32,000 characters in all; a cut is marked. When the
+  model first reads or changes a file in a subfolder, that subfolder's own
+  `AGENTS.md` / `CLAUDE.md` come with the result of that read or change, once
+  per folder (again after a compaction), at most 48,000 characters in a task. Files go through the same path check as
+  every read, so a link out of the folder or a credential file is never sent.
+  Instructions cannot grant permissions, and the CLI never runs commands or
   install hooks because a file says so.
+- **Skills, commands and agent definitions** written for Claude Code and Codex are read where they
+  are: `SKILL.md` folders in `.claude/skills` and `.agents/skills` of the project and of your home
+  folder, commands in `.claude/commands` (a subfolder becomes `folder:name`) and Codex custom prompts
+  in `~/.codex/prompts` (`/prompts:name`), agents in `.claude/agents/*.md` and `.codex/agents/*.toml`.
+  The system prompt lists each skill by name and description only; the model reads one with
+  `load_skill` (and `load_skill` with `file` for a file of its folder). `/name arguments` runs a skill
+  or command yourself, with the arguments replaced by the rules of the tool the file is written for
+  (`/skills` lists what was found and where). Their text is guidance: `allowed-tools`, hooks,
+  permission modes, sandbox settings and the like are not applied and are listed as such, and
+  every change and command is still asked. An agent definition becomes a `delegate` type (`agent`
+  instead of `kind`) that adds its instructions to an explore or worker run; its tool list can only
+  take tools away from that type. The model a definition names is not used unless
+  `tomverse config set agent-models on` allows it (it is a billing choice), and a name that is not in
+  the catalog always falls back to the task's model, with a note. Not read: `!`command`` injection
+  and `@file` in a command (nothing runs because a file says so), nested `.claude/skills` of
+  subfolders, plugin and enterprise locations.
+- **Project memory:** the model can keep a short note about the project
+  (`remember_fact`: how the tests run, a decision, a trap) without asking you.
+  Notes are stored in `~/.tomverse/memory/` (or `$TOMVERSE_HOME`), next to the
+  sessions and outside the project, one file per folder, and the file tools
+  never touch that folder. A note is one line of at most 300 characters; at
+  most 40 notes and 8,000 characters are kept, the oldest dropped first; and
+  anything that looks like a key, token or password is refused, not stored. At
+  the start of each task the notes are given to the model after the
+  instructions, marked as unchecked notes that cannot grant anything. A
+  `--read-only` session reads them but cannot add one. `tomverse memory show`
+  lists this folder's notes and `tomverse memory clear` deletes them;
+  `tomverse config set memory off` stops all reading and writing.
+
+### What each permission mode decides
+
+The mode and the rules answer first; only what they leave to a person reaches the
+prompt. Rows are what asks for an approval; `allow`, `review`, `person` and `refuse` are who decides
+when no rule names the action (a deny rule refuses in every mode, an ask rule always
+asks, an allow rule skips the question except where noted).
+
+| Request | read only | ask (default) | auto review | allow all |
+|---|---|---|---|---|
+| File change (`apply_patch`) | refuse | person | review | allow |
+| Command (`run_command`) | refuse | person | review | allow |
+| Web page (`web_fetch`) | person | person | person | person (a rule naming the host skips it) |
+| Web search (`web_search`, charged to the account) | person | person | review | allow |
+| Opening a public site in the browser tab (`browser_navigate`, Desktop, when the person allowed public sites) | person | person | person | person (no allow rule skips it) |
+| Click or typing in the browser tab | refuse | person | person | person |
+| MCP tool (`mcp__server__tool`) | refuse | person | person | person (a rule naming the tool or server skips it) |
+| `commit_changes`, `publish_changes` (Desktop) | refuse before the host is asked | the host's card | the host's card | the host's card |
+| A subagent worker's change or command | refuse | person | review | allow |
+
+- **Never decided by a mode, a rule, a hook or a reviewer:** a push, a pull request,
+  a command that sends something out of the computer, a credential file, a path
+  outside the folder. `commit_changes` and `publish_changes` do not pass through the
+  permission gate at all: the host opens its own card for every call (a push and a
+  pull request every time, a commit too), the model cannot answer it, and only the
+  person's answer on that card lets it run.
+- **How a command is read, and what that cannot see.** "A command that sends
+  something out" is found by reading the command line: programs such as `curl`,
+  `ssh` and `gh`, subcommands such as `git push` and `npm publish` wherever they
+  stand after their program, and a network address in the text. A line that hides
+  what it runs is left to a person too: a program name or a subcommand that is a
+  variable or a substitution, `eval` and `iex`, a shell started on built or encoded
+  text, `git -c ...`. This is a reading of text, not enforcement. It does not see
+  what a script file, a package script (`npm run deploy`) or a git alias set in the
+  repository does once it runs. The command sandbox is what limits a command that
+  is already running, and on Windows the sandbox does not limit the network, so
+  allow all on Windows should be used only with code you trust. Allow all and
+  auto review do not require the sandbox: the owner decided on 2026-11-26 to keep
+  this reading as a best-effort check with its limits stated here, instead of
+  tying those modes to a sandbox that enforces the network.
+- **MCP tools** are other programs that can send what they are given anywhere, so
+  allow all and auto review treat them like a web host: only a rule that names the
+  tool (`mcp__server__tool`, as the model sees the name) or its server (`mcp__server__*`, or
+  `mcp__server` for a server whose name holds no `__`) runs one without
+  asking. A rule is compared with the server and tool the call is for, not with
+  text: a server whose name holds `__` is opened as a whole only by `mcp__<name>__*`,
+  and a rule for one tool never reaches another server. Deny and ask rules read more
+  broadly (the tool's own name, anything that starts with the server's name). An "always" answer is remembered for this CLI process
+  and that exact server definition only. Even when a rule allowed the call, it runs
+  only if the server definition connected now is the one the approval was made for;
+  a project's own server also needs your approval of its definition before it is
+  started at all.
+- **Browser clicks and typing** follow the mode as above. A
+  password, one-time-code or card field is refused by the browser host itself, in
+  every mode and whatever was allowed. "Allow for this run" is offered for a loopback
+  page only; on a public site each click or typing is asked on its own.
+- **Opening a public site in the browser tab** (only where the host turned that on) is
+  asked per site (host), like `web_fetch`, in every mode: the address must be
+  `https` on the standard port with no IP address or credentials, and an answer is
+  remembered for this run only, apart from `web_fetch`'s and never saved as a rule. A
+  `web_fetch` allow rule does not open the browser; a deny or ask rule for the host does.
+- **Hooks** can block a call in every mode (a PreToolUse hook that exits 2 answers
+  before the gate is asked). Their "allow" output is ignored in every mode: it
+  never lifts read only, a rule, a boundary or the question.
+- **Subagent workers** ask through the same gate as the main agent, so read only
+  refuses their changes and commands, and a rule or a boundary applies to them too.
+- `run_command` is described to the model as not sandboxed unless the host says it runs
+  commands in a sandbox it enforces.
+
+### Window tools (a host's choice)
+
+A host that can show the person one window of their desktop (Tomverse Desktop on Windows) may give the runner the `computer_*` tools through the `computerAgent` option (`src/computer-tools.ts`). They exist only for a model that sees pictures, in a session that is not read-only or plan and that has someone to approve: `computer_screenshot` (the chosen window only; no approval; the picture is sent to the model once and never saved in the session), and `computer_click`, `computer_type`, `computer_key`, `computer_scroll`, each approved by a person in every permission mode (read-only refuses; no allow rule applies; "allow for this run" covers the window). The key list is fixed and has no Windows key, Alt or system shortcut; text that `redactText` would change is refused. The host decides what a window is and re-checks everything before it touches one. The `tomverse` command line has no such host.
+
+## Remote projects over SSH
+
+The Tomverse API agent can work on a folder of another computer that you reach with SSH (Tomverse Desktop opens one from **Settings > Execution and limits > Remote project (SSH)**, off by default; the CLI itself has no command for it). Code: `src/remote-target.ts` (names, quoting, ssh arguments, failure kinds), `remote-ssh.ts` (starting ssh), `remote-scripts.ts` (the shell that runs on the other computer), `remote-workspace.ts` (every operation), `remote-tools.ts` (the tools), `remote-changes.ts` (undo).
+
+**Where the agent runs.** Two designs were possible: (a) the agent runs on this computer and only its file and command operations go over SSH, or (b) a runtime runs on the remote machine and this computer shows the screen and takes the approvals. (a) is built, because the safety rules mean the same thing in it without moving anything: the Tomverse key, the permission modes and rules, the approval cards, the journal with its backups and the undo all stay on this computer, and the remote machine needs nothing installed (no Node, no CLI, no key of ours, no open port): a POSIX shell with the usual tools. (b) would put the key on the other machine, need a runtime installed and updated there, and make every approval a message across the network that has to be authenticated.
+
+**How it connects.** Each operation is one run of **your own `ssh`** (`BatchMode=yes`, `StrictHostKeyChecking=yes`, `UpdateHostKeys=no`, `-T`, `ConnectTimeout`, `ServerAliveInterval`, no agent, X11 or other forwarding, `PermitLocalCommand=no`, `RemoteCommand=none`), with your `~/.ssh/config`, ssh-agent and known_hosts; nothing is kept between operations, so Windows' OpenSSH (which has no connection sharing) works the same and a drop costs one operation. The CLI never receives, asks for or stores a key, a password or a passphrase. A key that needs a passphrase has to be in ssh-agent: connect once in a terminal (`ssh <target>`), add it, try again. An unknown host is never accepted: the strict host key check is given on the command line, which wins over `~/.ssh/config`, so `StrictHostKeyChecking accept-new` or `no` there cannot make the app connect to an unknown host or write to `known_hosts` (`UpdateHostKeys=no`); check the host key in a terminal first (`ssh <target>`), which is also the only way a host gets into `known_hosts`; a changed host key is reported as such. The environment ssh gets is the CLI's minimal command environment plus `SSH_AUTH_SOCK`/`SSH_AGENT_PID` and the home folder variables; no Tomverse variable, key or token.
+
+**What is validated.** The target (a Host name or `user@host`, never starting with `-`, no spaces, control or shell characters; an optional port 1-65535) and the folder (absolute, letters, digits, space and `. _ - @ % + = : , ~ /`, no `..`, not `/`, not inside `.ssh`, `.aws`, `.gnupg`, `.git` or the CLI's own folder, not the remote home folder) are checked before ssh is given anything, again where its arguments are built, and in the main process of Desktop. ssh gets an argument array and one command string; that string is `sh -c '<script>' sh '<arg>' ...`, and `shellQuote` in `remote-target.ts` is the only place that quotes text for the remote shell (single quotes, `'` as `'\''`; a unit test reads the result back through a real shell for awkward values). Every value the model or the person chose is a quoted argument of the script, never part of its text.
+
+**The same boundaries as a local folder, checked on the remote machine.** A path is made lexical-absolute here and then resolved **there** with the links followed (`readlink`/`cd -P`): it must be inside the project folder, or it is refused (`../x`, an absolute path elsewhere, a link out, a link swapped in later). Credential files (`.env*`, keys, `.git`, `.aws`, ... the same list as local) are never read or changed, judged by the real name after links, so an ordinary name that points at `.env` is refused. A write through a link is refused. Listing and search leave out every link, and every name that goes through a link, even when git lists it, so a search never reads a file outside the project or a credential file by way of an ordinary-looking link. A write is a temporary file in the same folder (`mktemp`), a length check, and one `mv`. A create does not use `mv`: it puts the finished file in place with a hard link, which fails if the name is taken, and where the file system has no hard links it creates the file with one exclusive open (`set -C`), so a file that appeared meanwhile is never replaced; a target that did not get all its content is removed again. A dropped connection or a short upload leaves the old file and no temporary one. An update only goes ahead if the file still has the identity (device, inode, mode) it had when it was approved and its folder is the one approved; otherwise nothing is written (`changed`). The identity is checked just before the `mv`; a change in the instant between that check and the rename cannot be excluded with `sh`, and a change made in place that keeps the inode and mode is only caught by the content check made earlier, before the write. A command runs in a folder checked the same way, with its input closed; a second process on the remote machine waits on the connection's own input and ends the command's process group when the connection goes away, a task is stopped or a command times out. Backups of both images of every change are kept in the local journal; undo checks the remote file against them first.
+
+**The tools.** `list_files` (git's list in a repository, else a walk that skips generated folders), `search_text` (`grep -E`/`-F` on the listed files; there is no ripgrep there), `read_file`, `view_image`, `apply_patch` and `run_command` have the same names and inputs, the same approvals (the card names the machine and the remote folder), the same journal records and permission decisions as the local ones. Commands are `argv` or a line for `sh` (not your login shell) by default, with the PATH of a non-interactive ssh session; a project can be set to **`bash -lc`** (Settings > Execution and limits > Remote project (SSH) > the open project, applied to the next task, per project and stored with the Desktop's settings, never in the project's own files) so the profile of your account there is read first and the tools it puts on `PATH` are found. Only the agent's commands use it (every file read, search and write is the same `sh -c` script as before), anything the profile prints is part of that command's output, a machine without bash refuses before anything starts, and the arguments and the command line arrive exactly as written in both modes (tested with quotes, `$`, backticks, globs and non-ASCII). They are **not sandboxed** (the OS sandbox is local; the approval says so and a schedule counts a remote project as having none). Not available: background commands, orchestration, the git tools, `read_terminal`, project-level MCP servers and hooks (they live in a folder of this computer). The remote `AGENTS.md`/`CLAUDE.md` is given to the model; subfolder instructions, `@` imports and `.claude/rules` are not.
+
+**When the connection goes.** An ssh-level failure of any operation (reset, timeout, key no longer usable, host unreachable) marks the project lost: the model is told once ("stop and tell the person"), every further file or command call and every approval for them is refused with that reason without starting ssh, a command that was running is reported with an **unknown outcome** and is never run again on its own, and a write whose answer did not come is `unconfirmed`. Reconnecting (`RemoteWorkspace.connect`; the Reconnect button in Desktop) looks at the folder again and lifts the block; the task is continued from where it was. Time limits: connect 40 s (ssh `ConnectTimeout` 15 s), reads and resolves 30 s, writes 60 s and more for large files, list and search 40 s, commands the plan's timeout.
+
+**Remote machine requirements.** Linux or macOS (BSD) with `sh`, `cat`, `mv`, `rm`, `mkdir`, `chmod`, `find`, `wc`, `readlink`, `mktemp`, `stat` (GNU `-c` or BSD `-f`), `grep`, `xargs`, `tr`, `cut`, `sleep`; `git` is used for listing when there is a repository. Tested under bash and dash. A missing tool is reported by name.
+
+**Tests, and what they do not prove.** `tests/remote-*.test.ts` run every operation against `tests/fake-ssh.mjs`, a stand-in for `ssh` that takes the same arguments (and refuses a call without `BatchMode=yes`), makes the remote command string the input of a local `sh` as a login shell would read it, and uses folders of this computer as the remote machine (links are made with the local `ln -s`; a control file makes the next call reset or drop the connection while a command runs; special destination names produce the messages ssh prints for a refused key, an unknown or changed host key, an unknown name or a refused connection). The scripts also run under `dash`. **None of this was checked against a real SSH server or a real OpenSSH client**, so the exact wording of ssh's errors in a given version, a login shell that is not POSIX (fish, nushell), `sshd` limits (`MaxStartups`, `MaxSessions`), a machine with a restricted shell or a forced command, and a ProxyJump chain are untested. On Windows the command string (several lines, with double quotes) is handed to `ssh.exe` as one argument; that is the standard command-line quoting and the fake never exercises it, so step 4 below is also the check that Windows' OpenSSH passes it through unchanged.
+
+**Checking it against a real server** (from this computer's terminal; the machine needs a folder you can write to):
+
+1. `ssh -o BatchMode=yes <target> true` must print nothing and succeed. If it asks for a passphrase or says `Host key verification failed`, fix that in the terminal first (the app will refuse in the same way).
+2. In Desktop: Settings > Execution and limits > turn on **Allow remote projects over SSH**; enter the target and a folder with a few files; **Test connection** shows the real folder path. Try a folder that does not exist, and `/`, and your home folder: each is refused with its own message.
+3. **Open as project** from the Code start screen: the status above the composer reads **Connected**; with the command sandbox on it also says remote commands run outside it. The terminal button, Git panel, review and attachment menu are absent.
+4. Ask: "read src/main.ts and add a comment on the first line". The patch card shows **On a remote computer** and the target; the file on the server does not change until you press Allow once; afterwards it has the change and the ssh login shell's `ls -la` shows no `.tomverse-*` leftovers.
+5. Ask it to run `pwd` and `sleep 120`: the first prints the remote folder; press Stop during the second and, on the server, `pgrep -a sleep` shows nothing within a few seconds.
+6. During a running command, disconnect the network (or `kill` the sshd session). The status turns to **Connection lost**; ask for anything else: it is refused; restore the network, press **Reconnect**, continue the task.
+7. In the change list of the finished task open a change and undo it; edit the same file on the server first and the undo is refused ("changed after the Code edit").
+
+## MCP servers and hooks
+
+Both run local commands from configuration files, so each project-defined one waits for your approval.
+
+**MCP servers.** The agent can use tools of MCP servers, several at once, as `mcp__<server>__<tool>`. Definitions use the Claude Code format, in two places:
+
+- yours: `mcp.json` in the CLI folder (`TOMVERSE_HOME`, default `~/.tomverse`). Trusted, because you wrote it.
+- the project's: `.mcp.json` at the folder root. Part of the repository, so **nothing in it runs until you approve that server** (`tomverse mcp approve <name>`, at a terminal; a command the agent runs has no terminal, so it cannot approve itself). The approval is bound to a hash of the whole definition: a changed command, argument, address or header asks again. If a project server has the same name as one of yours, yours is used.
+
+```json
+{ "mcpServers": {
+  "files":  { "command": "npx", "args": ["-y", "some-mcp-server"], "env": { "API_KEY": "${API_KEY}" } },
+  "remote": { "type": "http", "url": "https://example.com/mcp", "headers": { "Authorization": "Bearer ${TOKEN}" } }
+} }
+```
+
+Supported: stdio and streamable HTTP, with `${VAR}` and `${VAR:-default}` expanded in `command`, `args`, `env`, `url` and `headers` (`${CLAUDE_PROJECT_DIR}` is the folder; names starting with `TOMVERSE_` or `ELECTRON_`, and `NODE_OPTIONS`, are never read). Not supported: `sse`, `ws`, and servers that need an OAuth sign-in (listed as unsupported; no credential is stored). Servers start together when a session starts (30 s each, `MCP_TIMEOUT` in ms to change it); one that fails or hangs is reported and the rest carry on. A tool call has 120 s (`MCP_TOOL_TIMEOUT`, or `timeout` in the server's entry). Servers end with the session. A stdio server gets the `env` of its own definition and a small base environment (PATH, HOME and the like), never your Tomverse key or session.
+
+Every call is asked about, with the server, the tool and the arguments; "always" is remembered like other approvals, per tool and per server definition, for the process only. The answer comes back marked as untrusted data from another program. Read-only and plan sessions get no MCP tools and start no servers. `tomverse mcp [list|approve|enable|disable] [name]` shows and changes this for the folder; a disabled server is not started (keeps tool lists out of the context). `tomverse config set mcp off` turns the whole thing off.
+
+**Hooks.** Six events: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, `PreCompact`. The file format is Claude Code's (`hooks` > event > `[{ matcher, hooks: [{ type: "command", command, timeout }] }]`, matchers as in its documentation; Claude Code's tool names such as `Bash` also match `run_command`). Read from: yours — `hooks.json` in the CLI folder and Claude Code's user `settings.json` (`CLAUDE_CONFIG_DIR` or `~/.claude`); the project's — `.claude/settings.json`, `.claude/settings.local.json` and Codex's `.codex/hooks.json`, which wait for approval by hash (`tomverse hooks approve <n>`) like project servers. A hook gets the event as JSON on stdin and runs in your shell (PowerShell on Windows) in the folder, with `CLAUDE_PROJECT_DIR` and the small command environment. Exit 0 with plain text adds context (`SessionStart`, `UserPromptSubmit`, and instructions for `PreCompact`); exit 2 blocks (a tool call, a prompt, a compaction; on `Stop` it sends the task on with the message, three times at most); JSON output with `decision: "block"`, `hookSpecificOutput.permissionDecision: "deny"` or `additionalContext` works as documented. Any other exit code or a timeout is reported and does not block. Timeout 60 s (30 s for `UserPromptSubmit`), `timeout` in seconds in the entry, 600 at most; a slow hook is ended with its processes.
+
+What a hook cannot do: **widen anything.** "allow" output (`permissionDecision: "allow"`, `decision: "approve"`) is ignored: the approval question, the read-only and plan modes and every path and credential check decide as if the hook were not there. A PreToolUse hook that blocks a call that needs approval answers it before you are asked. Differences from Claude Code: only `command` hooks load (`http`, `prompt`, `agent`, `mcp_tool` do not); `updatedInput` and `continue: false` are ignored (except that `continue: false` stops a prompt); `async` hooks run synchronously; subagent workers' tool calls run PreToolUse hooks only for the ones that need approval and no PostToolUse hooks; the other 20-odd Claude Code events do not exist.
+
+An approval covers the command line as written, not the files it starts: a project hook or server whose command runs a script in the repository (`node .claude/hooks/check.js`) runs whatever that file says now. Approve those only for repositories you trust.
+
+## Plugins and marketplaces
+
+A plugin bundles skills, commands, agent definitions, hooks and MCP servers in one folder (Claude Code's plugin format: `.claude-plugin/plugin.json` or none, `skills/`, `commands/`, `agents/`, `hooks/hooks.json`, `.mcp.json`, and the places the manifest names; a Codex plugin's `.codex-plugin/plugin.json`, `skills/`, `mcp.json` and `hooks/hooks.json` are read the same way). Plugins live in `<CLI folder>/plugins/`.
+
+- `tomverse plugin install <folder | name@marketplace>` copies the plugin (no link out of its folder, at most 5000 files / 50 MB, `.git` left out) into a staging folder and shows what it holds: the number of skills, commands and agents, and **every hook command and MCP server command in full**. Only a yes at a terminal installs it; a command run by the agent has no terminal and installs nothing. `update` shows the same plus what changed (added, removed and changed hooks and servers); it is always your command, there is no automatic update. `remove` deletes the plugin's own folder and its records (switches, approvals) and nothing else. `enable`/`disable <name> [here]` switch it for everything or for the current folder; a plugin that is off brings nothing.
+- Its skills, commands and agents join the lists as `plugin:name` (an agent in `agents/review/security.md` is `plugin:review:security`); `${CLAUDE_PLUGIN_ROOT}` in their text is the installed folder. They are guidance, as always: nothing in them grants anything.
+- Its **hooks and MCP servers are third-party code and never start on their own.** They are listed with their origin by `tomverse hooks list` / `tomverse mcp list`, wait for `approve` at a terminal, and the approval is bound to the plugin's name **and the digest of all its files**: any changed file (a script as well as a definition) asks again, and an update that changes a file leaves them unapproved. `${CLAUDE_PLUGIN_ROOT}` is expanded in their commands and passed to them as an environment variable. Not supported, and listed as not used: `userConfig` (a hook or server that reads `${user_config.*}` is not loaded), language servers, monitors, output styles, `bin/`, MCP bundles (`.mcpb`).
+- A **marketplace** is a catalog of plugins (`.claude-plugin/marketplace.json`, or Codex's `.agents/plugins/marketplace.json`). The terminal adds none itself (Tomverse Desktop carries its own official one). `tomverse plugin marketplace add <folder | git address> [branch or tag]` copies a folder, or downloads **one commit** with your own git (no global git configuration, no credential helper and no prompt, so a private repository is out of reach; no hooks, no submodules, no links) and records the commit. Adding runs nothing from it. Catalog sources understood: a path inside the marketplace (`./plugins/x`, or a bare name under `metadata.pluginRoot`), `github`, `url`, `git-subdir` (with `ref`/`sha`) and Codex's `local`; `npm` and `zip` sources are read from a catalog but installed only by Tomverse Desktop (it unpacks them itself and never runs npm); `archive` and `command` sources are listed as not supported. `marketplace update` downloads again; `marketplace remove` forgets it and leaves installed plugins alone.
 
 ## Sessions, interruption and recovery
 
@@ -270,6 +588,28 @@ first request is pinned for the rest of the session (including compaction and
 resume). Native protocol features (signed thinking, encrypted reasoning state)
 are not used by this CLI.
 
+### Rewind and fork
+
+Every user message of a session is a turn: a task's prompt, or a message you sent while it ran.
+The session records where the conversation and its list of file changes stood just before each one.
+
+- `/rewind` (interactive) lists the turns and asks which one to go back to. It then shows what
+  would be put back, newest change first, which files would conflict, and which commands ran in
+  that part (their effects cannot be undone), and asks what to rewind: `b` files and conversation,
+  `f` files only, `c` conversation only. A file is put back only if it is still exactly what the
+  session wrote, the same check as `tomverse undo`; a file you edited since is left alone and
+  reported as a conflict, and so is an earlier change to the same file that waits behind it. The
+  message that was taken out is shown so you can edit it and send it again. The model is told
+  what was and was not put back, so its next request does not rest on history that no longer
+  matches the folder. A rewind is recorded in the session. It is refused while a task runs,
+  waits for an approval, or has an unknown outcome, and the conversation cannot be cut at a turn
+  that a compaction folded into a summary (the files still can).
+- `/fork [n]` and `tomverse sessions fork <session> [--turn <n>]` copy the conversation through
+  turn `n` (all of it by default) into a new session and touch no file. The original stays as it
+  was; the copy starts with no changes of the original to undo, no requests and no approvals, and
+  continues with `tomverse resume <new id>`. Sessions saved by an older CLI have no turns and
+  cannot be rewound or forked.
+
 ## Support
 
 - Windows (PowerShell), macOS (zsh) and Linux (bash), with Node.js 22 or
@@ -277,8 +617,8 @@ are not used by this CLI.
   tested on every one of these systems before it is published.
 - Terminal text is English; Korean and other Unicode input, file names and
   output work.
-- Not in this version: MCP, plugins or skills, image input, a code index or
-  LSP, parallel agents or worktrees, IDE or desktop apps, background agents.
+- Not in this version: MCP, plugins or skills, a code index or
+  LSP, worktrees, IDE or desktop apps, background agents.
 
 ## Update and roll back
 

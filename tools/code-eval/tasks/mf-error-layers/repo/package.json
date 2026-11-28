@@ -1,0 +1,8 @@
+{
+  "name": "mf-error-layers",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

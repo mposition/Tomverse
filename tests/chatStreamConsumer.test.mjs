@@ -260,11 +260,22 @@ test("a request whose server-side extraction runs long still succeeds", async ()
 
 /* ------------------------------------------------------ the timeouts ----- */
 
+/** The server's first-token keepalive, every 20s, until `ms` or an abort. */
+const keepAlive = async (p, ms, state = "awaiting_first_token") => {
+  for (let elapsed = 20_000; elapsed <= ms; elapsed += 20_000) {
+    if (p.handle.aborted) return;
+    p.advance(20_000);
+    p.stream.push(buildStreamKeepaliveChunk({ state, elapsedMs: elapsed, intervalMs: 20_000 }));
+    await flush();
+  }
+};
+
 test("the first-response deadline ends the turn as a timeout, not a cancellation", async () => {
   const p = panel();
   p.liveness.noteHeaders();
 
-  p.advance(600_001);
+  // The server holds the connection open for a provider that never answers.
+  await keepAlive(p, 620_000);
   await assert.rejects(p.settled, { name: "AbortError" });
 
   assert.equal(p.expiries.length, 1);
@@ -324,6 +335,72 @@ test("keepalives do not buy a stalled provider more time", async () => {
   assert.ok(p.expiries[0].elapsedMs <= 620_000);
 });
 
+/* ------------------------------------------- after the first token ------ */
+
+test("a long tool input after a preamble survives on the server's post-token keepalives", async () => {
+  // The reported failure: a preamble, then two minutes of a document
+  // specification written into a tool call. Only visible text used to count,
+  // so this was ended as CHAT_STREAM_IDLE_TIMEOUT while the provider worked.
+  const p = panel();
+  p.liveness.noteHeaders();
+  p.advance(3_000);
+  p.stream.push("문서를 만들어 드릴게요.");
+  await flush();
+  await keepAlive(p, 180_000, "provider_active");
+  assert.deepEqual(p.expiries, []);
+  p.stream.push(" 완성했습니다.");
+  await flush();
+  p.stream.close();
+
+  const result = await p.settled;
+  assert.equal(result.displayText, "문서를 만들어 드릴게요. 완성했습니다.");
+  assert.deepEqual(p.expiries, []);
+});
+
+test("a server that goes silent after the first token is still ended as idle", async () => {
+  const p = panel();
+  p.liveness.noteHeaders();
+  p.stream.push("Half an answer");
+  await flush();
+  await keepAlive(p, 60_000, "provider_active");
+  // The provider stopped producing parts, so the server stopped writing.
+  p.advance(90_001);
+  await assert.rejects(p.settled, { name: "AbortError" });
+  assert.equal(p.expiries[0].cause, "stream_idle_timeout");
+  assert.equal(p.partialText(), "Half an answer");
+});
+
+test("each keepalive is reported once, however many chunks follow it", async () => {
+  const stream = scriptedStream();
+  const calls = { keepalive: [], visible: 0, signal: 0 };
+  const run = consumeChatStream({
+    reader: stream.reader,
+    liveness: {
+      noteKeepalive: (intervalMs) => calls.keepalive.push(intervalMs),
+      noteVisibleChunk: () => { calls.visible += 1; },
+      noteServerSignal: () => { calls.signal += 1; },
+    },
+    onProgress: () => undefined,
+  });
+  stream.push(buildStreamKeepaliveChunk({ state: "awaiting_first_token", elapsedMs: 1, intervalMs: 20_000 }));
+  await flush();
+  stream.push("One. ");
+  await flush();
+  stream.push("Two. ");
+  await flush();
+  stream.push(buildRoutingRetryChunk("claude-opus-4-8"));
+  await flush();
+  stream.push(buildStreamKeepaliveChunk({ state: "provider_active", elapsedMs: 2 }));
+  await flush();
+  stream.close();
+  await run;
+
+  assert.deepEqual(calls.keepalive, [20_000, undefined]);
+  assert.equal(calls.visible, 2);
+  // The routing notice is the server writing, not progress.
+  assert.equal(calls.signal, 1);
+});
+
 /* -------------------------------------------------------- a user stop ---- */
 
 test("stopping this response keeps the cancelled state", async () => {
@@ -355,7 +432,8 @@ test("stopping all responses keeps the cancelled state", async () => {
 test("a stop that beats the watchdog is still reported as a stop", async () => {
   const p = panel();
   p.liveness.noteHeaders();
-  p.advance(599_999);
+  await keepAlive(p, 580_000);
+  p.advance(19_999);
 
   p.handle.abort("user_stop");
   p.stream.fail(abortError());
@@ -455,11 +533,7 @@ test("a fallback announcement still names the model that answered", async () => 
 test("the server's stall notice is reported and never rendered", async () => {
   const p = panel();
   p.liveness.noteHeaders();
-  p.advance(120_000);
-  p.stream.push(
-    buildStreamKeepaliveChunk({ state: "awaiting_first_token", elapsedMs: 120_000 })
-  );
-  await flush();
+  await keepAlive(p, 520_000);
   p.stream.push(
     buildStreamKeepaliveChunk({
       state: "stalled",

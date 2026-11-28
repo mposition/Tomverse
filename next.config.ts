@@ -66,6 +66,16 @@ const nextConfig: NextConfig = {
   // Authorization codes, state and email sign-in links must not enter dev logs.
   logging: { incomingRequests: { ignore: [/\/(?:api\/mcp\/oauth\/callback|auth\/email\/verify)(?:\?|$)/] } },
   poweredByHeader: false,
+  // The browser's own build id, for browser error reports
+  // (lib/clientErrorReporter.ts): a page left open across a deploy runs the
+  // old build while the server answers as the new one, so the server's commit
+  // cannot stand in for it. Inlined at build time; empty when no commit is
+  // known, and nothing reads it as anything but a label.
+  env: {
+    NEXT_PUBLIC_APP_VERSION:
+      process.env.NEXT_PUBLIC_APP_VERSION ||
+      (process.env.RAILWAY_GIT_COMMIT_SHA || "").slice(0, 12),
+  },
   serverExternalPackages: ["officeparser"],
   // Workspace packages ship TypeScript source and no build output, so the app
   // that consumes them compiles them (docs/policy/shared-packages.md).
@@ -121,6 +131,16 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       { source: "/chat-sw.js", headers: [{ key: "Cache-Control", value: "no-store" }, { key: "Service-Worker-Allowed", value: "/" }] },
+      // The pinned React/Babel files a chat preview frame loads (lib/chatArtifactPreview.ts). The frame's origin is
+      // opaque ("null") and the scripts carry integrity, so the browser fetches them in CORS mode; these are public
+      // library files with versions in their names, so any origin may read them and they never change.
+      {
+        source: "/vendor/artifact-preview/:file*",
+        headers: [
+          { key: "Access-Control-Allow-Origin", value: "*" },
+          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+        ],
+      },
       {
         source: "/:path*",
         headers: securityHeaders,

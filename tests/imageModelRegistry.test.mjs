@@ -46,6 +46,13 @@ test("catalogue-parametrised lookups resolve against the given list, not module 
   );
 });
 
+test("Nano Banana 2.1 requests JPEG even from a legacy PNG catalog row", () => {
+  const seed = getImageModel("gemini-3.1-flash-image");
+  const legacy = { ...seed, outputMimeTypes: ["image/png"], deliveryMimeType: "image/png" };
+  assert.equal(imageDeliveryMimeType(legacy), "image/png");
+  assert.equal(imageDeliveryMimeType({ ...legacy, apiModelId: "gemini-nano-banana-2.1" }), "image/jpeg");
+});
+
 test("client components never write the module-global image catalogue", () => {
   for (const file of [
     "../app/(site)/(application)/chat/ChatPageClient.tsx",
@@ -226,6 +233,11 @@ test("a stated thinking cap is a bound only where the request can hold it", () =
   assert.equal(imageThinkingBilling("toString", "qwen-image-3.0"), null);
   assert.equal(imageThinkingCapMinimumMicroUsd("constructor", "qwen-image-3.0"), null);
   assert.equal(imageThinkingBilling(undefined), null);
+  // A photo tool answers only for its own provider and id.
+  assert.equal(imageThinkingBilling("fal", "bria/rmbg-3"), "not_billed");
+  assert.equal(imageThinkingBilling("recraft", "bria/rmbg-3"), null);
+  assert.equal(imageThinkingBilling("recraft", "recraft-remove-background"), "not_billed");
+  assert.equal(imageThinkingBilling("recraft", undefined), null);
   assert.equal(imageThinkingCapMinimumMicroUsd("ideogram"), null);
   assert.equal(imageThinkingCapMinimumMicroUsd("google"), null);
 });

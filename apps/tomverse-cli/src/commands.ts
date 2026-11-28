@@ -1,9 +1,9 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { commandEnv } from "./env.js";
 export { commandEnv } from "./env.js";
 import { readProcess } from "./readprocess.js";
 import { accessSync, constants as fsConstants, existsSync, statSync } from "node:fs";
-import { basename, delimiter, extname, isAbsolute, join } from "node:path";
+import { basename, delimiter, extname, isAbsolute, join, resolve } from "node:path";
 
 /**
  * Runs one approved command. It runs with the user's own operating-system
@@ -18,7 +18,7 @@ import { basename, delimiter, extname, isAbsolute, join } from "node:path";
  * `command` form is the way to run it.
  */
 
-export type CommandInput = { argv?: string[]; command?: string; cwd?: string; timeoutSeconds?: number };
+export type CommandInput = { argv?: string[]; command?: string; cwd?: string; timeoutSeconds?: number; background?: boolean };
 
 export type CommandPlan = {
     mode: "argv" | "shell";
@@ -28,8 +28,11 @@ export type CommandPlan = {
     display: string;
     shell: string | null;
     cwd: string;
+    /** 0 for a background command, which has no time limit of its own. */
     timeoutMs: number;
     envNames: string[];
+    /** Keeps running after the call returns; ended when the task ends or the model stops it. */
+    background?: boolean;
 };
 
 export type CommandResult = {
@@ -48,17 +51,27 @@ export type CommandResult = {
     spawnError?: string;
 };
 
+/**
+ * Wraps the program a command starts: a supervisor, a sandbox. `context` is what the wrapper needs to build its arguments (the working folder
+ * and the environment the command would get). `env` is added to that environment. A wrapper that cannot do its job throws, and the command
+ * is not started: a sandbox never falls back to running without itself.
+ */
+export type CommandLaunchContext = { cwd: string; env: Record<string, string> };
+export type CommandLaunchResult = { file: string; args: readonly string[]; env?: Record<string, string> };
+export type CommandLaunch = (file: string, args: readonly string[], context?: CommandLaunchContext) => CommandLaunchResult;
+
 export class CommandError extends Error {}
 
 const MAX_TIMEOUT_MS = 30 * 60_000;
 
 /** As for patches: what the approval cannot show as it is never reaches a command. Tab is allowed. */
-const UNSHOWABLE_IN_COMMAND = /[\u0000-\u0008\u000a-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u206f\ufeff]/;
+export const UNSHOWABLE_IN_COMMAND = /[\u0000-\u0008\u000a-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u206f\ufeff]/;
+
+const windowsSystemRoot = (env: NodeJS.ProcessEnv = process.env) => env.SystemRoot ?? env.SYSTEMROOT ?? "C:\\Windows";
 
 export const userShell = (env: NodeJS.ProcessEnv = process.env) => {
     if (process.platform === "win32") {
-        const root = env.SystemRoot ?? env.SYSTEMROOT ?? "C:\\Windows";
-        return join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+        return join(windowsSystemRoot(env), "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
     }
     const preferred = env.SHELL;
     if (preferred && isAbsolute(preferred) && ["bash", "zsh", "sh", "dash"].includes(basename(preferred)) && existsSync(preferred)) return preferred;
@@ -69,7 +82,7 @@ const shellArgs = (shell: string, command: string) =>
     process.platform === "win32" ? ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command] : ["-c", command];
 
 /** Finds a program on PATH the way Windows would, to tell an .exe from a .cmd. */
-const resolveWindowsProgram = (program: string, env: Record<string, string>) => {
+const resolveWindowsProgram = (program: string, cwd: string, env: Record<string, string>) => {
     const exts = (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean).map((e) => e.toLowerCase());
     const candidates = (dir: string) => (extname(program) ? [join(dir, program)] : exts.map((ext) => join(dir, `${program}${ext}`)));
     if (isAbsolute(program) || program.includes("\\") || program.includes("/")) {
@@ -77,7 +90,7 @@ const resolveWindowsProgram = (program: string, env: Record<string, string>) => 
     }
     const dirs = (env.PATH ?? env.Path ?? "").split(delimiter).filter(Boolean);
     for (const dir of dirs) {
-        const hit = candidates(dir).find((p) => existsSync(p));
+        const hit = candidates(resolve(cwd, dir)).find((p) => existsSync(p));
         if (hit) return hit;
     }
     return null;
@@ -91,7 +104,9 @@ export const planCommand = (input: CommandInput, cwd: string, defaultTimeoutMs: 
     if (hasArgv === hasCommand) throw new CommandError("Give exactly one of argv (a program and its arguments) or command (a shell line).");
     const requested = input.timeoutSeconds;
     if (requested !== undefined && (!Number.isFinite(requested) || requested <= 0)) throw new CommandError("timeoutSeconds must be a positive number.");
-    const timeoutMs = Math.min(MAX_TIMEOUT_MS, requested ? Math.round(requested * 1000) : defaultTimeoutMs);
+    const background = input.background === true;
+    if (background && requested !== undefined) throw new CommandError("A background command has no time limit: leave out timeoutSeconds, and stop it with stop_background.");
+    const timeoutMs = background ? 0 : Math.min(MAX_TIMEOUT_MS, requested ? Math.round(requested * 1000) : defaultTimeoutMs);
     const env = commandEnv(extraEnv);
     const envNames = Object.keys(env).sort();
     if (hasArgv) {
@@ -101,8 +116,9 @@ export const planCommand = (input: CommandInput, cwd: string, defaultTimeoutMs: 
             throw new CommandError("argv must be strings without control, invisible or bidi characters, so the approval shows exactly what runs.");
         }
         let file = argv[0]!;
+        if (file.includes("/") || (process.platform === "win32" && file.includes("\\"))) file = resolve(cwd, file);
         if (process.platform === "win32") {
-            const resolved = resolveWindowsProgram(file, env);
+            const resolved = resolveWindowsProgram(file, cwd, env);
             if (resolved && /\.(cmd|bat)$/i.test(resolved)) {
                 throw new CommandError(
                     `${basename(resolved)} is a batch script; Windows runs it through cmd.exe, which re-reads the arguments. Use the command form instead (it runs in PowerShell and the approval shows it as a shell line).`
@@ -112,7 +128,7 @@ export const planCommand = (input: CommandInput, cwd: string, defaultTimeoutMs: 
         } else if (!file.includes("/")) {
             // Resolved here too, so the approval shows (and binds) the exact program.
             const dirs = (env.PATH ?? "").split(delimiter).filter(Boolean);
-            const hit = dirs.map((dir) => join(dir, file)).find((candidate) => {
+            const hit = dirs.map((dir) => resolve(cwd, dir, file)).find((candidate) => {
                 try {
                     accessSync(candidate, fsConstants.X_OK);
                     return statSync(candidate).isFile();
@@ -122,7 +138,7 @@ export const planCommand = (input: CommandInput, cwd: string, defaultTimeoutMs: 
             });
             if (hit) file = hit;
         }
-        return { mode: "argv", file, args: argv.slice(1), display: argv.map(quoteForDisplay).join(" "), shell: null, cwd, timeoutMs, envNames };
+        return { mode: "argv", file, args: argv.slice(1), display: argv.map(quoteForDisplay).join(" "), shell: null, cwd, timeoutMs, envNames, ...(background ? { background } : {}) };
     }
     const shell = userShell();
     const command = input.command!;
@@ -130,13 +146,13 @@ export const planCommand = (input: CommandInput, cwd: string, defaultTimeoutMs: 
     if (UNSHOWABLE_IN_COMMAND.test(command.replaceAll("\n", ""))) {
         throw new CommandError("The command contains control, invisible or bidi characters (or CR), so the approval could not show exactly what runs.");
     }
-    return { mode: "shell", file: shell, args: shellArgs(shell, command), display: command, shell, cwd, timeoutMs, envNames };
+    return { mode: "shell", file: shell, args: shellArgs(shell, command), display: command, shell, cwd, timeoutMs, envNames, ...(background ? { background } : {}) };
 };
 
 const LIMIT = 32 * 1024;
 
 /** Keeps the first and last 32 KB of a stream and counts what was left out. */
-class BoundedCapture {
+export class BoundedCapture {
     private head: Buffer[] = [];
     private headBytes = 0;
     private tail: Buffer[] = [];
@@ -214,14 +230,15 @@ export const killTree = async (child: ChildProcess): Promise<{ residual: number[
     const pid = child.pid;
     if (!pid) return { residual: [], treeChecked: true };
     if (process.platform === "win32") {
+        const taskkill = join(windowsSystemRoot(), "System32", "taskkill.exe");
         // End the tree at once; listing it first can take seconds, and the
         // tree keeps running meanwhile.
-        await controlProcess("taskkill", ["/PID", String(pid), "/T", "/F"], 15_000);
+        await controlProcess(taskkill, ["/PID", String(pid), "/T", "/F"], 15_000);
         // Then look for anything below it that survived (an orphan keeps its
         // recorded parent id) and end that too.
         const listed = await windowsDescendants(pid);
         const descendants = (listed ?? []).filter(alive);
-        await Promise.all(descendants.map((d) => controlProcess("taskkill", ["/PID", String(d), "/T", "/F"], 15_000)));
+        await Promise.all(descendants.map((d) => controlProcess(taskkill, ["/PID", String(d), "/T", "/F"], 15_000)));
         await new Promise((r) => setTimeout(r, 300));
         return { residual: [pid, ...descendants].filter(alive), treeChecked: listed !== null };
     }
@@ -257,7 +274,8 @@ export const killTree = async (child: ChildProcess): Promise<{ residual: number[
 
 /** Processes below `pid` by parent links (`ps`), including ones in other sessions. */
 const posixDescendants = async (pid: number): Promise<number[] | null> => {
-    const result = await controlProcess("ps", ["-A", "-o", "pid=,ppid="], 10_000);
+    const ps = ["/bin/ps", "/usr/bin/ps"].find(existsSync) ?? "ps";
+    const result = await controlProcess(ps, ["-A", "-o", "pid=,ppid="], 10_000);
     if (result.code !== 0 || typeof result.stdout !== "string") return null;
     const children = new Map<number, number[]>();
     for (const line of result.stdout.split("\n")) {
@@ -277,7 +295,35 @@ const posixDescendants = async (pid: number): Promise<number[] | null> => {
     return out;
 };
 
-export const runCommand = (plan: CommandPlan, signal: AbortSignal, onOutput?: (stream: "stdout" | "stderr", text: string) => void, extraEnv: string[] = []) =>
+/** Starts the planned program with the small command environment, as its own process group on POSIX so the whole tree can be ended. */
+export const spawnPlanned = (plan: CommandPlan, extraEnv: string[] = [], launchCommand?: CommandLaunch): ChildProcess => {
+    const launch: CommandLaunchResult = launchCommand?.(plan.file, plan.args, { cwd: plan.cwd, env: commandEnv(extraEnv) }) ?? plan;
+    return spawn(launch.file, launch.args, {
+        cwd: plan.cwd,
+        env: commandEnv(extraEnv, process.env, launch.env),
+        stdio: ["ignore", "pipe", "pipe"],
+        shell: false,
+        windowsHide: true,
+        // Its own process group on POSIX, so the whole tree can be ended.
+        detached: process.platform !== "win32",
+    });
+};
+
+/** Ends a process tree at once and without waiting, for the moment the CLI itself is exiting (an exit handler cannot await). */
+export const killTreeSync = (pid: number) => {
+    try {
+        if (process.platform === "win32") {
+            spawnSync(join(windowsSystemRoot(), "System32", "taskkill.exe"), ["/PID", String(pid), "/T", "/F"], { windowsHide: true, timeout: 5000, stdio: "ignore" });
+        } else {
+            process.kill(-pid, "SIGKILL");
+        }
+    } catch {
+        // already gone
+    }
+};
+
+export const runCommand = (plan: CommandPlan, signal: AbortSignal, onOutput?: (stream: "stdout" | "stderr", text: string) => void,
+    extraEnv: string[] = [], launchCommand?: CommandLaunch) =>
     new Promise<CommandResult>((resolve) => {
         const started = Date.now();
         const stdout = new BoundedCapture();
@@ -289,15 +335,7 @@ export const runCommand = (plan: CommandPlan, signal: AbortSignal, onOutput?: (s
         let killing: Promise<void> | null = null;
         let child: ChildProcess;
         try {
-            child = spawn(plan.file, plan.args, {
-                cwd: plan.cwd,
-                env: commandEnv(extraEnv),
-                stdio: ["ignore", "pipe", "pipe"],
-                shell: false,
-                windowsHide: true,
-                // Its own process group on POSIX, so the whole tree can be ended.
-                detached: process.platform !== "win32",
-            });
+            child = spawnPlanned(plan, extraEnv, launchCommand);
         } catch (error) {
             resolve({ exitCode: null, signal: null, timedOut: false, cancelled: false, durationMs: 0, stdout: "", stderr: "", stdoutOmittedBytes: 0, stderrOmittedBytes: 0, residualProcesses: [], processTreeChecked: true, spawnError: String((error as Error).message) });
             return;

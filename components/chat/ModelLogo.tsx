@@ -1,7 +1,11 @@
+"use client";
+
+import { createContext, useContext } from "react";
 import type { AiModel, AiProvider } from "@/lib/models";
 import { getModelBrand } from "@/lib/modelBranding";
 
 type ModelLogoSize = "xs" | "sm" | "md" | "lg";
+export const ModelLogoAssets = createContext<(path: string) => string | undefined>((path) => path);
 
 type ModelLogoProps = {
   model?: Pick<AiModel, "name" | "provider" | "icon"> | null;
@@ -32,6 +36,8 @@ export function ModelLogo({
 }: ModelLogoProps) {
   const resolvedProvider = model?.provider || provider || "ai";
   const brand = getModelBrand(resolvedProvider);
+  const resolveAsset = useContext(ModelLogoAssets);
+  const image = brand.image && resolveAsset(brand.image);
   const label = model?.name || resolvedProvider;
 
   return (
@@ -40,10 +46,10 @@ export function ModelLogo({
       aria-hidden="true"
       title={label}
     >
-      {brand.image ? (
+      {image ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={brand.image}
+          src={image}
           alt=""
           className={`${imageSize[size]} object-contain`}
           draggable={false}

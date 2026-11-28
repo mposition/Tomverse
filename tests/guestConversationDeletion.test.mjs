@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { removeGuestConversationStorage } from "../lib/guestImport.ts";
+import { buildGuestImportPayload, removeGuestConversationStorage } from "../lib/guestImport.ts";
+import {
+  beginReplacement,
+  getSupersededIds,
+  resetSupersededForTests,
+  restoreGuestSuperseded,
+} from "../lib/chatSupersededTurns.ts";
 
 class FakeStorage {
   #values = new Map();
@@ -114,4 +120,61 @@ test("deleting the last Review conversation preserves Chat and unrelated storage
       assert.equal(storage.getItem("unrelated_setting"), "keep-me");
     }
   );
+});
+
+test("a guest's replaced-turn note survives a reload, leaves with its conversation, and is imported marked replaced", () => {
+  withGuestStorage(
+    {
+      guest_conversations: JSON.stringify([{ id: "g1", title: "Guest", selectedModels: ["m1"], createdAt: "2026-11-27T00:00:00.000Z" }]),
+      "guest_messages_g1_m1": JSON.stringify([
+        { id: "u1", role: "user", content: "first question", createdAt: "2026-11-27T00:00:01.000Z" },
+        { id: "a1", role: "assistant", content: "first answer", createdAt: "2026-11-27T00:00:02.000Z" },
+        { id: "u2", role: "user", content: "asked again", createdAt: "2026-11-27T00:00:03.000Z" },
+        { id: "a2", role: "assistant", content: "new answer", createdAt: "2026-11-27T00:00:04.000Z" },
+      ]),
+      "guest_superseded_g1-archive": JSON.stringify(["other"]),
+    },
+    (storage) => {
+      resetSupersededForTests();
+      // A guest regenerates: the note is kept beside the transcript, outside the transcript keys.
+      beginReplacement("g1", ["u1", "a1"]).complete("normal", { saved: false });
+      assert.deepEqual(JSON.parse(storage.getItem("guest_superseded_g1")).sort(), ["a1", "u1"]);
+      assert.ok(Object.keys(storage).every((key) => !key.startsWith("guest_messages_g1_") || key === "guest_messages_g1_m1"));
+
+      // A reload forgets the page's memory; loading the guest conversation brings the note back.
+      resetSupersededForTests();
+      assert.equal(getSupersededIds("g1").size, 0);
+      restoreGuestSuperseded("g1");
+      assert.deepEqual([...getSupersededIds("g1")].sort(), ["a1", "u1"]);
+
+      // Signing in imports the whole history, the replaced turn marked replaced (the guest copy is removed after).
+      const payload = buildGuestImportPayload("g1");
+      assert.deepEqual(
+        payload.messages.map((message) => [message.content, message.superseded === true]),
+        [["first question", true], ["first answer", true], ["asked again", false], ["new answer", false]]
+      );
+
+      // Deleting the conversation removes its note, and only its note.
+      removeGuestConversationStorage("g1");
+      assert.equal(storage.getItem("guest_superseded_g1"), null);
+      assert.equal(storage.getItem("guest_superseded_g1-archive"), JSON.stringify(["other"]));
+      resetSupersededForTests();
+    }
+  );
+});
+
+test("a signed-in conversation's replacement is never written to the browser", () => {
+  withGuestStorage({}, (storage) => {
+    resetSupersededForTests();
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response("{}", { status: 200 });
+    try {
+      beginReplacement("s1", ["u1", "a1"], true).complete("normal", { saved: true });
+      assert.deepEqual([...getSupersededIds("s1")].sort(), ["a1", "u1"]);
+      assert.equal(storage.length, 0);
+    } finally {
+      globalThis.fetch = previousFetch;
+      resetSupersededForTests();
+    }
+  });
 });

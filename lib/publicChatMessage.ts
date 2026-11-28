@@ -30,6 +30,7 @@ export const PUBLIC_CHAT_MESSAGE_SELECT = {
   createdAt: true,
   memoryUsedCount: true,
   knowledgeChunkCount: true,
+  supersededAt: true,
   artifacts: {
     orderBy: { ordinal: "asc" as const },
     select: {
@@ -64,6 +65,7 @@ type PublicChatMessageRow = {
   createdAt: Date | string;
   memoryUsedCount: number | null;
   knowledgeChunkCount: number | null;
+  supersededAt?: Date | string | null;
   artifacts: Array<{
     id: string;
     ordinal: number;
@@ -138,6 +140,9 @@ export const toPublicChatMessage = (row: PublicChatMessageRow) => ({
   ...(typeof row.knowledgeChunkCount === "number" && row.knowledgeChunkCount > 0
     ? { knowledgeChunkCount: row.knowledgeChunkCount }
     : {}),
+  // "Regenerate" or "edit" replaced this turn (lib/chatSupersededMessages.ts).
+  // A flag, not the time: the screen dims it and leaves it out of context.
+  ...(row.supersededAt ? { superseded: true as const } : {}),
 });
 
 /**

@@ -23,8 +23,30 @@ export type CliConfig = {
     model?: string;
     /** Extra environment variable names passed to approved commands. */
     commandEnv?: string[];
+    /** Notes the agent keeps about a project for later tasks. On unless set to false; when off nothing is read or written. */
+    memory?: boolean;
+    /** Lets an agent definition's model name pick the model of its subagent runs. Off unless set to true: it is a billing choice. */
+    agentModels?: boolean;
+    /** Gives the agent web_search (Tomverse's web search, charged to the account and approved per call). Off unless set to true. */
+    webSearch?: boolean;
+    /**
+     * Subagent orchestration for new sessions: parallel subtasks with write scopes and verification. Off unless set to true, because it
+     * can use several times the requests of a plain task. The two numbers are how many subagents run at once and how many requests they share.
+     */
+    orchestrate?: boolean;
+    orchestrateMaxSubagents?: number;
+    orchestrateMaxRequests?: number;
+    /** MCP servers and hooks (mcp.json, hooks.json and the folder's own files). On unless set to false. */
+    mcp?: boolean;
+    hooks?: boolean;
     /** Folders the user has said the CLI may work in (real paths). */
     trustedRoots?: string[];
+    /** An operating-system sandbox for approved commands: off (the default), workspace-write or read-only. See sandbox.ts. */
+    sandbox?: string;
+    /** The hosts a sandboxed command may reach through the filtering proxy. When absent a small list of package registries is used. */
+    sandboxDomains?: string[];
+    /** Lets a sandboxed command connect to localhost. Off unless set to true. */
+    sandboxLocalhost?: boolean;
 };
 
 export const tomverseHome = (env: NodeJS.ProcessEnv = process.env) =>
@@ -60,7 +82,18 @@ export const readConfig = (env: NodeJS.ProcessEnv = process.env): CliConfig => {
     if (typeof value.allowInsecureLocalhost === "boolean") config.allowInsecureLocalhost = value.allowInsecureLocalhost;
     if (typeof value.model === "string") config.model = value.model;
     if (Array.isArray(value.commandEnv)) config.commandEnv = value.commandEnv.filter((v): v is string => typeof v === "string");
+    if (typeof value.memory === "boolean") config.memory = value.memory;
+    if (typeof value.agentModels === "boolean") config.agentModels = value.agentModels;
+    if (typeof value.webSearch === "boolean") config.webSearch = value.webSearch;
+    if (typeof value.orchestrate === "boolean") config.orchestrate = value.orchestrate;
+    if (typeof value.orchestrateMaxSubagents === "number") config.orchestrateMaxSubagents = value.orchestrateMaxSubagents;
+    if (typeof value.orchestrateMaxRequests === "number") config.orchestrateMaxRequests = value.orchestrateMaxRequests;
+    if (typeof value.mcp === "boolean") config.mcp = value.mcp;
+    if (typeof value.hooks === "boolean") config.hooks = value.hooks;
     if (Array.isArray(value.trustedRoots)) config.trustedRoots = value.trustedRoots.filter((v): v is string => typeof v === "string");
+    if (typeof value.sandbox === "string") config.sandbox = value.sandbox;
+    if (Array.isArray(value.sandboxDomains)) config.sandboxDomains = value.sandboxDomains.filter((v): v is string => typeof v === "string");
+    if (typeof value.sandboxLocalhost === "boolean") config.sandboxLocalhost = value.sandboxLocalhost;
     return config;
 };
 

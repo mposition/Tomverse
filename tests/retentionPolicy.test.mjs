@@ -323,17 +323,30 @@ test("deleting a conversation takes its deep research jobs with it", () => {
     // retention sweep is not the answer here: the point of deleting an account
     // is that the content goes when the user says so, not thirty days later on
     // a cadence.
-    for (const path of [
-        "lib/accountDeletion.ts",
-        "app/api/conversations/[conversationId]/route.ts",
-        "app/api/conversations/route.ts",
-    ]) {
+    for (const path of ["lib/accountDeletion.ts", "lib/conversationDeletion.ts"]) {
         assert.match(
             readFileSync(path, "utf8"),
             /deleteDeepResearchJobsForConversations\(\s*tx,/,
             `${path} removes the jobs inside the delete transaction`
         );
     }
+    // The owner's deletes and the temporary Chat sweep all go through the one
+    // conversation deletion path, inside their own transaction.
+    for (const path of [
+        "app/api/conversations/[conversationId]/route.ts",
+        "app/api/conversations/route.ts",
+        "lib/temporaryConversationSweep.ts",
+    ]) {
+        assert.match(
+            readFileSync(path, "utf8"),
+            /deleteOwnedConversations\(\s*tx,/,
+            `${path} deletes through lib/conversationDeletion.ts inside its transaction`
+        );
+    }
+    const CONVERSATION_DELETION = readFileSync("lib/conversationDeletion.ts", "utf8");
+    const sharedJobs = CONVERSATION_DELETION.indexOf("deleteDeepResearchJobsForConversations(tx");
+    const sharedDelete = CONVERSATION_DELETION.indexOf("tx.conversation.deleteMany");
+    assert.ok(sharedJobs > 0 && sharedDelete > sharedJobs);
 
     // Inside the same transaction as the conversation delete, and before it.
     // A failure between the two is the orphan this exists to prevent.

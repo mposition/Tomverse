@@ -669,6 +669,9 @@ run(
     "tests/integration/admin-audit-integrity-walk.db.test.ts",
     "tests/integration/admin-users.db.test.ts",
     "tests/integration/login-methods.db.test.ts",
+    // Adding Google or Microsoft from Desktop: only the user who started the link and holds the PKCE verifier may spend
+    // the provider code, and a refused attempt writes nothing.
+    "tests/integration/desktop-oauth-link.db.test.ts",
     "tests/integration/account-deletion.db.test.ts",
     "tests/integration/apple-account-deletion.db.test.ts",
     "tests/integration/conversation-title.db.test.ts",
@@ -678,6 +681,11 @@ run(
     // claims, draft/checkpoint CAS, DB-clock leases and deletion cascades can
     // all look correct in one process while failing under PostgreSQL races.
     "tests/integration/chat-durable-recovery.db.test.ts",
+    // Scheduled tasks spend an account's credits unattended: the occurrence
+    // and one-in-flight unique keys, the reservation guard's transaction and
+    // lease reconciliation only mean anything against PostgreSQL.
+    "tests/integration/scheduled-tasks.db.test.ts",
+    "tests/integration/scheduled-task-chat-route.db.test.ts",
     "tests/integration/review-continuation-handoff.db.test.ts",
     "tests/integration/provider-recovery.db.test.ts",
     "tests/integration/provider-failure-scope.db.test.ts",
@@ -1001,6 +1009,11 @@ run(
     "tests/integration/memory-metrics.db.test.ts",
     "tests/integration/conversation-memory-mode.db.test.ts",
     "tests/integration/conversation-selection-mode.db.test.ts",
+    // Personal instructions, temporary Chat and answer ratings: the sweep
+    // deletes only expired temporary conversations and waits for a running
+    // answer, the CHECKs keep a temporary row out of projects and memory, and
+    // the instructions reach the priced context block and the account export.
+    "tests/integration/chat-personalization-privacy.db.test.ts",
     // AI Review's operational record: that a run round-trips content-free,
     // that a guest run lands at all (it produces no ComparisonReview row), and
     // that the 90-day purge reaches only what it should.
@@ -1036,6 +1049,9 @@ run(
     // match cannot take an authorised hit's candidate slot is a property of
     // the SQL and the snapshot it runs in, not of the ranking function.
     "tests/integration/conversation-search.db.test.ts",
+    // What the model's past-chat search is never shown (locked, current, image, project, imported, memory-off):
+    // a query and a post-filter, so only a database can say it.
+    "tests/integration/chat-history-reference.db.test.ts",
     // The TXT that carries the imported original: one snapshot of two halves,
     // and permission decided after the bytes exist.
     "tests/integration/continuation-source-export.db.test.ts",
@@ -1121,6 +1137,16 @@ run(
     "--test-concurrency=1", "tests/integration/amuxV22TransferStaging.db.test.mjs"],
   "Running the v22 chunked result transfer, sliced read and staging sweep scenarios",
 );
+// Desktop remote control: one account never reaches another's PC, an answer is
+// recorded once for the reported request and handed over once, and reports
+// expire and are deleted. It drives the real route handlers with the web
+// session replaced through mock.module, so it runs in its own process.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/desktop-remote-control.db.test.ts"],
+  "Running the Desktop remote control report, answer and expiry scenarios",
+);
 // Native pass redemption uses real promotion/entitlement rows with mocked
 // authentication and email/provider seams. Keep those mocks in their own process.
 run(
@@ -1137,6 +1163,17 @@ run(
     "--test-concurrency=1",
     "tests/integration/code-managed-execution.db.test.mjs"],
   "Running the managed Code reservation, settlement, reconciliation, and timezone scenarios",
+);
+// Desktop cloud execution over the real managed Code reservation and shared
+// credit ledger: create, upload, claim, report, call, finish, stop, the
+// runner-lost sweep and retention. Fakes the model provider and catalogue;
+// own process for its module mocks.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/code-cloud-execution.db.test.mjs"],
+  "Running the Desktop cloud execution job, reservation, settlement and sweep scenarios",
 );
 // The external inference API fakes only the model provider and exercises the
 // real shared credit ledger, key cap and revocation race. Own process for its
@@ -1196,6 +1233,16 @@ run(
     "--test-concurrency=1",
     "tests/integration/external-api-coding.db.test.mjs"],
   "Running the coding API's catalogue, dedicated-row billing and general-API refusal scenarios",
+);
+// The coding API's web search: the flat search surcharge and the search vendor
+// bucket on the shared ledger, key cap, Idempotency-Key, cancellation and
+// expiry. Fakes only the search backend and Prisma's client; own process.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/code-web-search.db.test.mjs"],
+  "Running the coding API web search's surcharge, vendor budget, cap, idempotency, cancellation and expiry scenarios",
 );
 // The budget suite mocks Prisma and the audit writer while exercising real
 // PostgreSQL constraints. Module mocks must be isolated from the batch above.
@@ -1496,6 +1543,39 @@ run(
     "tests/integration/conversation-auto-selection-route.db.test.ts",
   ],
   "Running the Auto selection-mode route scenarios"
+);
+// Its own process: it replaces next-auth so its requests carry a session.
+// Temporary Chat's switch, creation, listing and refusals, and the answer
+// rating route's ownership, lock and closed-value checks.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/chat-personalization-routes.db.test.ts",
+  ],
+  "Running the temporary Chat and answer rating route scenarios"
+);
+// Its own process: it replaces next-auth and the provider stream. Who may mark
+// a regenerated or edited turn replaced, that the conversation read carries
+// the mark, and that the chat route leaves marked turns out of the context and
+// records the turn a send replaces only with a saved answer.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/conversation-superseded-turns.db.test.ts",
+  ],
+  "Running the replaced-turn mark scenarios"
 );
 // Real row/transaction semantics with storage fully stubbed. Keep the R2 mock
 // in its own process rather than changing another integration suite's client.

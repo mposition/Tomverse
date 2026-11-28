@@ -21,16 +21,11 @@ export type AiProvider =
 
 export type ModelTier = "Free" | "Pro" | "Max";
 export type ModelStatus = "enabled" | "limited" | "disabled" | "coming-soon";
-export type ModelUsageClass =
-    | "standard"
-    | "advanced"
-    | "premium"
-    | "reasoning"
-    | "premium-reasoning"
-    | "research"
-    | "deep-research"
-    | "frontier"
-    | "apex";
+export const MODEL_USAGE_CLASSES = [
+    "standard", "advanced", "premium", "reasoning", "premium-reasoning",
+    "research", "deep-research", "frontier", "apex",
+] as const;
+export type ModelUsageClass = (typeof MODEL_USAGE_CLASSES)[number];
 export type ModelMinimumPlan = "Guest" | "Free" | "Pro";
 export type ModelUsageCategory =
     | "Standard"
@@ -151,7 +146,7 @@ export type AiModel = {
      */
     reasoning?: "none" | "low" | "medium" | "high";
     /** User-selectable overrides supplied by the public catalogue. */
-    reasoningEfforts?: readonly ("low" | "high")[];
+    reasoningEfforts?: readonly ("low" | "medium" | "high")[];
     /** Published context window for catalogue metadata and request validation. */
     contextWindowTokens?: number;
     /** Explicit per-model native input support. Omitted means text-only. */

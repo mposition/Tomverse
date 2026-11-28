@@ -75,9 +75,33 @@ import { researchRunMessage } from "@/lib/researchPreviewRunClient";
 import type { ResearchPreviewRunDto } from "@/lib/researchPreviewRunTypes";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { fitChatRequestTranscript } from "@/lib/chatRequestLimits";
+import {
+  armSupersede,
+  beginReplacement,
+  canResendQuestion,
+  lastReplaceableTurn,
+  parkReplacement,
+  rememberSupersededMessages,
+  restoreGuestSuperseded,
+  settleParkedReplacement,
+  takeArmedSupersede,
+  withoutSuperseded,
+} from "@/lib/chatSupersededTurns";
 import type { ChatContentState } from "@/lib/chatContentState";
 import type { ModelRuntimeStatus } from "@/lib/chatRuntimeStatus";
 import { consumeChatStream } from "@/lib/chatStreamConsumer";
+import {
+  decideChatStreamReattach,
+  handOffInterruptedChatAttempt,
+  isDurableChatStreamResponse,
+  isInterruptedChatAttempt,
+  pendingInterruptedChatAttempts,
+  recoveredPartialText,
+  settleInterruptedChatAttempt,
+  shouldApplyPolledPartial,
+  watchInterruptedChatAttempts,
+  type ChatStreamInterruption,
+} from "@/lib/chatStreamReattach";
 import { readChatImageTurnRef, readChatImageTurnRequest } from "@/lib/chatImageTurnCore";
 import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
 import type { ReviewImageTurns } from "@/lib/reviewImageTurn";
@@ -151,6 +175,15 @@ import {
   isGuestAutoRetryBlocked,
   type GuestAutoRetryMetadata,
 } from "@/lib/guestAutoRetry";
+import {
+  CHAT_SEND_LOCALIZED_ATTACHMENT_CODES,
+  chatAttachmentErrorCopyKey,
+} from "@/lib/chatAttachmentErrorCopy";
+import {
+  isTransientDatabaseCode,
+  transientDatabaseRetryDelayMs,
+  waitForTransientRetry,
+} from "@/lib/databaseError";
 
 const processedPromptKeys = new Set<string>();
 // One image-turn request plus two re-asks under the same answer id.
@@ -604,7 +637,12 @@ function ChatAppComponent({
     new Map<string, {
       conversationId: string;
       sourceUserMessageId: string;
-      requestedModelId: string;
+      /**
+       * Null for a stream this panel reattached to after it broke: the
+       * server may have substituted the model it recorded (a retired model's
+       * successor), so the first poll's value is adopted and then held.
+       */
+      requestedModelId: string | null;
       analyticsPromptId: string | null;
     }>()
   );
@@ -637,6 +675,53 @@ function ChatAppComponent({
     attemptBackedMessageIdsRef.current = new Set();
     queueMicrotask(() => setDurableAttemptIds([]));
   }, [runtimeKey]);
+
+  /*
+    Streams that broke on this key and were handed to the attempt poller
+    instead of ending as an error (lib/chatStreamReattach.ts). Adopted on a
+    microtask so the reset above has already run, and again on every
+    hand-off. Only an account Chat panel polls; anywhere else the hand-off
+    finds no watcher and the turn ends exactly as it did before.
+  */
+  useEffect(() => {
+    if (isGuestMode || transcriptScope !== "conversation") return;
+    let active = true;
+    const adopt = () => {
+      if (!active) return;
+      const pending = pendingInterruptedChatAttempts(runtimeKey);
+      if (pending.length === 0) return;
+      for (const attempt of pending) {
+        const id = attempt.assistantMessageId;
+        attemptBackedMessageIdsRef.current.add(id);
+        if (!durableAttemptIdentityRef.current.has(id)) {
+          durableAttemptIdentityRef.current.set(id, {
+            conversationId: attempt.conversationId,
+            sourceUserMessageId: attempt.sourceUserMessageId,
+            requestedModelId: null,
+            analyticsPromptId: attempt.analyticsPromptId,
+          });
+        }
+        if (!durableAttemptRevisionsRef.current.has(id)) {
+          durableAttemptRevisionsRef.current.set(id, -1);
+        }
+        if (!durableAttemptPollStartedRef.current.has(id)) {
+          durableAttemptPollStartedRef.current.set(id, Date.now());
+        }
+      }
+      setDurableAttemptIds((current) => {
+        const missing = pending
+          .map((attempt) => attempt.assistantMessageId)
+          .filter((id) => !current.includes(id));
+        return missing.length > 0 ? [...current, ...missing] : current;
+      });
+    };
+    queueMicrotask(adopt);
+    const unwatch = watchInterruptedChatAttempts(runtimeKey, adopt);
+    return () => {
+      active = false;
+      unwatch();
+    };
+  }, [isGuestMode, runtimeKey, transcriptScope]);
     const isMobileShell = useIsMobileShell();
     const [modelInputs, setModelInputs] = useState<Record<string, string>>({});
     const modelInput = modelInputs[modelId] || "";
@@ -1000,6 +1085,8 @@ function ChatAppComponent({
         if (!isCurrentChatRuntimeLoad(loadKey, requestId)) return;
 
         if (initialConversationId) {
+          // The replaced-turn note of a guest conversation is kept beside its transcript.
+          restoreGuestSuperseded(initialConversationId);
           const storageKey = guestMessagesStorageKey(initialConversationId, modelId);
           const savedMessages = localStorage.getItem(storageKey);
           const carried = transcriptScope === "model"
@@ -1117,6 +1204,8 @@ function ChatAppComponent({
             if (getChatRuntimeRevision(loadKey) !== revisionAtStart) return;
             if (isChatRuntimeStreaming(loadKey)) return;
 
+          // The server's note of replaced turns (lib/chatSupersededTurns.ts).
+          rememberSupersededMessages(initialConversationId, data.messages);
           if (data.messages && data.messages.length > 0) {
             const filteredMessages = reviewProvider
               ? reviewProviderTranscript<Message>(data.messages, reviewProvider, id => getModel(id)?.provider)
@@ -1139,6 +1228,7 @@ function ChatAppComponent({
               if (attempt.conversationId !== initialConversationId || !hasJourneySource(panelIdentityKey, initialConversationId, attempt.sourceUserMessageId) ||
                 !data.messages.some((message: Message) => message.role === "user" && message.id === attempt.sourceUserMessageId)) continue;
               const completed = parseCompletedChatResponseMessage(data.messages.find((message: Message) => message.id === attempt.assistantMessageId), attempt);
+              if (completed) settleParkedReplacement(attempt.assistantMessageId, completed.status);
               if (completed) observeJourneyReply({ owner: panelIdentityKey, epoch: hydrationJourneyEpoch,
                 conversationId: initialConversationId, sourceUserMessageId: attempt.sourceUserMessageId,
                 status: completed.status === "incomplete" ? "incomplete" : "normal", nonempty: Boolean(completed.content.trim()) });
@@ -1272,6 +1362,13 @@ function ChatAppComponent({
       terminal.add(assistantMessageId);
       durableAttemptPollStartedRef.current.delete(assistantMessageId);
       durableAttemptIdentityRef.current.delete(assistantMessageId);
+      const interrupted = settleInterruptedChatAttempt(key, assistantMessageId);
+      if (interrupted) {
+        // Polling could not settle a stream that broke in this panel: it
+        // ends with the error it would have ended with before reattaching.
+        interrupted.finish(null);
+        return;
+      }
       writeChatRuntimeMessages(key, (current) =>
         current.map((message) =>
           message.id === assistantMessageId &&
@@ -1359,10 +1456,15 @@ function ChatAppComponent({
           attempt.assistantMessageId !== assistantMessageId ||
           attempt.conversationId !== expectedIdentity.conversationId ||
           attempt.sourceUserMessageId !== expectedIdentity.sourceUserMessageId ||
-          attempt.requestedModelId !== expectedIdentity.requestedModelId
+          (expectedIdentity.requestedModelId !== null &&
+            attempt.requestedModelId !== expectedIdentity.requestedModelId)
         ) {
           makeTerminalRecovery(assistantMessageId, "CHAT_ATTEMPT_POLL_INVALID");
           return;
+        }
+        if (expectedIdentity.requestedModelId === null) {
+          // Adopted once, then held like any other identity field.
+          expectedIdentity.requestedModelId = attempt.requestedModelId;
         }
         const priorRevision =
           durableAttemptRevisionsRef.current.get(assistantMessageId) ?? -1;
@@ -1378,21 +1480,54 @@ function ChatAppComponent({
           assistantMessageId,
           Date.now() + DURABLE_ATTEMPT_POLL_INTERVAL_MS
         );
+        const interrupted = isInterruptedChatAttempt(key, assistantMessageId);
+        if (
+          interrupted &&
+          !isActiveChatResponseAttempt(attempt) &&
+          attempt.status !== "completed"
+        ) {
+          // The server ended the turn without an answer -- including a
+          // cancellation it made because the connection went away, which the
+          // user did not ask for. The panel ends it the way it ended before
+          // reattaching existed, keeping the longer of the two partials.
+          terminal.add(assistantMessageId);
+          durableAttemptPollStartedRef.current.delete(assistantMessageId);
+          durableAttemptIdentityRef.current.delete(assistantMessageId);
+          settleInterruptedChatAttempt(key, assistantMessageId)?.finish(
+            attempt.partialContent
+          );
+          return;
+        }
         if (attempt.checkpointRevision > priorRevision) {
           durableAttemptRevisionsRef.current.set(
             assistantMessageId,
             attempt.checkpointRevision
           );
-          writeChatRuntimeMessages(key, (current) =>
-            replaceAttemptBackedMessage(
+          writeChatRuntimeMessages(key, (current) => {
+            if (interrupted && isActiveChatResponseAttempt(attempt)) {
+              const shown = current.find(
+                (message) => message.id === assistantMessageId
+              )?.content;
+              if (
+                typeof shown === "string" &&
+                !shouldApplyPolledPartial(shown, attempt.partialContent)
+              ) {
+                return current;
+              }
+            }
+            return replaceAttemptBackedMessage(
               current,
               attempt,
               attemptBackedMessageIdsRef.current,
               t("chat.responseError")
-            )
-          );
+            );
+          });
         }
+        // A regenerated answer that finished while polled is the replacement.
+        if (completedMessage) settleParkedReplacement(assistantMessageId, completedMessage.status);
+        else if (!isActiveChatResponseAttempt(attempt)) settleParkedReplacement(assistantMessageId, null);
         if (completedMessage) {
+          settleInterruptedChatAttempt(key, assistantMessageId)?.completed?.();
           writeChatRuntimeMessages(key, (current) => {
             if (!attemptBackedMessageIdsRef.current.has(assistantMessageId)) {
               return current;
@@ -1607,6 +1742,12 @@ function ChatAppComponent({
       with them.
     */
     let sourceReceipt: ContinuationReceipt | undefined;
+    // The turn this send replaces ("Regenerate" / "edit"). It is excluded from
+    // this request's context at once but is recorded as replaced only when the
+    // new answer is reported finished (`replacement.complete`, at each place a
+    // finished answer is known): a refused, failed or stopped send leaves the
+    // earlier answer as it was (lib/chatSupersededTurns.ts).
+    let replacement = beginReplacement(targetChatId, null);
     const writeAssistantMessage = assistantMessageWriter(runKey);
     const setAssistantMessage: typeof writeAssistantMessage = (
       id,
@@ -1643,6 +1784,11 @@ function ChatAppComponent({
       and the conversation's own mode is used everywhere else, so an ordinary
       send is identical to what it was before the override existed.
     */
+    // "Regenerate" / "edit" armed a replacement of the newest turn; the send
+    // that carries that exact question takes it up, so a send that never
+    // starts leaves the earlier answer untouched.
+    replacement = beginReplacement(targetChatId, takeArmedSupersede(targetChatId, text), !isGuestMode);
+    const replacedIds = replacement.excludedIds();
     const { webSearchMode: webSearchModeOverride, reasoningEffort, projectReferences } = requestOptions ?? {};
     const effectiveWebSearchMode: WebSearchMode | undefined =
       researchMode ? "always" : webSearchModeOverride ?? webSearchMode;
@@ -1716,6 +1862,7 @@ function ChatAppComponent({
       }),
     });
     let latencyCompleted = false;
+    let latencyHandedOff = false;
 
     let requestTraceId: string | null = null;
     /*
@@ -1769,6 +1916,12 @@ function ChatAppComponent({
     // can still show whatever was generated before the abort, instead of
     // discarding it -- the catch block needs to read it too.
     let assistantText = "";
+    // What the catch block needs to decide whether a broken stream is handed
+    // to attempt polling (lib/chatStreamReattach.ts) instead of ending here.
+    let durableStream = false;
+    let streamReadFailed = false;
+    let serverReportedFailure = false;
+    let detachPageLivenessListeners = () => {};
     const buildErrorReport = (
       traceId: string | null,
       errorCode: string,
@@ -1847,12 +2000,109 @@ function ChatAppComponent({
       );
     };
 
+    /**
+     * Ends a reattached turn that the server did not finish, exactly as the
+     * catch block below would have ended it before reattaching existed: a
+     * client timeout through `endAsTimeout`, and a body read that rejected
+     * with no server code as the request-failure branch's generic error.
+     *
+     * The partial answer is not lost by either: only an account Chat panel
+     * (transcriptScope "conversation") takes a hand-off, and there
+     * `setAssistantMessage` writes an error turn's body from `assistantText`
+     * -- which the hand-off's `finish` has just set to the longer of what was
+     * shown and what the server checkpointed -- and the error sentence into
+     * `recoveryNotice` beside it.
+     */
+    const endAsInterrupted = (interruption: ChatStreamInterruption) => {
+      if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
+        conversationId: targetChatId, sourceUserMessageId,
+        status: interruption.kind === "timeout" ? "cancelled" : "error", nonempty: false });
+      if (interruption.kind === "timeout") {
+        endAsTimeout(
+          interruption.errorCode,
+          ERROR_CLASSIFICATION_SOURCE.client,
+          assistantText
+        );
+        return;
+      }
+      console.error("Chat request failed", {
+        traceId: requestTraceId || undefined,
+      });
+      if (requestTraceId && typeof window !== "undefined") {
+        window.localStorage.setItem("tomverse_last_error_trace_id", requestTraceId);
+      }
+      setAssistantMessage(
+        assistantMessageId,
+        `${t("chat.responseError")}${
+          requestTraceId ? `\n${t("chat.traceId")}: ${requestTraceId}` : ""
+        }`,
+        "error",
+        {
+          errorCode: "UNKNOWN_ERROR",
+          errorHadAttachments: attachments.length > 0,
+          errorReport: buildErrorReport(
+            requestTraceId,
+            "UNKNOWN_ERROR",
+            ERROR_CLASSIFICATION_SOURCE.client
+          ),
+        }
+      );
+    };
+
+    /**
+     * Hands a broken durable stream to the attempt poller of whichever panel
+     * shows this conversation now, instead of ending it. The server's
+     * checkpoint carries the answer on from wherever the connection dropped;
+     * the panel keeps what it already showed until a checkpoint is at least
+     * as long, and shows the server's final state. `false` when no panel is
+     * polling this key -- the turn then ends exactly as it did before.
+     */
+    const handOffInterruptedStream = (
+      interruption: ChatStreamInterruption,
+      conversationId: string
+    ) => {
+      const handedOff = handOffInterruptedChatAttempt(runKey, {
+        assistantMessageId,
+        conversationId,
+        sourceUserMessageId,
+        analyticsPromptId,
+        finish: (checkpointed) => {
+          assistantText = recoveredPartialText(assistantText, checkpointed);
+          endAsInterrupted(interruption);
+          latency.finish(interruption.kind === "timeout" ? "cancelled" : "failed");
+        },
+        // The poller showed the server's completed answer: the turn the user
+        // sees is a completion, and its latency is recorded as one.
+        completed: () => latency.finish("completed"),
+      });
+      if (!handedOff) return false;
+      // The send's own `finally` must not record the hand-off as the turn's
+      // end: the turn ends when the poller settles it, through one of the two
+      // callbacks above.
+      latencyHandedOff = true;
+      // Diagnostics only, and only these fields.
+      console.warn(
+        JSON.stringify({
+          event: "chat_client_stream_reattach",
+          traceId: requestTraceId,
+          modelId,
+          interruption: interruption.kind,
+          ...(interruption.kind === "timeout"
+            ? { errorCode: interruption.errorCode }
+            : {}),
+        })
+      );
+      return true;
+    };
+
     // The bundle actually presented, which a stale-recovery retry replaces.
     // `contextBundle` is what this send was prepared with; after one refusal
     // for drift the request is re-prepared and this becomes the new one.
     let activeContextBundle = researchMode ? null : contextBundle ?? null;
     let contextBundleRetries = 0;
     let contextBundleCollisionRetries = 0;
+    // The one automatic resend a transient database refusal earns.
+    let transientDatabaseRetries = 0;
     let memoryUsedCount = 0;
     // Set only on a turn the Router actually chose the model for. The server
     // omits both headers on a manual turn and on an Auto turn that fell back,
@@ -2063,7 +2313,8 @@ function ChatAppComponent({
           // past them (lib/chatRequestLimits.ts).
           messages: researchMode ? [{ ...toChatRequestMessage(userMessage), id: sourceUserMessageId }] : fitChatRequestTranscript(
             requestTranscriptForScope(
-              messages,
+              // A turn the person replaced is not shown to the model again.
+              withoutSuperseded(messages, replacedIds),
               userMessage,
               transcriptScope
             )
@@ -2086,6 +2337,9 @@ function ChatAppComponent({
                 // The server fingerprints the attempt with it, so a reused
                 // assistant id cannot be attached to a different question.
                 sourceUserMessageId,
+                // The turn this send replaces: recorded by the server with the
+                // finished answer, even if this page is gone by then.
+                ...(replacement.replacing() && !researchMode ? { supersedesMessageIds: replacement.replacing() } : {}),
               }
             : {}),
           ...(researchMode ? { researchMode } : {}),
@@ -2201,6 +2455,8 @@ function ChatAppComponent({
             typeof errorBody?.error === "string" ? errorBody.error : undefined;
           (requestError as Error & { details?: unknown }).details =
             errorBody?.details;
+          (requestError as Error & { retryAfter?: string }).retryAfter =
+            res.headers.get("Retry-After") ?? undefined;
           throw requestError;
         }
 
@@ -2340,6 +2596,90 @@ function ChatAppComponent({
           activeContextBundle = refreshed;
           contextBundleCollisionRetries += 1;
           response = await sendChatRequest(undefined, recoverWithSavedLocation);
+        } else if (
+          !researchMode && !hasRouterLocationContinuation && promptRefinerAllowsAutomaticChatRecovery(promptRefinerDecision) &&
+          isTransientDatabaseCode(code) &&
+          transientDatabaseRetries < 1 &&
+          // A Guest Auto turn is one-shot by design; every other guest send
+          // is the same request again, as before.
+          !(isGuestMode && guestAutoCapability) &&
+          !controller.signal.aborted
+        ) {
+          // The server refused before any provider call, because a database
+          // connection did not open in time (503 DATABASE_TEMPORARILY_UNAVAILABLE
+          // with Retry-After). Nothing was answered and nothing was paid for, so
+          // the same question is sent once more after the pause the server
+          // asked for. A second refusal falls through to the localized
+          // "try again shortly" sentence below.
+          //
+          // Everything that makes a resend safe is the machinery the
+          // `already_consumed` recovery above already relies on:
+          //   * the saved question keeps its id, so it is not saved or shown
+          //     twice -- only the request is repeated;
+          //   * the answer gets a fresh id, because the server ended the first
+          //     attempt as failed and the old id would reattach to it;
+          //   * a prepared context bundle is single-use and may already have
+          //     been consumed, so it is prepared again.
+          transientDatabaseRetries += 1;
+          liveness.stop();
+          await waitForTransientRetry(
+            transientDatabaseRetryDelayMs(
+              (error as { retryAfter?: string } | null)?.retryAfter
+            ),
+            controller.signal
+          );
+          controller.signal.throwIfAborted();
+
+          if (activeContextBundle) {
+            let refreshed: string | null = null;
+            try {
+              refreshed = onContextBundleStale
+                ? await onContextBundleStale({
+                    promptId: analyticsPromptId,
+                    modelId,
+                  })
+                : contextLayout === "single"
+                  ? await prepareChatContextBundle({
+                      conversationId: isGuestMode ? null : targetChatId,
+                      modelIds: [modelId],
+                      prompt: text,
+                      previousContextBundle: activeContextBundle,
+                      projectReferences,
+                    })
+                  : null;
+            } catch {
+              // The database is still not answering; the refusal below is
+              // the honest result, not a failed refresh.
+              refreshed = null;
+            }
+            if (!refreshed) throw error;
+            activeContextBundle = refreshed;
+          }
+          controller.signal.throwIfAborted();
+
+          if (!isGuestMode) {
+            const refusedAssistantMessageId = assistantMessageId;
+            const freshAssistantMessageId = crypto.randomUUID();
+            const pending = getChatRuntimeSnapshot(runKey).messages.find(
+              (message) => message.id === refusedAssistantMessageId
+            );
+            if (!pending || pending.role !== "assistant" || pending.content) {
+              throw error;
+            }
+            writeChatRuntimeMessages(runKey, (current) =>
+              current.map((message) =>
+                message.id === refusedAssistantMessageId
+                  ? {
+                      ...message,
+                      id: freshAssistantMessageId,
+                      createdAt: new Date().toISOString(),
+                    }
+                  : message
+              )
+            );
+            assistantMessageId = freshAssistantMessageId;
+          }
+          response = await sendChatRequest(undefined, recoverWithSavedLocation);
         } else {
           throw error;
         }
@@ -2421,6 +2761,8 @@ function ChatAppComponent({
               : message
           )
         );
+        if (completedMessage) replacement.complete(completedMessage.status);
+        else if (isActiveChatResponseAttempt(attempt)) parkReplacement(assistantMessageId, replacement);
         if (isActiveChatResponseAttempt(attempt)) {
           durableAttemptPollStartedRef.current.set(
             assistantMessageId,
@@ -2449,6 +2791,29 @@ function ChatAppComponent({
         throw new Error(t("chat.responseBodyMissing"));
       }
 
+      durableStream = isDurableChatStreamResponse({
+        responseMode: response.headers.get("X-Chat-Response-Mode"),
+        transcriptScope,
+        isGuest: isGuestMode,
+        isReviewProjection: Boolean(reviewProvider),
+        conversationId: targetChatId,
+      });
+      if (durableStream && typeof document !== "undefined") {
+        // A frozen page runs no timers, so a connection that died while the
+        // phone was locked or the app was in the background is checked the
+        // moment the page is back, rather than whenever the watchdog's timer
+        // next gets to run.
+        const recheckLiveness = () => {
+          if (document.visibilityState === "visible") liveness.checkNow();
+        };
+        document.addEventListener("visibilitychange", recheckLiveness);
+        window.addEventListener("online", recheckLiveness);
+        detachPageLivenessListeners = () => {
+          document.removeEventListener("visibilitychange", recheckLiveness);
+          window.removeEventListener("online", recheckLiveness);
+        };
+      }
+
       /*
         The read loop lives in lib/chatStreamConsumer.ts.
 
@@ -2464,8 +2829,12 @@ function ChatAppComponent({
         // A stream the server failed part way carries its error report in a
         // trailer written just before the break. A connection that simply
         // dropped has none, and that report stays unverified.
-        onInterrupted: (json) =>
-          adoptStreamErrorReport(parseChatStreamTrailer(json)),
+        onInterrupted: (json) => {
+          const trailer = parseChatStreamTrailer(json);
+          streamReadFailed = true;
+          serverReportedFailure = Boolean(trailer?.errorReport);
+          adoptStreamErrorReport(trailer);
+        },
         onProgress: (progress) => {
           if (progress.displayText.trim() && sourceReceipt?.status === "unknown") sourceReceipt = { ...sourceReceipt, status: "dispatched" };
           if (progress.retryingWithModelId && sourceReceipt?.attempt === 0) sourceReceipt = { ...sourceReceipt, attempt: 1, status: "unknown" };
@@ -2526,6 +2895,15 @@ function ChatAppComponent({
         all rather than a spinner that never resolves.
       */
       const artifacts = trailer?.artifacts ?? [];
+      // A file the server kept is the answer even with no prose above it
+      // (docs/policy/generated-artifacts.md section 8): the card is shown,
+      // with this screen's own sentence, instead of "empty response". A
+      // failure card alone is kept the same way -- it is what the server
+      // stored, and what a reload will show -- but it is not a reply.
+      const fileOnlyAnswer =
+        !assistantText.trim() &&
+        artifacts.some((artifact) => artifact.status === "ready");
+      const cardOnlyAnswer = !assistantText.trim() && artifacts.length > 0;
 
       // The server stopped waiting for the provider and said so. Checked
       // before the empty-response branch below, and that order is the whole
@@ -2541,7 +2919,7 @@ function ChatAppComponent({
           ERROR_CLASSIFICATION_SOURCE.server,
           assistantText
         );
-      } else if (!assistantText.trim()) {
+      } else if (!assistantText.trim() && !cardOnlyAnswer) {
         if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
           conversationId: targetChatId, sourceUserMessageId, status: "normal", nonempty: false });
         if (requestTraceId && typeof window !== "undefined") {
@@ -2556,7 +2934,11 @@ function ChatAppComponent({
           // "pick another model" is the wrong advice then (2026-11-21).
           `${t(trailer?.failure?.kind === "attachment_rejected"
             ? "chat.responseAttachmentRejected"
-            : "chat.responseEmpty")}${
+            : trailer?.persistence === "not_saved"
+              ? "chat.responseNotSavedNotice"
+              : trailer?.persistence === "unknown"
+                ? "chat.responseSaveUnknownNotice"
+                : "chat.responseEmpty")}${
             requestTraceId
               ? `\n${t("chat.traceId")}: ${requestTraceId}`
               : ""
@@ -2587,12 +2969,21 @@ function ChatAppComponent({
           undefined,
           {
             searchMetadata,
-            appliedReasoningEffort: trailer?.appliedReasoningEffort,
+            // `medium` is a Desktop-only step; the web composer has no label for it.
+            appliedReasoningEffort: trailer?.appliedReasoningEffort === "medium" ? undefined : trailer?.appliedReasoningEffort,
             // Always written, so a retry that produces no file clears the
             // cards the previous attempt left behind.
             artifacts,
             isGeneratingArtifact: false,
             generatingArtifactFormat: undefined,
+            // The server did not (or could not confirm it did) save this
+            // answer; say so under it.
+            ...(trailer?.persistence ? { persistence: trailer.persistence } : {}),
+            // Which notice an incomplete answer gets: the output ceiling, or
+            // a provider stream that broke off.
+            ...(completionStatus === "incomplete" && trailer?.completion?.incompleteReason
+              ? { incompleteReason: trailer.completion.incompleteReason }
+              : {}),
             ...(memoryUsedCount > 0 ? { memoryUsedCount } : {}),
             // Only when the Router chose it, and only when the answer did not
             // then fall back to something else: `retryingWithModelId` means a
@@ -2609,8 +3000,11 @@ function ChatAppComponent({
             modelId: answeringModelId({ requestedModelId: modelId, routedModelId, retryingWithModelId }),
           }
         );
+        // Only an answer the server stored replaces the turn before it.
+        replacement.complete(completionStatus, { saved: !trailer?.persistence });
         if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
-          conversationId: targetChatId, sourceUserMessageId, status: completionStatus, nonempty: Boolean(assistantText.trim()) });
+          conversationId: targetChatId, sourceUserMessageId, status: completionStatus,
+          nonempty: Boolean(assistantText.trim()) || fileOnlyAnswer });
         onResponseComplete?.(
           analyticsPromptId,
           answeringModelId({ requestedModelId: modelId, routedModelId, retryingWithModelId }),
@@ -2619,6 +3013,26 @@ function ChatAppComponent({
         );
       }
     } catch (error: unknown) {
+      // A durable stream that broke -- a client timeout, or a body read that
+      // rejected with nothing the server signed -- is read from its attempt
+      // row instead of ending here. Everything else takes the paths below,
+      // unchanged; so does this turn, if the attempt ends without an answer.
+      const interruption = decideChatStreamReattach({
+        durableStream,
+        aborted: controller.signal.aborted,
+        abortCause: getChatRuntimeAbortCause(runKey, controller),
+        streamReadFailed,
+        serverReportedFailure,
+      });
+      // Only to a panel that shows the conversation the run belongs to: a
+      // turn the user walked away from ends as it always did.
+      if (
+        interruption &&
+        targetChatId &&
+        handOffInterruptedStream(interruption, targetChatId)
+      ) {
+        return;
+      }
       const requestError =
         error && typeof error === "object"
           ? (error as {
@@ -2757,6 +3171,20 @@ function ChatAppComponent({
               errorCode === "TURNSTILE_NOT_CONFIGURED" ||
               errorCode === "SECURITY_NOT_CONFIGURED"
             ? t("chat.guestVerificationUnavailable")
+          : isTransientDatabaseCode(errorCode)
+            // Raised by the chat route and by the shared rate limiter alike.
+            // Reaching here means the one automatic resend was already spent
+            // (or never applied), so the person is asked to try again.
+            ? t("chat.databaseTemporarilyUnavailable")
+          : errorCode === "CHAT_APPLICATION_ERROR"
+            // The server's sentence for this code is a fixed Korean one. A
+            // database fault after paid work began (a search, a router call, a
+            // scanned page) ends here instead of as a resend, so it reads as
+            // the generic failure in the person's own language.
+            ? t("chat.responseError")
+          : CHAT_SEND_LOCALIZED_ATTACHMENT_CODES.has(errorCode) &&
+              chatAttachmentErrorCopyKey(errorCode)
+            ? t(chatAttachmentErrorCopyKey(errorCode) as string)
           : errorCode === "CHAT_RATE_LIMITED"
             ? t("chat.tooManyRequestsRetry").replace(
                 "{seconds}",
@@ -2889,7 +3317,8 @@ function ChatAppComponent({
       }	
     } finally {
 	  liveness.stop();
-      latency.finish(latencyCompleted ? "completed" :
+      detachPageLivenessListeners();
+      if (!latencyHandedOff) latency.finish(latencyCompleted ? "completed" :
         controller.signal.aborted && classifyChatAbort(getChatRuntimeAbortCause(runKey, controller)).kind !== "timeout"
           ? "cancelled" : "failed");
 
@@ -2943,6 +3372,27 @@ function ChatAppComponent({
     );
     if (prompt && prompt.attachments.length === 0) onRetryPrompt(prompt);
   }, [initialConversationId, onRetryPrompt, transcriptScope]);
+
+  /**
+   * Asks the newest finished answer's question again ("Regenerate", "Try
+   * another model" once a model is chosen) or sends an edited copy of it.
+   *
+   * Both go through the shell's ordinary retry send, so the turn is validated,
+   * priced and charged like any question typed into the composer. Nothing is
+   * deleted: the replaced question and answer are noted as replaced
+   * (lib/chatSupersededTurns.ts) when the new send actually starts.
+   */
+  const handleReplaceLastTurn = useCallback((editedText?: string) => {
+    if (transcriptScope !== "conversation" || !onRetryPrompt || !initialConversationId ||
+        isChatRuntimeStreaming(runtimeKeyRef.current)) return;
+    const turn = lastReplaceableTurn(getChatRuntimeSnapshot(runtimeKeyRef.current).messages);
+    if (!turn || !canResendQuestion(turn)) return;
+    const text = (editedText ?? turn.question.content).trim();
+    if (!text) return;
+    armSupersede(initialConversationId, text, [turn.question.id, turn.answer.id]);
+    onRetryPrompt({ text, attachments: [], targetChatId: initialConversationId });
+  }, [initialConversationId, onRetryPrompt, transcriptScope]);
+  const handleRegenerateAnswer = useCallback(() => handleReplaceLastTurn(), [handleReplaceLastTurn]);
 
   /**
    * Sends a concurrency-refused question again, in place of the refused turn.
@@ -3486,6 +3936,9 @@ function ChatAppComponent({
           ? handleRetryQuestion : undefined}
         // In Chat the shell's close-model handler opens the model picker.
         onChooseAnotherModel={transcriptScope === "conversation" ? onRequestCloseModel : undefined}
+        onRegenerateAnswer={transcriptScope === "conversation" && onRetryPrompt ? handleRegenerateAnswer : undefined}
+        onEditLastQuestion={transcriptScope === "conversation" && onRetryPrompt ? handleReplaceLastTurn : undefined}
+        enableQuote={transcriptScope === "conversation" && currentProduct === "chat"}
         // Built from this transcript, which is the one on screen.
         onCompareInReview={transcriptScope === "conversation" && (onCompareContinuationInReview || onCompareInReview)
           ? (messageId) => {

@@ -1,0 +1,363 @@
+import "server-only";
+
+import { randomUUID } from "node:crypto";
+import type { Session } from "next-auth";
+import type { Prisma } from "@prisma/client";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
+import {
+  DESKTOP_REMOTE_COMMAND_RETENTION_MS,
+  DESKTOP_REMOTE_COMMAND_TTL_MS,
+  DESKTOP_REMOTE_LIMITS,
+  DESKTOP_REMOTE_SNAPSHOT_TTL_MS,
+  DESKTOP_REMOTE_WITHDRAWN_MS,
+  checkDesktopRemoteCommand,
+  desktopRemoteCommand,
+  desktopRemoteSnapshot,
+  type DesktopRemoteCommand,
+  type DesktopRemoteCommandRefusal,
+  type DesktopRemoteCommandRequest,
+  type DesktopRemoteCommandView,
+  type DesktopRemoteDeviceView,
+  type DesktopRemoteSyncRequest,
+} from "@/lib/desktopRemoteControlContract";
+import { prisma } from "@/lib/prisma";
+
+/**
+ * The server half of Desktop remote control (docs/ops/desktop-remote-control.md). It relays and records; it decides
+ * nothing on the PC. A PC writes only its own row, through its own Desktop bearer. A web session reads and writes only
+ * the PCs of its own account, and only while the PC's token family is live.
+ *
+ * Raw SQL on purpose: handing an answer to the PC is one conditional UPDATE ... RETURNING, so it is handed over at most
+ * once under any race, and every expiry is compared with the database clock (the columns are TIMESTAMPTZ; the
+ * `MobileTokenFamily` expiry is a naive UTC timestamp and is compared with `now() AT TIME ZONE 'UTC'`).
+ */
+
+type DesktopIdentity = { userId: string; deviceId: string; familyId: string };
+
+export class DesktopRemoteRefused extends Error {
+  constructor(readonly code: DesktopRemoteCommandRefusal) {
+    super("The remote control request was refused.");
+  }
+}
+
+type DeliveredRow = {
+  id: string; kind: string; taskKey: string; approvalId: string | null; approvalDigest: string | null;
+  decision: string | null; text: string | null; ageMs: number; createdMs: number;
+};
+
+/**
+ * The PC's sync: replaces its report, records what it did with the answers it last received, and hands it the
+ * answers that are waiting, each once. Returns null when the account is not active. A report whose number is not
+ * higher than the last one taken from this PC, or than its withdrawal, is not taken: it was sent earlier and arrived
+ * late. The answer then says so, with the number the server holds.
+ */
+export async function syncDesktopRemote(identity: DesktopIdentity, body: DesktopRemoteSyncRequest) {
+  const snapshot = JSON.stringify(body.snapshot);
+  return prisma.$transaction(async (tx) => {
+    const active = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "User" WHERE "id" = ${identity.userId} AND "accountStatus" = 'active'
+    `;
+    if (!active.length) return null;
+    const written = await tx.$executeRaw`
+      INSERT INTO "DesktopRemoteDevice" ("deviceId", "userId", "familyId", "snapshot", "revision", "createdAt", "updatedAt", "expiresAt")
+      VALUES (${identity.deviceId}, ${identity.userId}, ${identity.familyId}, ${snapshot}::jsonb, ${body.seq}::bigint, now(), now(),
+        now() + (${DESKTOP_REMOTE_SNAPSHOT_TTL_MS}::integer * interval '1 millisecond'))
+      ON CONFLICT ("deviceId") DO UPDATE SET
+        "familyId" = EXCLUDED."familyId", "snapshot" = EXCLUDED."snapshot", "revision" = EXCLUDED."revision",
+        "updatedAt" = now(), "expiresAt" = EXCLUDED."expiresAt", "withdrawnAt" = NULL
+      WHERE "DesktopRemoteDevice"."userId" = ${identity.userId} AND EXCLUDED."revision" > "DesktopRemoteDevice"."revision"
+    `;
+    if (written !== 1) {
+      const held = await tx.$queryRaw<Array<{ seq: string }>>`
+        SELECT "revision"::text AS "seq" FROM "DesktopRemoteDevice" WHERE "deviceId" = ${identity.deviceId} AND "userId" = ${identity.userId}
+      `;
+      return held[0] ? { stale: true as const, seq: Number(held[0].seq) } : null;
+    }
+    for (const ack of body.acks) {
+      await tx.$executeRaw`
+        UPDATE "DesktopRemoteCommand" SET "result" = ${ack.result}, "resultReason" = ${ack.result === "refused" ? ack.reason ?? null : null},
+          "resultAt" = now()
+        WHERE "id" = ${ack.id} AND "deviceId" = ${identity.deviceId} AND "deliveredAt" IS NOT NULL AND "result" IS NULL
+      `;
+    }
+    const rows = await tx.$queryRaw<DeliveredRow[]>`
+      UPDATE "DesktopRemoteCommand" AS c SET "deliveredAt" = now()
+      WHERE c."id" IN (
+        SELECT "id" FROM "DesktopRemoteCommand"
+        WHERE "deviceId" = ${identity.deviceId} AND "userId" = ${identity.userId} AND "deliveredAt" IS NULL AND "expiresAt" > now()
+        ORDER BY "createdAt" LIMIT ${DESKTOP_REMOTE_LIMITS.commandsPerSync}
+        FOR UPDATE SKIP LOCKED
+      )
+      RETURNING c."id", c."kind", c."taskKey", c."approvalId", c."approvalDigest", c."decision", c."text",
+        (EXTRACT(EPOCH FROM (now() - c."createdAt")) * 1000)::float8 AS "ageMs",
+        (EXTRACT(EPOCH FROM c."createdAt") * 1000)::float8 AS "createdMs"
+    `;
+    // An answer outlives its retention for as long as this PC still reports the request it answered: the row is what
+    // refuses a second answer for it.
+    await tx.$executeRaw`
+      DELETE FROM "DesktopRemoteCommand"
+      WHERE "deviceId" = ${identity.deviceId} AND "createdAt" < now() - (${DESKTOP_REMOTE_COMMAND_RETENTION_MS}::integer * interval '1 millisecond')
+        AND NOT ("approvalId" IS NOT NULL AND EXISTS (
+          SELECT 1 FROM "DesktopRemoteDevice" r
+          WHERE r."deviceId" = "DesktopRemoteCommand"."deviceId" AND r."snapshot"->'approval'->>'id' = "DesktopRemoteCommand"."approvalId"
+        ))
+    `;
+    const commands: DesktopRemoteCommand[] = [];
+    for (const row of [...rows].sort((a, b) => a.createdMs - b.createdMs)) {
+      const command = desktopRemoteCommand.safeParse({
+        id: row.id, kind: row.kind, deviceId: identity.deviceId, taskKey: row.taskKey, ageMs: Math.max(0, Math.round(row.ageMs)),
+        ...(row.kind === "approval" ? { approvalId: row.approvalId, digest: row.approvalDigest, decision: row.decision } : {}),
+        ...(row.kind === "follow_up" ? { text: row.text } : {}),
+      });
+      if (command.success) commands.push(command.data);
+    }
+    return { stale: false as const, deviceId: identity.deviceId, commands };
+  });
+}
+
+/**
+ * The PC turned remote control off (or is signing out): its report and every answer waiting for it go now. What stays
+ * for a short while is an empty, hidden marker with the number of this request, so that a sync the PC sent before it
+ * and that arrives after it is refused instead of putting the report back. The withdrawal obeys the same order: one
+ * whose number is not higher than the last request taken from this PC was sent before that request, arrives late, and
+ * changes nothing.
+ */
+export async function withdrawDesktopRemote(identity: DesktopIdentity, seq: number): Promise<{ stale: false } | { stale: true; seq: number | null }> {
+  return prisma.$transaction(async (tx) => {
+    // The marker is written first. Writing it takes the row's lock, so an answer that is being recorded for this PC has
+    // either committed, and is removed below, or waits for this and then finds no report it could answer.
+    const won = await tx.$executeRaw`
+      INSERT INTO "DesktopRemoteDevice" ("deviceId", "userId", "familyId", "snapshot", "revision", "createdAt", "updatedAt", "expiresAt", "withdrawnAt")
+      VALUES (${identity.deviceId}, ${identity.userId}, ${identity.familyId}, '{"tasks":[],"approval":null}'::jsonb, ${seq}::bigint, now(), now(), now(), now())
+      ON CONFLICT ("deviceId") DO UPDATE SET
+        "snapshot" = EXCLUDED."snapshot", "revision" = EXCLUDED."revision",
+        "updatedAt" = now(), "expiresAt" = now(), "withdrawnAt" = now()
+      WHERE "DesktopRemoteDevice"."userId" = ${identity.userId} AND EXCLUDED."revision" > "DesktopRemoteDevice"."revision"
+    `;
+    if (won !== 1) {
+      const held = await tx.$queryRaw<Array<{ seq: string }>>`
+        SELECT "revision"::text AS "seq" FROM "DesktopRemoteDevice" WHERE "deviceId" = ${identity.deviceId} AND "userId" = ${identity.userId}
+      `;
+      return { stale: true as const, seq: held[0] ? Number(held[0].seq) : null };
+    }
+    await tx.$executeRaw`
+      DELETE FROM "DesktopRemoteCommand" WHERE "deviceId" = ${identity.deviceId} AND "userId" = ${identity.userId}
+    `;
+    return { stale: false as const };
+  });
+}
+
+type DeviceRow = { deviceId: string; label: string; snapshot: unknown; updatedMs: number };
+type CommandRow = {
+  id: string; deviceId: string; kind: string; taskKey: string; approvalId: string | null; decision: string | null;
+  delivered: boolean; expired: boolean; result: string | null; resultReason: string | null; createdMs: number;
+};
+
+const commandState = (row: CommandRow): DesktopRemoteCommandView["state"] =>
+  row.result === "applied" ? "applied" : row.result === "refused" ? "refused" : row.delivered ? "delivered" : row.expired ? "expired" : "waiting";
+
+/**
+ * The account's PCs that report now, for the web screen. A report past its expiry, or of a device or token family that
+ * is revoked or no longer the account's, is deleted here rather than shown. One expired report is kept, hidden: the
+ * report whose request already has an answer. Its answer row is what refuses a second answer when the PC comes back
+ * with the same request still open, and it goes when the PC reports the request closed or its sign-in ends.
+ */
+export async function listDesktopRemoteDevices(userId: string): Promise<DesktopRemoteDeviceView[]> {
+  await prisma.$executeRaw`
+    DELETE FROM "DesktopRemoteDevice" AS r
+    WHERE r."userId" = ${userId} AND (NOT EXISTS (
+      SELECT 1 FROM "MobileDevice" d JOIN "MobileTokenFamily" f ON f."deviceId" = d."id"
+      WHERE d."id" = r."deviceId" AND d."userId" = r."userId" AND d."platform" = 'desktop' AND d."revokedAt" IS NULL
+        AND f."id" = r."familyId" AND f."userId" = r."userId" AND f."revokedAt" IS NULL
+        AND f."absoluteExpiresAt" > (now() AT TIME ZONE 'UTC')
+    ) OR (r."expiresAt" <= now() AND NOT (r."withdrawnAt" IS NOT NULL AND r."withdrawnAt" > now() - (${DESKTOP_REMOTE_WITHDRAWN_MS}::integer * interval '1 millisecond')) AND NOT EXISTS (
+      SELECT 1 FROM "DesktopRemoteCommand" c
+      WHERE c."deviceId" = r."deviceId" AND c."approvalId" = r."snapshot"->'approval'->>'id'
+    )))
+  `;
+  const devices = await prisma.$queryRaw<DeviceRow[]>`
+    SELECT r."deviceId", d."label", r."snapshot", (EXTRACT(EPOCH FROM r."updatedAt") * 1000)::float8 AS "updatedMs"
+    FROM "DesktopRemoteDevice" r JOIN "MobileDevice" d ON d."id" = r."deviceId"
+    WHERE r."userId" = ${userId} AND d."userId" = ${userId} AND r."expiresAt" > now()
+    ORDER BY r."updatedAt" DESC
+    LIMIT 10
+  `;
+  if (!devices.length) return [];
+  const commands = await prisma.$queryRaw<CommandRow[]>`
+    SELECT "id", "deviceId", "kind", "taskKey", "approvalId", "decision", "deliveredAt" IS NOT NULL AS "delivered",
+      "expiresAt" <= now() AS "expired", "result", "resultReason", (EXTRACT(EPOCH FROM "createdAt") * 1000)::float8 AS "createdMs"
+    FROM "DesktopRemoteCommand"
+    WHERE "userId" = ${userId} AND "deviceId" = ANY(${devices.map((device) => device.deviceId)}::text[])
+      AND ("createdAt" > now() - (${DESKTOP_REMOTE_COMMAND_RETENTION_MS}::integer * interval '1 millisecond')
+        OR ("approvalId" IS NOT NULL AND EXISTS (
+          SELECT 1 FROM "DesktopRemoteDevice" r
+          WHERE r."deviceId" = "DesktopRemoteCommand"."deviceId" AND r."snapshot"->'approval'->>'id' = "DesktopRemoteCommand"."approvalId"
+        )))
+    ORDER BY "createdAt" DESC
+    LIMIT 100
+  `;
+  const views: DesktopRemoteDeviceView[] = [];
+  for (const device of devices) {
+    const snapshot = desktopRemoteSnapshot.safeParse(device.snapshot);
+    if (!snapshot.success) continue;
+    views.push({
+      deviceId: device.deviceId,
+      label: device.label.slice(0, 80),
+      updatedAt: new Date(device.updatedMs).toISOString(),
+      snapshot: snapshot.data,
+      commands: commands.filter((row) => row.deviceId === device.deviceId).slice(0, 20).map((row) => ({
+        id: row.id,
+        kind: row.kind as DesktopRemoteCommandView["kind"],
+        taskKey: row.taskKey,
+        approvalId: row.approvalId,
+        decision: row.decision as DesktopRemoteCommandView["decision"],
+        state: commandState(row),
+        reason: row.resultReason as DesktopRemoteCommandView["reason"],
+        createdAt: new Date(row.createdMs).toISOString(),
+      })),
+    });
+  }
+  return views;
+}
+
+const AUDIT_ACTIONS = {
+  approval: "desktop_remote.approval_answered",
+  stop: "desktop_remote.task_stop_requested",
+  follow_up: "desktop_remote.follow_up_sent",
+} as const;
+
+function auditSummary(input: DesktopRemoteCommandRequest) {
+  if (input.kind === "approval") return `Answered a Desktop approval request from another device (${input.decision === "once" ? "allow once" : "deny"})`;
+  if (input.kind === "stop") return "Asked a Desktop task to stop from another device";
+  return "Sent a Desktop task a follow-up from another device";
+}
+
+/**
+ * Whether a command would be refused now, read without locking and without writing anything: the PC is the account's own and
+ * reports now, the task and the request are the ones it reported with the same digest and answerable from another device, and
+ * the request is not answered yet. Asked before a passkey ceremony is started and before its challenge is used, so that a
+ * request that changed or was answered meanwhile is said so first; `recordDesktopRemoteCommand` still decides under its lock.
+ */
+export async function precheckDesktopRemoteCommand(userId: string, command: DesktopRemoteCommandRequest): Promise<DesktopRemoteCommandRefusal | null> {
+  const approvalId = command.kind === "approval" ? command.approvalId : null;
+  const rows = await prisma.$queryRaw<Array<{ snapshot: unknown; answered: boolean }>>`
+    SELECT r."snapshot", EXISTS (
+      SELECT 1 FROM "DesktopRemoteCommand" c WHERE c."deviceId" = r."deviceId" AND c."approvalId" = ${approvalId}::text
+    ) AS "answered"
+    FROM "DesktopRemoteDevice" r
+    JOIN "MobileDevice" d ON d."id" = r."deviceId"
+    JOIN "MobileTokenFamily" f ON f."id" = r."familyId"
+    WHERE r."deviceId" = ${command.deviceId} AND r."userId" = ${userId} AND r."expiresAt" > now()
+      AND d."userId" = ${userId} AND d."platform" = 'desktop' AND d."revokedAt" IS NULL
+      AND f."userId" = ${userId} AND f."deviceId" = r."deviceId" AND f."revokedAt" IS NULL
+      AND f."absoluteExpiresAt" > (now() AT TIME ZONE 'UTC')
+  `;
+  const snapshot = rows[0] ? desktopRemoteSnapshot.safeParse(rows[0].snapshot) : null;
+  if (!snapshot?.success) return "DEVICE_NOT_FOUND";
+  const verdict = checkDesktopRemoteCommand(command, snapshot.data);
+  if (!verdict.ok) return verdict.code;
+  return rows[0]!.answered ? "ALREADY_ANSWERED" : null;
+}
+
+/**
+ * Records one answer, stop or follow-up from a signed-in web session, with the person's audit entry in the same
+ * transaction. Refused unless the PC is the session's own, reports now, and its latest report has the task (and, for an
+ * answer, the very request with the same digest, answerable from another device). A second answer for one request is
+ * refused by the unique index. The PC checks everything again before it acts.
+ */
+export async function recordDesktopRemoteCommand(input: {
+  session: Session;
+  request: Request;
+  command: DesktopRemoteCommandRequest;
+  /**
+   * The passkey that confirmed this command (lib/desktopRemotePasskeyStore.ts), when one was needed. `apply` moves its counter
+   * in this transaction, after the answer was stored: a command that is refused leaves no use of the passkey behind.
+   */
+  passkeyUse?: { passkeyId: string; apply(tx: Prisma.TransactionClient): Promise<void> };
+}): Promise<{ id: string }> {
+  const userId = input.session.user.id;
+  const command = input.command;
+  return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    // The audit chain's lock comes before any row lock (lib/adminAudit.ts takeAuditChainLock).
+    await takeAuditChainLock(tx);
+    const device = await tx.$queryRaw<Array<{ snapshot: unknown }>>`
+      SELECT r."snapshot" FROM "DesktopRemoteDevice" r
+      JOIN "MobileDevice" d ON d."id" = r."deviceId"
+      JOIN "MobileTokenFamily" f ON f."id" = r."familyId"
+      WHERE r."deviceId" = ${command.deviceId} AND r."userId" = ${userId} AND r."expiresAt" > now()
+        AND d."userId" = ${userId} AND d."platform" = 'desktop' AND d."revokedAt" IS NULL
+        AND f."userId" = ${userId} AND f."deviceId" = r."deviceId" AND f."revokedAt" IS NULL
+        AND f."absoluteExpiresAt" > (now() AT TIME ZONE 'UTC')
+      FOR UPDATE OF r
+    `;
+    const snapshot = device[0] ? desktopRemoteSnapshot.safeParse(device[0].snapshot) : null;
+    if (!snapshot?.success) throw new DesktopRemoteRefused("DEVICE_NOT_FOUND");
+    const verdict = checkDesktopRemoteCommand(command, snapshot.data);
+    if (!verdict.ok) throw new DesktopRemoteRefused(verdict.code);
+
+    const id = randomUUID();
+    const approval = command.kind === "approval" ? command : null;
+    const inserted = await tx.$queryRaw<Array<{ id: string }>>`
+      INSERT INTO "DesktopRemoteCommand" ("id", "deviceId", "userId", "kind", "taskKey", "approvalId", "approvalDigest", "decision", "text", "createdAt", "expiresAt")
+      VALUES (${id}, ${command.deviceId}, ${userId}, ${command.kind}, ${command.taskKey}, ${approval?.approvalId ?? null},
+        ${approval?.digest ?? null}, ${approval?.decision ?? null}, ${command.kind === "follow_up" ? command.text : null}, now(),
+        now() + (${DESKTOP_REMOTE_COMMAND_TTL_MS}::integer * interval '1 millisecond'))
+      ON CONFLICT ("deviceId", "approvalId") DO NOTHING
+      RETURNING "id"
+    `;
+    if (!inserted.length) throw new DesktopRemoteRefused("ALREADY_ANSWERED");
+    await input.passkeyUse?.apply(tx);
+
+    await writeAdminAuditLog({
+      tx,
+      session: input.session,
+      request: input.request,
+      action: AUDIT_ACTIONS[command.kind],
+      targetType: "DesktopRemoteCommand",
+      targetId: id,
+      summary: auditSummary(command),
+      // Names and counts only: never the follow-up text, a command line or a path.
+      metadata: {
+        deviceId: command.deviceId,
+        taskKey: command.taskKey,
+        ...(input.passkeyUse ? { passkeyId: input.passkeyUse.passkeyId } : {}),
+        ...(approval ? {
+          approvalId: approval.approvalId, decision: approval.decision, digest: approval.digest,
+          approvalKind: snapshot.data.approval?.kind ?? null,
+        } : {}),
+        ...(command.kind === "follow_up" ? { textLength: command.text.length } : {}),
+      },
+    });
+    return { id };
+  });
+}
+
+/**
+ * Maintenance: reports past their expiry and answers past their retention. Both are short-lived by design. An answer
+ * for a request its PC still reports is kept, so that request cannot be answered a second time. So is the expired
+ * report that shows it, for as long as the device's sign-in is valid: a PC that was away and comes back with the
+ * request still open finds its answer here.
+ */
+export async function purgeDesktopRemoteControl() {
+  const commands = await prisma.$executeRaw`
+    DELETE FROM "DesktopRemoteCommand"
+    WHERE "createdAt" < now() - (${DESKTOP_REMOTE_COMMAND_RETENTION_MS}::integer * interval '1 millisecond')
+    AND NOT ("approvalId" IS NOT NULL AND EXISTS (
+      SELECT 1 FROM "DesktopRemoteDevice" r
+      WHERE r."deviceId" = "DesktopRemoteCommand"."deviceId" AND r."snapshot"->'approval'->>'id' = "DesktopRemoteCommand"."approvalId"
+    ))
+  `;
+  const devices = await prisma.$executeRaw`
+    DELETE FROM "DesktopRemoteDevice" AS r
+    WHERE r."expiresAt" <= now() AND NOT (r."withdrawnAt" IS NOT NULL AND r."withdrawnAt" > now() - (${DESKTOP_REMOTE_WITHDRAWN_MS}::integer * interval '1 millisecond')) AND NOT (EXISTS (
+      SELECT 1 FROM "DesktopRemoteCommand" c
+      WHERE c."deviceId" = r."deviceId" AND c."approvalId" = r."snapshot"->'approval'->>'id'
+    ) AND EXISTS (
+      SELECT 1 FROM "MobileDevice" d JOIN "MobileTokenFamily" f ON f."deviceId" = d."id"
+      WHERE d."id" = r."deviceId" AND d."userId" = r."userId" AND d."platform" = 'desktop' AND d."revokedAt" IS NULL
+        AND f."id" = r."familyId" AND f."userId" = r."userId" AND f."revokedAt" IS NULL
+        AND f."absoluteExpiresAt" > (now() AT TIME ZONE 'UTC')
+    ))
+  `;
+  return { commands, devices };
+}

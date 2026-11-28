@@ -22,6 +22,23 @@
  * how Korean body text wraps; the document title prefers whole words.
  * Latin breaks at spaces and falls back to mid-word only when a single word
  * is wider than the column.
+ *
+ * ## A character the font cannot draw
+ *
+ * The embedded font is a subset (see `lib/generatedArtifactFont.ts`), so a
+ * document can name a character it has no glyph for: an emoji, a rare hanja,
+ * Arabic. One such character used to fail the whole file, which is the wrong
+ * trade for a contract that has one stray emoji in it. Now it is drawn
+ * as a replacement box and the writer reports which characters were replaced
+ * and how often, so the caller can tell the user.
+ *
+ * What it will not do is hand over a document that is mostly boxes. When more
+ * than `PDF_MAX_REPLACED_SHARE` of the visible characters have no glyph the
+ * file would be unreadable rather than imperfect, so that case still fails --
+ * with the characters named, so the model can say why and offer DOCX, where
+ * the reader's own fonts apply. Invisible characters (variation selectors,
+ * zero-width joiners, control codes) are dropped without a box and without
+ * being counted.
  */
 
 import "server-only";
@@ -91,10 +108,53 @@ const STYLES = {
 /* Measuring and breaking                                                     */
 /* ------------------------------------------------------------------------ */
 
-type Glyph = { id: number; width: number };
+/** `codePoint` is the character the author wrote, not the glyph drawn for it. */
+type Glyph = { id: number; width: number; codePoint: number };
+
+/** The box drawn in place of a character the font has no glyph for. */
+const REPLACEMENT_CODE_POINT = 0x25a1;
 
 /**
- * A string as glyphs, or the character that stopped it.
+ * More than this share of a document's visible characters having no glyph
+ * turns "a few boxes" into "a page of boxes", and the file is refused instead.
+ */
+export const PDF_MAX_REPLACED_SHARE = 0.25;
+
+/** How many distinct characters an error or a notice names before "and N more". */
+const LISTED_CHARACTERS = 24;
+const NOTICE_CHARACTERS = 12;
+
+const replacementGlyph = (font: LoadedFont): number =>
+  glyphFor(font, REPLACEMENT_CODE_POINT) ?? 0;
+
+/**
+ * Characters that draw nothing: control codes and the format characters
+ * (zero-width joiner and space, variation selectors, bidi marks, byte order
+ * mark). A font without a glyph for them is not missing anything, so they are
+ * dropped rather than boxed.
+ */
+const isInvisible = (codePoint: number): boolean =>
+  /^[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}]$/u.test(String.fromCodePoint(codePoint));
+
+const isWhitespace = (codePoint: number): boolean =>
+  /^\s$/u.test(String.fromCodePoint(codePoint));
+
+/**
+ * The glyph a character is drawn with: its own, the replacement box, or null
+ * when it is invisible and nothing is drawn.
+ */
+const glyphForCharacter = (font: LoadedFont, codePoint: number): number | null => {
+  const own = glyphFor(font, codePoint);
+  if (own !== null) return own;
+  return isInvisible(codePoint) ? null : replacementGlyph(font);
+};
+
+/**
+ * A string as glyphs.
+ *
+ * Never throws for a character the font cannot draw: it is drawn as a box
+ * (see the file header). `renderDocumentPdf` counts those once, up front, in
+ * `record`, which is the one place that sees every string the document draws.
  *
  * A tab becomes four spaces because the PDF text operator has no tab stop, and
  * silently dropping it would close up indentation the author wrote.
@@ -103,17 +163,9 @@ const toGlyphs = (font: LoadedFont, value: string): Glyph[] => {
   const glyphs: Glyph[] = [];
   for (const character of value.replace(/\t/g, "    ")) {
     const codePoint = character.codePointAt(0)!;
-    const id = glyphFor(font, codePoint);
-    if (id === null) {
-      throw new PdfGenerationError(
-        "UNSUPPORTED_CHARACTERS",
-        `The PDF font cannot draw "${character}" (U+${codePoint
-          .toString(16)
-          .toUpperCase()
-          .padStart(4, "0")}).`
-      );
-    }
-    glyphs.push({ id, width: font.advances[id] ?? 0 });
+    const id = glyphForCharacter(font, codePoint);
+    if (id === null) continue;
+    glyphs.push({ id, width: font.advances[id] ?? 0, codePoint });
   }
   return glyphs;
 };
@@ -123,12 +175,14 @@ const glyphsWidth = (glyphs: readonly Glyph[], size: number, unitsPerEm: number)
 
 /** Whether a line may break *before* this character. */
 const breaksBefore = (codePoint: number): boolean =>
-  // Hangul syllables and jamo, CJK punctuation and ideographs: Korean wraps
-  // between syllables rather than at spaces.
+  // Hangul syllables and jamo, kana and ideographs: Korean, Japanese and
+  // Chinese wrap between characters rather than at spaces.
   (codePoint >= 0xac00 && codePoint <= 0xd7a3) ||
   (codePoint >= 0x1100 && codePoint <= 0x11ff) ||
   (codePoint >= 0x3130 && codePoint <= 0x318f) ||
-  (codePoint >= 0x4e00 && codePoint <= 0x9fff);
+  (codePoint >= 0x3040 && codePoint <= 0x30ff) ||
+  (codePoint >= 0x4e00 && codePoint <= 0x9fff) ||
+  (codePoint >= 0xf900 && codePoint <= 0xfaff);
 
 const wrap = (
   font: LoadedFont,
@@ -143,7 +197,6 @@ const wrap = (
       lines.push([]);
       continue;
     }
-    const characters = [...paragraph];
     const glyphs = toGlyphs(font, paragraph);
     let line: Glyph[] = [];
     let lineWidth = 0;
@@ -153,8 +206,7 @@ const wrap = (
     for (let index = 0; index < glyphs.length; index += 1) {
       const glyph = glyphs[index]!;
       const advance = glyph.width * (size / font.unitsPerEm);
-      const character = characters[index] ?? " ";
-      const codePoint = character.codePointAt(0)!;
+      const codePoint = glyph.codePoint;
 
       if (lineWidth + advance > width && line.length > 0) {
         if (lastBreak >= 0) {
@@ -170,9 +222,9 @@ const wrap = (
           // on its final line. Carry a few glyphs with that short tail when
           // the measured column can fit them; never overflow a narrow cell.
           let tailLength = 0;
-          while (tailLength < 3 && index + tailLength < characters.length) {
-            const next = characters[index + tailLength]!;
-            if (/\s/u.test(next) || breaksBefore(next.codePointAt(0)!)) break;
+          while (tailLength < 3 && index + tailLength < glyphs.length) {
+            const next = glyphs[index + tailLength]!.codePoint;
+            if (isWhitespace(next) || breaksBefore(next)) break;
             tailLength += 1;
           }
           const carryCount = tailLength > 0 && tailLength < 3 ? 3 - tailLength : 0;
@@ -195,8 +247,11 @@ const wrap = (
 
       // Keep closing punctuation with its preceding Korean/CJK syllable.
       // Remember an earlier break so the pair moves together without overflow.
-      const nextCloses = /[.,!?;:%)\]}〉》」』】、。，！？：；…]/u.test(characters[index + 1] ?? "");
-      if (character === " " || (!keepWords && breaksBefore(codePoint) && !nextCloses)) {
+      const following = glyphs[index + 1];
+      const nextCloses =
+        following !== undefined &&
+        /[.,!?;:%)\]}〉》」』】、。，！？：；…]/u.test(String.fromCodePoint(following.codePoint));
+      if (codePoint === 0x20 || (!keepWords && breaksBefore(codePoint) && !nextCloses)) {
         lastBreak = line.length;
         widthAtBreak = lineWidth;
       }
@@ -562,22 +617,91 @@ const buildPdf = (objects: PdfObject[]): Uint8Array => {
 /* Entry point                                                                */
 /* ------------------------------------------------------------------------ */
 
+/** One kind of character drawn as a box, and how many times. */
+export type PdfReplacedCharacter = {
+  character: string;
+  codePoint: number;
+  count: number;
+};
+
+export type PdfRenderResult = {
+  bytes: Uint8Array;
+  /** Every character the font has no glyph for, most frequent first. */
+  replaced: PdfReplacedCharacter[];
+  /** The total of `replaced[].count`. */
+  replacedCount: number;
+};
+
+const replacedCharacters = (counts: ReadonlyMap<number, number>): PdfReplacedCharacter[] =>
+  [...counts.entries()]
+    .map(([codePoint, count]) => ({ character: String.fromCodePoint(codePoint), codePoint, count }))
+    // Most frequent first; the code point breaks ties so the order, and the
+    // sentence made from it, is the same on every run.
+    .sort((a, b) => b.count - a.count || a.codePoint - b.codePoint);
+
+const listCharacters = (replaced: readonly PdfReplacedCharacter[], limit: number, withCounts: boolean) => {
+  const shown = replaced
+    .slice(0, limit)
+    .map((entry) => (withCounts && entry.count > 1 ? `${entry.character}x${entry.count}` : entry.character))
+    .join(" ");
+  const kinds = replaced.length;
+  return kinds > limit ? `${shown} and ${kinds - limit} more kinds` : shown;
+};
+
+/**
+ * What the caller should tell the user when a PDF was made with boxes in it,
+ * or null when nothing was replaced. Written for the model, which relays it.
+ */
+export const describePdfReplacements = (result: PdfRenderResult): string | null => {
+  if (result.replacedCount === 0) return null;
+  const one = result.replacedCount === 1;
+  return (
+    `The PDF font has no glyph for ${result.replacedCount} character${one ? "" : "s"} of this ` +
+    `document (${listCharacters(result.replaced, NOTICE_CHARACTERS, true)}), so ` +
+    `${one ? "it is" : "each is"} drawn as a box. Tell the user which characters were ` +
+    `replaced, and offer a Word (.docx) version, where their own fonts apply.`
+  );
+};
+
 /** The PDF for an admitted document specification. */
 export const renderDocumentPdf = (
   spec: DocumentSpec,
   images: ResolvedDocumentImages = new Map()
-): Uint8Array => {
+): Uint8Array => renderDocumentPdfWithReport(spec, images).bytes;
+
+/**
+ * The PDF, and which characters had to be drawn as a box to make it.
+ *
+ * Throws `PdfGenerationError("UNSUPPORTED_CHARACTERS")` when so much of the
+ * document has no glyph that a PDF of it would be mostly boxes.
+ */
+export const renderDocumentPdfWithReport = (
+  spec: DocumentSpec,
+  images: ResolvedDocumentImages = new Map()
+): PdfRenderResult => {
   const font = loadPdfFont();
   const builder = new PageBuilder(font);
   const used = new Map<number, number>();
+  const replacedCounts = new Map<number, number>();
+  let visible = 0;
+  let replacedCount = 0;
 
-  // Every glyph the document draws, recorded as it is measured so the subset
-  // and the content stream cannot disagree about what was used.
-  const record = (value: string) => {
+  // Every glyph the document draws, recorded up front so the subset and the
+  // content stream cannot disagree about what was used -- and so a document
+  // that cannot be drawn is refused before any of it is laid out.
+  const record = (value: string, counted = true) => {
     for (const character of value.replace(/\t/g, "    ")) {
       const codePoint = character.codePointAt(0)!;
       const glyph = glyphFor(font, codePoint);
-      if (glyph !== null) used.set(glyph, codePoint);
+      if (glyph !== null) {
+        used.set(glyph, codePoint);
+        if (counted && !isWhitespace(codePoint)) visible += 1;
+      } else if (!isInvisible(codePoint)) {
+        used.set(replacementGlyph(font), REPLACEMENT_CODE_POINT);
+        replacedCounts.set(codePoint, (replacedCounts.get(codePoint) ?? 0) + 1);
+        replacedCount += 1;
+        visible += 1;
+      }
     }
   };
 
@@ -593,11 +717,12 @@ export const renderDocumentPdf = (
         break;
       case "bullets":
       case "numbers":
-        block.items.forEach(record);
-        record("•0123456789. ");
+        block.items.forEach((item) => record(item));
+        // The list markers are glyphs to keep, not text the author wrote.
+        record("•0123456789. ", false);
         break;
       case "table":
-        block.columns.forEach(record);
+        block.columns.forEach((column) => record(column));
         block.rows.forEach((row) => row.forEach((value, column) => record(tableCellText(block, column, value))));
         break;
       case "image":
@@ -606,6 +731,17 @@ export const renderDocumentPdf = (
       default:
         break;
     }
+  }
+
+  const replaced = replacedCharacters(replacedCounts);
+  if (replacedCount > 0 && replacedCount / visible > PDF_MAX_REPLACED_SHARE) {
+    throw new PdfGenerationError(
+      "UNSUPPORTED_CHARACTERS",
+      `The PDF font does not cover this document's writing system: ${replacedCount} of ` +
+        `${visible} characters (${Math.round((replacedCount / visible) * 100)}%) have no glyph. ` +
+        `Characters it cannot draw: ${listCharacters(replaced, LISTED_CHARACTERS, false)}. ` +
+        `Make a .docx instead, or write in a language the PDF font covers.`
+    );
   }
 
   if (spec.title) {
@@ -692,9 +828,13 @@ export const renderDocumentPdf = (
     return objects.length;
   };
 
+  // Compressed: `loca` and `hmtx` have an entry for every glyph in the face
+  // (the subset keeps glyph ids stable, see lib/generatedArtifactFont.ts), and
+  // they are almost all repeats, so Flate takes a few hundred KB to a few tens.
+  const compressedFont = zlibSync(fontProgram, { level: 6 });
   const fontFile = add(
-    `<< /Length ${fontProgram.length} /Length1 ${fontProgram.length} >>`,
-    fontProgram
+    `<< /Length ${compressedFont.length} /Length1 ${fontProgram.length} /Filter /FlateDecode >>`,
+    compressedFont
   );
   const descriptor = add(
     `<< /Type /FontDescriptor /FontName /${PDF_FONT_NAME} /Flags 4 ` +
@@ -780,5 +920,5 @@ export const renderDocumentPdf = (
 
   add(`<< /Type /Catalog /Pages ${pagesObject} 0 R >>`);
 
-  return buildPdf(objects);
+  return { bytes: buildPdf(objects), replaced, replacedCount };
 };

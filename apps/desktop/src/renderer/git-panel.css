@@ -1,0 +1,32 @@
+.git-panel-dialog { width: min(720px, 94vw); max-height: 82vh; overflow: auto; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px; }
+.git-panel-dialog::backdrop { background: #0a10204d; }
+.git-panel-dialog header, .git-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.git-panel-dialog h2 { margin: 0; font-size: 16px; }
+.git-panel-dialog h3, .pr-view h3, .git-approval h3 { margin: 14px 0 6px; font-size: 13px; }
+.git-panel-dialog section { border-top: 1px solid var(--line); padding: 8px 0 12px; }
+.git-panel-dialog label { display: grid; gap: 4px; font-size: 12px; margin: 6px 0; }
+.git-panel-dialog label.inline { display: flex; align-items: center; gap: 6px; }
+.git-panel-dialog input:not([type="checkbox"]), .git-panel-dialog textarea { min-width: 0; border: 1px solid var(--line); border-radius: 7px; background: var(--raised); color: var(--text); padding: 8px; font: inherit; }
+.git-panel-dialog textarea { min-height: 64px; resize: vertical; }
+.git-files { list-style: none; padding: 0; margin: 0; max-height: 180px; overflow: auto; }
+.git-files li { display: flex; align-items: center; gap: 8px; padding: 2px 0; font-size: 12px; overflow-wrap: anywhere; }
+.git-files code, .pr-view code, .git-approval code { font-size: 12px; }
+.git-notice { margin: 8px 0 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.git-notice[role="alert"] { color: light-dark(#a31535, #f09ab0); }
+.pr-view { margin-top: 10px; }
+.pr-view ul { list-style: none; padding: 0; margin: 0; }
+.pr-view li { border-bottom: 1px solid var(--line); padding: 8px 0; }
+.pr-check[data-bucket="fail"] .pr-bucket { color: light-dark(#a31535, #f09ab0); }
+.pr-check[data-bucket="pass"] .pr-bucket { color: light-dark(#11664f, #89d2b8); }
+.pr-check[data-bucket="pending"] .pr-bucket { color: light-dark(#835009, #f3c57a); }
+.pr-comment-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; font-size: 12px; max-height: 160px; overflow: auto; }
+.prompt-attachments { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; padding: 0; margin: 6px 0 0; font-size: 12px; }
+.prompt-attachments li { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 999px; padding: 2px 6px 2px 10px; background: var(--raised); }
+.git-approval section { border-top: 1px solid var(--line); padding: 6px 0 10px; }
+.git-approval dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: 13px; }
+.git-approval dd { margin: 0; overflow-wrap: anywhere; }
+.git-approval ul { margin: 4px 0; padding-left: 18px; font-size: 13px; }
+.git-approval pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font: inherit; }
+.git-draft { display: grid; gap: 4px; margin: 8px 0; }
+.git-draft small { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.git-panel-dialog select { min-width: 0; border: 1px solid var(--line); border-radius: 7px; background: var(--raised); color: var(--text); padding: 6px 8px; font: inherit; }

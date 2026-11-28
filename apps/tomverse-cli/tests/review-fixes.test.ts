@@ -19,10 +19,11 @@ import { captureOutput } from "./helpers.js";
 import { Runner, findCompactionCut } from "../src/agent.js";
 import { renderFileDiff, safeText } from "../src/display.js";
 import { canonicalDigest } from "../src/session.js";
-import { undoChange, UndoError, viewChanges } from "../src/changes.js";
+import { renderChange, undoChange, UndoError, viewChanges } from "../src/changes.js";
 import { chmodSync, renameSync, statSync, symlinkSync } from "node:fs";
 import { planCommand, runCommand, CommandError } from "../src/commands.js";
 import { renderApproval } from "../src/interactive.js";
+import { applyPlannedPatch, type ToolContext } from "../src/tools.js";
 
 const src = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
 
@@ -79,6 +80,27 @@ test("a compaction cut off by the network stops before any further paid request"
             assert.equal(compact.length, 1);
             assert.equal(compact[0]!.lookup, "not_found", "looked up by its recorded key; not found is not taken as free");
             assert.equal(gateway.completions.at(-1)!.body.messages.at(-1).content.includes("Summarize this session"), true, "the compaction was the last request sent");
+        }
+    ));
+
+test("a confirmed credit refusal during compaction pauses before the next model step", () =>
+    withGateway(
+        (body) => {
+            if (/Summarize this session so far/.test(lastUserText(body))) {
+                return { fault: "http", status: 429, code: "key_credit_cap_reached" };
+            }
+            return toolResultsSinceUser(body).length < 3
+                ? { toolCalls: [{ name: "read_file", args: { path: "big.txt" } }] } : { text: "done" };
+        },
+        async (gateway) => {
+            const repo = makeRepo({ "big.txt": "가나다 const value = 1; ".repeat(200) });
+            const { runner, journal } = await makeRunner(gateway, repo, { prompter: null, model: "fake-small", contextWindow: 9_000 });
+            assert.equal(await runner.runTask("Read big.txt a few times"), "error");
+            const record = journal.state.generations.at(-1);
+            assert.equal(record?.purpose, "compact");
+            assert.equal(record.error?.code, "key_credit_cap_reached");
+            assert.equal(record.closed, true);
+            assert.equal(gateway.completions.length, journal.state.generations.length);
         }
     ));
 
@@ -211,6 +233,65 @@ test("undo re-checks the real path: a parent swapped for a link out of the works
             assert.equal(readFileSync(join(outside, "sub", "f.txt"), "utf8"), "new\n", "the file outside is untouched");
         }
     ));
+
+test("a mid-patch conflict reports the applied, failed and unattempted paths separately", async () => {
+    await withGateway(() => ({ text: "done" }), async (gateway) => {
+        const root = makeRepo({ "middle.txt": "original" });
+        const path = join(root, "middle.txt");
+        const { journal } = await makeRunner(gateway, root);
+        const workspace = new Workspace(root);
+        const plan = planPatch(workspace, [
+            { path: "first.txt", action: "create", content: "written" },
+            { path: "middle.txt", action: "update", replacements: [{ old: "original", new: "model text" }] },
+            { path: "last.txt", action: "create", content: "unattempted" },
+        ]);
+        let checks = 0;
+        const ctx: ToolContext = {
+            workspace, journal, readByteLimit: 1024, commandTimeoutMs: 1000, commandEnv: [],
+            signal: () => new AbortController().signal,
+            onActivity() {}, onCommandOutput() {},
+            beforeWrite(edit) {
+                if (edit.path === "middle.txt" && ++checks === 2) writeFileSync(path, "later edit");
+            },
+        };
+        try {
+            const outcome = applyPlannedPatch(ctx, "tool", plan);
+            assert.equal(outcome.status, "partial");
+            assert.deepEqual(outcome.files.map((file) => [file.path, file.status]), [
+                ["first.txt", "applied"], ["middle.txt", "failed"], ["last.txt", "not_attempted"],
+            ]);
+            assert.equal(readFileSync(join(root, "first.txt"), "utf8"), "written");
+            assert.equal(readFileSync(path, "utf8"), "later edit");
+            assert.equal(existsSync(join(root, "last.txt")), false);
+        } finally {
+            journal.release();
+        }
+    });
+});
+
+test("the saved diff survives a same-byte file replacement but undo refuses the replacement", async () => {
+    await withGateway(
+        (body) => toolResultsSinceUser(body).length ? { text: "ok" } :
+            { toolCalls: [{ name: "apply_patch", args: { edits: [{ path: "new.txt", action: "create", content: "same bytes\n" }] } }] },
+        async (gateway) => {
+            const root = makeRepo();
+            const { runner, journal } = await makeRunner(gateway, root, { prompter: scriptedPrompter([true]) });
+            try {
+                await runner.runTask("create a test file");
+                const change = journal.state.changes[0]!;
+                const path = join(root, "new.txt");
+                renameSync(path, join(root, "earlier.txt"));
+                writeFileSync(path, "same bytes\n");
+                assert.match(renderChange(journal, change), /\+ same bytes/);
+                assert.equal(viewChanges(journal)[0]!.current, "changed_since");
+                assert.throws(() => undoChange(journal, change.changeId), UndoError);
+                assert.equal(readFileSync(path, "utf8"), "same bytes\n");
+            } finally {
+                journal.release();
+            }
+        },
+    );
+});
 test("search attributes each match by its whole path and never returns a credential file's lines", () =>
     withGateway(
         () => ({ text: "x" }),
@@ -254,11 +335,11 @@ test("cancel also ends a descendant that moved to its own session (setsid)", { s
     const dir = tempDir("tree");
     const marker = join(dir, "survived.txt");
     const grandchild = join(dir, "gc.cjs");
-    writeFileSync(grandchild, `setTimeout(() => require("fs").writeFileSync(${JSON.stringify(marker)}, "x"), 3000); setInterval(() => {}, 1000);\n`);
+    writeFileSync(grandchild, `setTimeout(() => require("fs").writeFileSync(process.argv[2], "x"), 3000); setInterval(() => {}, 1000);\n`);
     const parent = join(dir, "p.cjs");
-    writeFileSync(parent, `require("child_process").spawn(process.execPath, [${JSON.stringify(grandchild)}], { detached: true, stdio: "ignore" }).unref(); setInterval(() => {}, 1000);\n`);
+    writeFileSync(parent, `require("child_process").spawn(process.execPath, [process.argv[2], process.argv[3]], { detached: true, stdio: "ignore" }).unref(); setInterval(() => {}, 1000);\n`);
     const controller = new AbortController();
-    const running = runCommand(planCommand({ argv: [process.execPath, parent] }, dir, 60_000), controller.signal);
+    const running = runCommand(planCommand({ argv: [process.execPath, parent, grandchild, marker] }, dir, 60_000), controller.signal);
     setTimeout(() => controller.abort(), 800);
     const result = await running;
     assert.equal(result.cancelled, true);

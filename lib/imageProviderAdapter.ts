@@ -1,20 +1,26 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+import sharp from "sharp";
 import { DIRECT_RASTER_MODELS, isDirectRasterProvider, RECRAFT_SIZE, type DirectRasterProvider } from "@/lib/directRasterModels";
+import { FAL_BRIA_BACKGROUND_REMOVAL, IMAGE_PHOTO_TOOL_SIZE, imagePhotoToolContract, RECRAFT_BACKGROUND_REMOVAL } from "@/lib/imagePhotoTools";
 import { IDEOGRAM_MODEL_ID, IDEOGRAM_OUTPUT_COST_MICRO_USD, IDEOGRAM_SIZE, isIdeogramAssetUrl } from "@/lib/ideogramImageRequest";
 
 import {
   IMAGE_GENERATION_MODEL_ID,
+  IMAGE_PROMPT_MAX_TOKENS,
   imageModelSupportsEdit,
   type ImageQuality,
   type ImageSize,
 } from "@/lib/imageGenerationPricing";
 import {
   getImageModel,
+  imageEditCredits,
   GOOGLE_IMAGE_OUTPUT_LIMIT_MARGIN,
   imageDeliveryMimeType,
   imageMeasuredOutputLimitBound,
   imageThinkingCapEnforced,
+  isImagePhotoTool,
   type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
 import {
@@ -38,8 +44,10 @@ import {
   falPlatformHeaders,
   falAssetLengthRefused,
   FAL_MAX_ASSET_BYTES,
+  FAL_RUN_URL_BASE,
   isFalAssetUrl,
   parseFalImageResponse,
+  parseFalSingleImageResponse,
 } from "@/lib/falImageRequest";
 import { resolveProviderApiKey } from "@/lib/modelRegistryShared";
 import {
@@ -52,6 +60,7 @@ import {
   GOOGLE_API_KEY_HEADER,
   GOOGLE_INTERACTIONS_URL,
   googleBilledImageTokens,
+  googleBilledPhotoInputTokens,
   googleNonImageBillableTokens,
   parseGoogleImageResponse,
   readGoogleImageInteraction,
@@ -151,6 +160,12 @@ export class ImageProviderError extends Error {
 
   /** The response's numeric usage fields, where a refused response reported any (billing measurement). */
   providerUsage: Record<string, number> | null = null;
+
+  /**
+   * What the provider said the refused request cost, where it reports one.
+   * The failure then charges the provider budget anything past the reservation.
+   */
+  reportedCostMicroUsd: number | null = null;
 
   /**
    * The provider generated (and billed) the image and only fetching or
@@ -421,7 +436,7 @@ const getImageApiKey = () => {
  * audit blob. The set is the guard, so adding a provider means adding its name
  * here rather than remembering that this filter exists.
  */
-const PROMPT_FIELD_NAMES = new Set(["prompt", "input"]);
+const REQUEST_CONTENT_FIELDS = new Set(["prompt", "input", "images"]);
 
 /**
  * The audit view of a request body: everything except the prompt, which is
@@ -432,7 +447,7 @@ const auditableRequestParams = (
   body: Record<string, unknown>
 ): Record<string, unknown> =>
   Object.fromEntries(
-    Object.entries(body).filter(([key]) => !PROMPT_FIELD_NAMES.has(key))
+    Object.entries(body).filter(([key]) => !REQUEST_CONTENT_FIELDS.has(key))
   );
 
 /**
@@ -502,12 +517,12 @@ export const generateImageWithProvider = async (input: {
       `Image model ${modelId} has no thinking cap its request can enforce.`
     );
   }
-  // OpenAI, xAI and fal have edit requests. Any other model asked to edit
-  // would draw a new picture from the prompt alone -- charged as an edit and
-  // ignoring the photo -- so it is refused, as is one whose edit price is held.
+  // An edit must have both a photo path and a verified price for this option.
+  const price = input.editImage && model.prices.find(option => option.size === input.size && option.quality === input.quality);
   if (
     input.editImage &&
-    !(["openai", "xai", "fal", "byteplus"].includes(model.provider) && imageModelSupportsEdit(model.id))
+    !(["openai", "xai", "fal", "byteplus", "qwen", "bfl", "google", "recraft", "ideogram"].includes(model.provider) &&
+      imageModelSupportsEdit(model.id) && price && imageEditCredits(model, price))
   ) {
     throw new ImageProviderError(
       "provider_failed",
@@ -553,6 +568,9 @@ const dispatchImageRequest = async (
   model: ImageModelProfile,
   input: ImageRequestInput
 ): Promise<ImageProviderResult> => {
+  if (isImagePhotoTool(model.id)) {
+    return removeBackground(model, input);
+  }
   if (isDirectRasterProvider(model.provider)) {
     return generateWithDirectRaster(model.provider, model, input);
   }
@@ -624,7 +642,9 @@ const generateWithOpenAi = async (
   };
   const apiKey = getImageApiKey();
   let lastError: ImageProviderError | null = null;
-  const retries = input.retry === false ? 0 : RETRY_DELAYS_MS.length;
+  // An edit reservation funds one output. A timeout or 5xx could follow a
+  // completed billable edit, so submit once.
+  const retries = input.retry === false || editImage ? 0 : RETRY_DELAYS_MS.length;
 
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     if (attempt > 0) {
@@ -642,6 +662,7 @@ const generateWithOpenAi = async (
           ...(init.headers as Record<string, string> | undefined),
           Authorization: `Bearer ${apiKey}`,
         },
+        redirect: "error",
         signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       });
     } catch (error) {
@@ -762,7 +783,7 @@ const generateWithOpenAi = async (
  */
 const generateWithGoogle = async (
   model: ImageModelProfile,
-  input: { prompt: string; size: ImageSize; retry?: boolean }
+  input: ImageRequestInput
 ): Promise<ImageProviderResult> => {
   const body = buildGoogleImageRequest({
     apiModelId: model.apiModelId,
@@ -771,6 +792,7 @@ const generateWithGoogle = async (
     maxOutputTokens: model.maxOutputTokens ?? null,
     thinkingLevel: model.thinkingLevel ?? null,
     deliveryMimeType: imageDeliveryMimeType(model),
+    referencePngBase64: input.editImage?.bytes.toString("base64"),
   });
   if (!body) {
     throw new ImageProviderError(
@@ -778,7 +800,7 @@ const generateWithGoogle = async (
       `Image size ${input.size} has no Google request mapping for ${model.id}.`
     );
   }
-  const requestParams = auditableRequestParams(body);
+  const requestParams = { ...auditableRequestParams(body), ...editAuditParams(input.editImage, "interactions") };
   const apiKey = getGoogleApiKey();
   let lastError: ImageProviderError | null = null;
   // A measurement sends one request per sample, a rate limit included.
@@ -798,6 +820,7 @@ const generateWithGoogle = async (
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
+        redirect: "error",
         signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       });
     } catch (error) {
@@ -877,10 +900,20 @@ const generateWithGoogle = async (
     }
     const imageBytes = Buffer.from(parsed.imageBase64, "base64");
     const dimensions = readImageDimensions(imageBytes, parsed.mimeType);
+    const imageInputTokens = input.editImage ? googleBilledPhotoInputTokens(payload) : null;
+    let inputTokens = parsed.usage.inputTokens;
+    if (input.editImage) {
+      // Without the split, settle the photo and prompt at their separate
+      // reserved bounds. The combined count includes image tokens.
+      inputTokens = imageInputTokens === null
+        ? IMAGE_PROMPT_MAX_TOKENS
+        : Math.max(0, inputTokens - imageInputTokens);
+    }
     return {
       imageBytes,
       mimeType: parsed.mimeType,
-      inputTokens: parsed.usage.inputTokens,
+      ...(input.editImage ? { imageInputTokens } : {}),
+      inputTokens,
       thinkingTokens: parsed.usage.thinkingTokens,
       nonImageBillableTokens,
       billedImageTokens: googleBilledImageTokens(payload),
@@ -1231,9 +1264,8 @@ const generateWithXai = async (
  * Qwen on Alibaba Cloud Model Studio International: one synchronous call, then
  * the result fetched from the URL it returns (valid 24 hours).
  *
- * Reached only through a runtime catalogue row the judge admitted -- no Qwen
- * model is seeded -- and generation only: the edit check above refuses this
- * provider.
+ * Reached only through an admitted runtime catalogue row. An edit sends a single
+ * normalized photo on the same endpoint.
  *
  * Shaped like the fal path, for the same reasons:
  *   * **one attempt.** Billing is per image, and a generation that succeeded
@@ -1249,12 +1281,21 @@ const generateWithXai = async (
  */
 const generateWithQwen = async (
   model: ImageModelProfile,
-  input: { prompt: string; size: ImageSize }
+  input: ImageRequestInput
 ): Promise<ImageProviderResult> => {
+  let reference: ImageEditInput | undefined;
+  if (input.editImage) {
+    const sharp = (await import("sharp")).default;
+    const bytes = await sharp(input.editImage.bytes)
+      .resize(1024, 1024, { fit: "contain", background: "#ffffff" })
+      .flatten({ background: "#ffffff" }).png().toBuffer();
+    reference = { bytes, mimeType: "image/png", width: 1024, height: 1024, sha256: createHash("sha256").update(bytes).digest("hex") };
+  }
   const body = buildQwenImageRequest({
     apiModelId: model.apiModelId,
     prompt: input.prompt,
     size: input.size,
+    ...(reference ? { reference: `data:image/png;base64,${reference.bytes.toString("base64")}` } : {}),
   });
   if (!body) {
     throw new ImageProviderError(
@@ -1262,7 +1303,7 @@ const generateWithQwen = async (
       `Image size ${input.size} has no Qwen request mapping for ${model.id}.`
     );
   }
-  const requestParams = auditableRequestParams(body);
+  const requestParams = { ...auditableRequestParams(body), ...editAuditParams(reference, "multimodal-generation") };
   const apiKey = getQwenApiKey();
 
   let response: Response;
@@ -1274,6 +1315,7 @@ const generateWithQwen = async (
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
+      redirect: "error",
       signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
     });
   } catch (error) {
@@ -1301,7 +1343,7 @@ const generateWithQwen = async (
     );
   }
 
-  const parsed = parseQwenImageResponse(payload);
+  const parsed = parseQwenImageResponse(payload, reference ? 1 : 0);
   if (!parsed) {
     throw new ImageProviderError(
       "provider_failed",
@@ -1447,26 +1489,44 @@ const generateWithDirectRaster = async (
   const isSeedream = provider === "byteplus";
   const apiKey = (isSeedream ? process.env.ARK_API_KEY : process.env.RECRAFT_API_TOKEN)?.trim();
   if (!apiKey) throw new ImageProviderError("provider_failed", "Image provider API key is not configured.");
+  const recraftEdit = !isSeedream && Boolean(input.editImage);
+  let editImage = input.editImage;
+  if (recraftEdit && editImage) {
+    // This endpoint derives its shape from the single input; keep the photo
+    // intact inside the square that the 2K catalogue option prices.
+    const bytes = await sharp(editImage.bytes)
+      .resize(2048, 2048, { fit: "contain", background: "#fff" })
+      .png()
+      .toBuffer();
+    editImage = {
+      bytes, width: 2048, height: 2048, mimeType: "image/png",
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    };
+  }
 
   const params = {
     model: contract.apiModelId,
-    size: input.size,
     response_format: "b64_json",
+    ...(recraftEdit ? { strength: 0.65, zdr: true } : { size: input.size }),
     // On Seedream 5.5, layer decomposition is the one-to-many image mode.
     ...(isSeedream
       ? { output_format: "png", background: "opaque", layer_decomposition: false, watermark: false }
       : { image_format: "png", n: 1 }),
   };
   // The audit stores only the prepared photo's dimensions, digest and byte count.
-  const requestParams = { ...params, ...editAuditParams(input.editImage, "generations") };
+  const requestParams = { ...params, ...editAuditParams(editImage, recraftEdit ? "imageToImage" : "generations") };
   const body = {
     ...params,
     prompt: input.prompt,
-    ...(input.editImage ? { image: `data:image/png;base64,${input.editImage.bytes.toString("base64")}` } : {}),
+    ...(editImage ? {
+      [recraftEdit ? "image_url" : "image"]: `data:image/png;base64,${editImage.bytes.toString("base64")}`,
+    } : {}),
   };
   const endpoint = isSeedream
     ? "https://ark.ap-southeast.bytepluses.com/api/v3/images/generations"
-    : "https://external.api.recraft.ai/v1/images/generations";
+    : recraftEdit
+      ? "https://external.api.recraft.ai/v1/images/imageToImage"
+      : "https://external.api.recraft.ai/v1/images/generations";
   const signal = AbortSignal.timeout(PROVIDER_TIMEOUT_MS);
   let response: Response;
   try {
@@ -1498,9 +1558,15 @@ const generateWithDirectRaster = async (
   const b64 = item?.b64_json;
   const bytes = typeof b64 === "string" && b64.length <= maxEncodedLength ? Buffer.from(b64, "base64") : null;
   const dimensions = bytes && bytes.byteLength <= FAL_MAX_ASSET_BYTES ? readImageDimensions(bytes, "image/png") : null;
+  // Recraft reports the request's cost in API units (1,000 micro-USD each); read before the image is judged,
+  // so a billed answer that is then refused still tells the failure what it cost.
+  const units = payload?.credits;
+  const reportedCostMicroUsd = !isSeedream && Number.isSafeInteger(units) && units >= 0 && Number.isSafeInteger(units * 1000)
+    ? units * 1000 : null;
   if (!bytes || !dimensions || `${dimensions.width}x${dimensions.height}` !== input.size) {
     const error = new ImageProviderError("provider_failed", "Direct provider returned an unusable image.", response.status, requestId, requestParams);
     error.afterGeneration = true;
+    error.reportedCostMicroUsd = reportedCostMicroUsd;
     throw error;
   }
   return {
@@ -1508,7 +1574,154 @@ const generateWithDirectRaster = async (
     providerRequestId: requestId, provenance: [...model.provenance],
     outputWidth: dimensions.width, outputHeight: dimensions.height, requestParams,
     providerUsage: isSeedream ? numericUsage(payload.usage) : numericUsage({ credits: payload.credits }),
+    ...(reportedCostMicroUsd === null ? {} : { reportedCostMicroUsd }),
   };
+};
+
+/**
+ * A background remover (lib/imagePhotoTools.ts). The photo is centred on the
+ * white square the tool's one option prices and comes back as a PNG of that
+ * square with the background cleared; the caller takes the photo's own area
+ * back out. No prompt is sent: the user's text never reaches these endpoints.
+ * One attempt, because a lost response can follow a request that was billed.
+ */
+const removeBackground = async (model: ImageModelProfile, input: ImageRequestInput): Promise<ImageProviderResult> => {
+  const contract = imagePhotoToolContract(model.id);
+  const price = model.prices.find(option => option.quality === input.quality && option.size === input.size);
+  if (!contract || contract.provider !== model.provider || !input.editImage || input.size !== IMAGE_PHOTO_TOOL_SIZE ||
+      !price || price.outputCostMicroUsd < contract.outputCostMicroUsd) {
+    throw new ImageProviderError("provider_failed", "Unsupported background removal option.");
+  }
+  const side = Number(IMAGE_PHOTO_TOOL_SIZE.split("x")[0]);
+  const photo = await sharp(input.editImage.bytes)
+    .resize(side, side, { fit: "contain", background: "#fff" })
+    .flatten({ background: "#fff" })
+    .png()
+    .toBuffer();
+  // The audit stores only the prepared photo's dimensions, digest and byte count.
+  const audit = editAuditParams({
+    bytes: photo, width: side, height: side, mimeType: "image/png",
+    sha256: createHash("sha256").update(photo).digest("hex"),
+  }, "removeBackground");
+  const imageUrl = `data:image/png;base64,${photo.toString("base64")}`;
+  const answer = contract.modelId === RECRAFT_BACKGROUND_REMOVAL.modelId
+    ? await recraftCutOut(imageUrl, audit)
+    : await falBriaCutOut(imageUrl, audit);
+  // Everything from here follows a request the provider answered and billed.
+  const refuse = (): never => {
+    const error = new ImageProviderError("provider_failed", "Background removal returned an unusable image.", 200, answer.providerRequestId, answer.requestParams);
+    error.afterGeneration = true;
+    error.reportedCostMicroUsd = answer.reportedCostMicroUsd ?? null;
+    throw error;
+  };
+  const dimensions = answer.bytes.byteLength > 0 && answer.bytes.byteLength <= FAL_MAX_ASSET_BYTES
+    ? readImageDimensions(answer.bytes, "image/png") : null;
+  if (!dimensions || `${dimensions.width}x${dimensions.height}` !== input.size) refuse();
+  // A cut-out has an alpha channel; a picture without one is the photo unchanged. Only read here:
+  // the provider's bytes are stored as they came (policy section 9), never re-encoded.
+  const hasAlpha = await sharp(answer.bytes).metadata().then(meta => meta.hasAlpha === true, () => false);
+  if (!hasAlpha) return refuse();
+  return {
+    imageBytes: answer.bytes, mimeType: "image/png", inputTokens: 0, outputTokens: 0, thinkingTokens: 0,
+    providerRequestId: answer.providerRequestId, provenance: [],
+    outputWidth: dimensions!.width, outputHeight: dimensions!.height, requestParams: answer.requestParams,
+    ...(answer.providerUsage ? { providerUsage: answer.providerUsage } : {}),
+    ...(answer.reportedCostMicroUsd === undefined ? {} : { reportedCostMicroUsd: answer.reportedCostMicroUsd }),
+  };
+};
+
+type CutOutAnswer = {
+  bytes: Buffer;
+  providerRequestId: string | null;
+  requestParams: Record<string, unknown>;
+  providerUsage?: Record<string, number>;
+  reportedCostMicroUsd?: number;
+};
+
+/** Recraft removeBackground: zero data retention, the PNG inline in the response. */
+const recraftCutOut = async (imageUrl: string, audit: Record<string, unknown>): Promise<CutOutAnswer> => {
+  const apiKey = process.env.RECRAFT_API_TOKEN?.trim();
+  if (!apiKey) throw new ImageProviderError("provider_failed", "Image provider API key is not configured.");
+  const params = { response_format: "b64_json", image_format: "png", zdr: true };
+  const requestParams = { ...params, ...audit };
+  const signal = AbortSignal.timeout(PROVIDER_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch("https://external.api.recraft.ai/v1/images/removeBackground", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ ...params, image_url: imageUrl }),
+      redirect: "error",
+      signal,
+    });
+  } catch {
+    throw new ImageProviderError("provider_failed", "Background removal request failed.", null, null, requestParams);
+  }
+  const maxEncodedLength = 4 * Math.ceil(FAL_MAX_ASSET_BYTES / 3);
+  const payload = await readResponseToBuffer(response, response.ok ? maxEncodedLength + 64 * 1024 : 64 * 1024, signal)
+    .then(bytes => JSON.parse(bytes.toString("utf8"))).catch(() => null);
+  const rawId = response.headers.get("x-request-id") ?? payload?.image?.image_id;
+  const providerRequestId = typeof rawId === "string" && /^[A-Za-z0-9_.:-]{1,180}$/.test(rawId) ? rawId : null;
+  if (!response.ok || payload?.error) {
+    const phase = /sensitive(content|image)|riskcontrol|content_?moderated/i.test(String(payload?.error?.code ?? ""))
+      ? "provider_moderation_rejected" : response.ok || response.status === 402
+        ? "provider_failed" : classifyImageProviderFailure(response.status, payload);
+    throw new ImageProviderError(phase, "Background removal was rejected.", response.status, providerRequestId, requestParams);
+  }
+  const b64 = payload?.image?.b64_json;
+  const units = payload?.credits;
+  return {
+    // An answer with no image is refused by the caller, as billed.
+    bytes: typeof b64 === "string" && b64.length <= maxEncodedLength ? Buffer.from(b64, "base64") : Buffer.alloc(0),
+    providerRequestId, requestParams,
+    providerUsage: numericUsage({ credits: units }) ?? undefined,
+    ...(Number.isSafeInteger(units) && units >= 0 && Number.isSafeInteger(units * 1000) ? { reportedCostMicroUsd: units * 1000 } : {}),
+  };
+};
+
+/**
+ * Bria RMBG 3.0 through fal. The same platform headers as every fal request
+ * (no retry, no stored payload, a 15-minute asset), and the asset is fetched
+ * only from fal's CDN with its size checked before it is read. fal reports no
+ * cost, so this settles at the fixed price.
+ */
+const falBriaCutOut = async (imageUrl: string, audit: Record<string, unknown>): Promise<CutOutAnswer> => {
+  const requestParams = { ...audit };
+  const apiKey = getFalApiKey();
+  const signal = AbortSignal.timeout(PROVIDER_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(`${FAL_RUN_URL_BASE}/${FAL_BRIA_BACKGROUND_REMOVAL.modelId}`, {
+      method: "POST",
+      headers: { Authorization: falAuthorizationHeader(apiKey), "Content-Type": "application/json", ...falPlatformHeaders() },
+      body: JSON.stringify({ image_url: imageUrl }),
+      redirect: "error",
+      signal,
+    });
+  } catch {
+    throw new ImageProviderError("provider_failed", "Background removal request failed.", null, null, requestParams);
+  }
+  const providerRequestId = response.headers.get("x-fal-request-id");
+  const payload = await readResponseToBuffer(response, 64 * 1024, signal)
+    .then(bytes => JSON.parse(bytes.toString("utf8"))).catch(() => null);
+  if (!response.ok) {
+    throw new ImageProviderError(
+      classifyImageProviderFailure(response.status, payload), imageProviderRejectionDetail(response.status, payload),
+      response.status, providerRequestId, requestParams
+    );
+  }
+  // Billed from here: every failure below leaves an empty answer for the caller to refuse.
+  const empty = { bytes: Buffer.alloc(0), providerRequestId, requestParams };
+  const parsed = parseFalSingleImageResponse(payload);
+  if (!parsed || parsed.mimeType !== "image/png") return empty;
+  // Followed manually so the final host is checked too.
+  const asset = await fetch(parsed.url, { redirect: "manual", signal }).catch(() => null);
+  if (!asset) return empty;
+  if (!asset.ok || !isFalAssetUrl(asset.url) || falAssetLengthRefused(asset.headers.get("content-length"))) {
+    await asset.body?.cancel().catch(() => undefined);
+    return empty;
+  }
+  return { ...empty, bytes: await readResponseToBuffer(asset, FAL_MAX_ASSET_BYTES, signal).catch(() => Buffer.alloc(0)) };
 };
 
 const generateWithIdeogram = async (model: ImageModelProfile, input: ImageRequestInput): Promise<ImageProviderResult> => {
@@ -1529,14 +1742,25 @@ const generateWithIdeogram = async (model: ImageModelProfile, input: ImageReques
     magic_prompt: "off",
     async: false,
   };
-  const requestParams = auditableRequestParams(body);
+  const { editImage } = input;
+  const requestParams = { ...auditableRequestParams(body), ...editAuditParams(editImage, "generations") };
+  let requestBody: BodyInit = JSON.stringify(body);
+  const headers: Record<string, string> = { "Api-Key": apiKey };
+  if (editImage) {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(body)) form.set(key, String(value));
+    form.set("images", new Blob([new Uint8Array(editImage.bytes)], { type: editImage.mimeType }), "reference.png");
+    requestBody = form;
+  } else {
+    headers["Content-Type"] = "application/json";
+  }
   let response: Response;
   try {
     // A lost response can follow a billable generation. Submit only once.
     response = await fetch("https://api.ideogram.ai/v2/image/generate/ideogram-4-6", {
       method: "POST",
-      headers: { "Api-Key": apiKey, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      headers,
+      body: requestBody,
       redirect: "error",
       signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
     });
@@ -1574,9 +1798,8 @@ const generateWithIdeogram = async (model: ImageModelProfile, input: ImageReques
  * FLUX 3 on the Black Forest Labs API: submit a task, poll the URL it returns
  * until it is ready, then fetch the signed image (valid ten minutes).
  *
- * Reached only through a runtime catalogue row the judge admitted -- no BFL
- * model is seeded -- and generation only: the edit check above refuses this
- * provider.
+ * Reached through an admitted catalogue profile. The opt-in edit uses the
+ * same endpoint and sends a single inline reference.
  *
  *   * **one submit.** Billing is per image, and a submit whose answer was lost
  *     may still have started a billed task; a second submit would buy a second
@@ -1593,17 +1816,20 @@ const generateWithIdeogram = async (model: ImageModelProfile, input: ImageReques
  */
 const generateWithBfl = async (
   model: ImageModelProfile,
-  input: { prompt: string; size: ImageSize }
+  input: ImageRequestInput
 ): Promise<ImageProviderResult> => {
   const apiModelId = model.apiModelId;
-  const body = buildBflImageRequest({ apiModelId, prompt: input.prompt, size: input.size });
+  const body = buildBflImageRequest({
+    apiModelId, prompt: input.prompt, size: input.size,
+    referenceBase64: input.editImage?.bytes.toString("base64"),
+  });
   if (!body || !isBflFlux3ImageModel(apiModelId)) {
     throw new ImageProviderError(
       "provider_failed",
       `Image size ${input.size} has no BFL request mapping for ${model.id}.`
     );
   }
-  const requestParams = auditableRequestParams(body);
+  const requestParams = { ...auditableRequestParams(body), ...editAuditParams(input.editImage, apiModelId) };
   const apiKey = getBflApiKey();
   // One budget for submit, polls and download together, so a slow queue
   // cannot stretch the job past the lease the executor planned for.

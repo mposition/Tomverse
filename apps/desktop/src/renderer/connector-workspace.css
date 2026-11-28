@@ -1,0 +1,25 @@
+/* Plugins screen: toolbar and catalogue heading in the body, and the menu that lives in the second lane. */
+.desktop-plugins-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 14px 0; }
+.desktop-plugins-search { flex: 1 1 200px; display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--muted); }
+.desktop-plugins-search input { flex: 1 1 auto; min-width: 0; padding: 6px 0; border: 0; background: transparent; outline: 0; color: var(--text); }
+.desktop-plugins-filter { min-height: 36px; max-width: 100%; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.desktop-plugins-tabs { display: flex; gap: 6px; flex-wrap: wrap; flex-basis: 100%; }
+.desktop-plugins-tabs button { min-height: 32px; padding: 4px 12px; border-radius: 8px; background: var(--raised); }
+.desktop-plugins-tabs button[aria-pressed="true"] { box-shadow: inset 0 0 0 1px var(--action); }
+.desktop-plugins-count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-inline-start: 6px; padding: 0 5px; border-radius: 9px; background: var(--raised); font-size: 11px; }
+.desktop-plugins-catalog-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 8px 0 0; }
+.desktop-plugins-catalog-heading h3 { margin: 0; }
+.desktop-plugins-catalog-heading span { color: var(--muted); font-size: 12px; }
+
+.desktop-plugins-lane { display: grid; gap: 24px; width: 100%; overflow-y: auto; padding: 2px; }
+.desktop-plugins-lane nav, .desktop-plugins-mine { display: grid; gap: 4px; }
+.desktop-plugins-lane nav > span, .desktop-plugins-mine > span { padding: 4px 10px; font-size: 11px; color: var(--muted); }
+.desktop-plugins-lane button { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 4px 10px; border-left: 2px solid transparent; border-radius: 6px; text-align: start; }
+.desktop-plugins-lane button:hover, .desktop-plugins-lane button[aria-current] { background: var(--raised); }
+.desktop-plugins-lane button[aria-current] { border-left-color: var(--action); }
+.desktop-plugins-lane button > span:not(.desktop-plugin-logo):not(.desktop-plugins-count) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-plugins-lane nav button .desktop-plugins-count { margin-inline-start: auto; }
+.desktop-plugins-lane .desktop-plugin-logo { width: 22px; height: 22px; border-radius: 6px; }
+.desktop-plugins-lane .desktop-plugin-logo img, .desktop-plugins-lane .desktop-plugin-logo svg { width: 16px; height: 16px; }
+.desktop-plugins-mine p { margin: 0; padding: 4px 10px; font-size: 12px; color: var(--muted); }
+.desktop-plugins-slot { width: 100%; }

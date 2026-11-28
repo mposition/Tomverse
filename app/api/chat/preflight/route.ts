@@ -638,6 +638,7 @@ export async function POST(request: Request) {
             session?.user?.id &&
             (turnContext.memory.decision.allowed ||
                 turnContext.profileTokens > 0 ||
+                (turnContext.preferenceTokens ?? 0) > 0 ||
                 (turnContext.project?.project ?? null) !== null)
                 ? issueChatContextBundle({
                       subjectKey: session.user.id,

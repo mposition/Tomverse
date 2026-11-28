@@ -14,6 +14,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { after } from "next/server";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { reconcileExpiredCodeTasks } from "@/lib/codeManagedService";
+import { sweepCodeCloudJobsQuietly } from "@/lib/codeCloudService";
 import {
   databaseErrorMetadata,
   isRetryableDatabaseError,
@@ -38,6 +39,7 @@ import { runImageAssetMaintenanceQuietly } from "@/lib/imageAssetLifecycle";
 import { runKnowledgeMaintenanceQuietly } from "@/lib/assistantKnowledgeLifecycle";
 import { runGeneratedArtifactMaintenanceQuietly } from "@/lib/generatedArtifactStorage";
 import { runMessageAttachmentMaintenanceQuietly } from "@/lib/messageAttachmentStorage";
+import { runTemporaryConversationSweepQuietly } from "@/lib/temporaryConversationSweep";
 import { runDecisionMakerRetentionMaintenanceQuietly } from "@/lib/amux/decisionMakerRetentionSweep";
 import { runMarketingLlmExpiryQuietly } from "@/lib/marketingLlmExpiry";
 import { runSupportTriageCycleQuietly } from "@/lib/supportTriageCycle";
@@ -46,6 +48,8 @@ import { runDevelopCiRepairQuietly } from "@/lib/developCiRepair";
 import { reconcileVoiceConversationsQuietly } from "@/lib/voiceConversationRecovery";
 import { recoverStaleResearchPreviewRuns } from "@/lib/researchPreviewRecovery";
 import { recoverResearchEngine } from "@/lib/researchEngineRecovery";
+import { runScheduledTasksQuietly } from "@/lib/scheduledTaskRunner";
+import { SCHEDULED_TASK_LIMITS } from "@/lib/scheduledTaskCore";
 
 const isAuthorized = (request: Request) => {
   const configured = process.env.MAINTENANCE_SECRET;
@@ -88,6 +92,7 @@ const reconcileCreditReservationsWithRetry = async () => {
 };
 
 export async function POST(request: Request) {
+  const requestStartedAt = Date.now();
   if (!isAuthorized(request)) {
     return Response.json(
       { error: "Unauthorized" },
@@ -132,6 +137,9 @@ export async function POST(request: Request) {
       console.warn(JSON.stringify({ event: "code_lease_sweep_deferred" }));
       return { interrupted: 0, deferred: true };
     });
+    // Desktop cloud jobs: ends jobs whose runner stopped reporting (with their reservations), fails expired uploads and
+    // queue waits, and deletes finished jobs past retention with their objects. Never throws.
+    const codeCloudJobs = await sweepCodeCloudJobsQuietly();
     const infrastructureMonitor = await monitorInfrastructureThresholdsIfDue();
     // Rides along on the only fifteen-minute schedule this deployment already
     // has, so the operator-notification queue drains without a second cron
@@ -150,12 +158,27 @@ export async function POST(request: Request) {
     const requestLeases = await reconcileExpiredChatRequestLeases().catch(
       () => ({ removed: 0 })
     );
+    // Temporary Chats past their expiry, deleted through the ordinary
+    // conversation deletion path (lib/temporaryConversationSweep.ts). Before
+    // the tombstone drains below, so the files it queues are deleted in this
+    // same run. DB-only, runs whatever the switch says, never throws.
+    const temporaryChats = await runTemporaryConversationSweepQuietly();
     // Rides along like the queues above: drains the DB-first image asset
     // deletion tombstones against R2 and audits the image invariants (an
     // image conversation with no generation, a generation whose worker
     // died). It never throws, so it cannot turn a successful reconciliation
     // into a failed one.
-    const imageAssets = await runImageAssetMaintenanceQuietly();
+    //
+    // While IMAGE_PENDING_REDRIVE_ENABLED is `on` (off by default; the service
+    // reads it, so this hand-over alone starts nothing), a generation whose
+    // executor died before claiming it is re-driven from `after()`, so its
+    // provider call never holds up this response. It runs on
+    // this route's maxDuration, not the 968s an image route states; the batch
+    // is bounded (IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP) and an attempt the
+    // budget cuts off is refunded by a later sweep, never run twice.
+    const imageAssets = await runImageAssetMaintenanceQuietly(new Date(), {
+      scheduleRedrive: (run) => after(run),
+    });
     // The same two arms for generated files: drain the deletion tombstones
     // against object storage, then reclaim objects whose row write never
     // landed. Never throws, so it cannot turn a successful reconciliation
@@ -265,12 +288,17 @@ export async function POST(request: Request) {
     after(() => runTraceReportAnalysisQuietly());
     // Off unless the owner turned it on; reads develop CI and calls no model.
     after(() => runDevelopCiRepairQuietly());
+    // Off (and touching nothing) unless feature.scheduledTasksEnabled; never
+    // throws; returns inside this request's maxDuration (runs that outlive it
+    // settle from their Chat attempt).
+    after(() => runScheduledTasksQuietly({ deadline: requestStartedAt + maxDuration * 1_000 - SCHEDULED_TASK_LIMITS.routeDeadlineMarginMs }));
     await completeScheduledJob({
       runId: run?.id,
       processedCount: result.examined,
       result: {
         ...result,
         codeTasks,
+        codeCloudJobs,
         deepResearchSettlements,
         voiceConversations,
         researchPreviewRuns,
@@ -279,6 +307,7 @@ export async function POST(request: Request) {
         notificationDeliveries,
         refundRequests,
         requestLeases,
+        temporaryChats,
         imageAssets,
         generatedArtifacts,
         messageAttachments,
@@ -297,6 +326,7 @@ export async function POST(request: Request) {
         success: true,
         result,
         codeTasks,
+        codeCloudJobs,
         deepResearchSettlements,
         voiceConversations,
         researchPreviewRuns,
@@ -305,6 +335,7 @@ export async function POST(request: Request) {
         notificationDeliveries,
         refundRequests,
         requestLeases,
+        temporaryChats,
         imageAssets,
         generatedArtifacts,
         messageAttachments,

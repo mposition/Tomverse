@@ -1,3 +1,10 @@
+export const photoSampleCaptions = [
+  "굿굿!", "사랑해", "고마워", "잘 자", "축하해",
+  "미안해", "배고파", "가는중", "잠깐!", "대박!",
+  "힘내!", "괜찮아", "피곤해", "좋아!", "최고야",
+  "안녕!", "헉!", "알겠어", "기대돼", "내일봐",
+] as const;
+
 export const studioLocale = {
   "captionLanguage": "문구 언어",
   "randomCaptions": "랜덤 문구 20개",
@@ -16,7 +23,6 @@ export const studioLocale = {
   "apply": "적용",
   "generationUnavailable": "현재 생성 기능을 사용할 수 없습니다.",
   "signInToGenerate": "로그인하면 생성할 수 있습니다.",
-  "generationCredits": "{model} · {credits} 크레딧",
   "packCaptions": "팩에 넣을 문구",
   "firstScene": "첫 장면 생성",
   "nextScene": "다음 장면 생성",
@@ -34,7 +40,6 @@ export const studioLocale = {
   "posterMobile": "포스터·피드·스토리",
   "samplePack": "예시가 포함된 이모티콘 20종",
   "exampleEventDetails": "8월 15일 · 제주 애월",
-  "backgroundArtwork": "배경 이미지",
   "changeImage": "이미지 변경",
   "changePhoto": "사진 변경",
   "invalidImage": "12MB 이하의 PNG, JPEG 또는 WebP 이미지를 선택해 주세요.",
@@ -59,7 +64,6 @@ export const studioLocale = {
   "myStickerPack": "내 이모티콘 팩",
   "newCaption": "새로 넣을 문구",
   "newImage": "새 이미지",
-  "openHistory": "채팅 기록 열기",
   "openingSituation": "첫 상황",
   "originalPhoto": "원본 사진",
   "original": "원본",
@@ -70,7 +74,7 @@ export const studioLocale = {
   "processedImage": "처리된 이미지",
   "questionExample": "질문 예시",
   "quizTitle": "테스트 제목",
-  "realFace": "실사 얼굴",
+  "realFace": "반실사 얼굴",
   "regenerateFromWords": "문구로 이모티콘 다시 만들기",
   "regenerate": "재생성",
   "removeBackground": "배경 제거",
@@ -84,6 +88,7 @@ export const studioLocale = {
   "stickerReplaced": "선택한 이모티콘을 새 이미지로 교체했어요.",
   "exampleMemeSituation": "다들 5분 뒤라더니 나만 먼저 도착했어.",
   "taskFailed": "작업을 완료하지 못했어요. 이미지를 확인하거나 다시 시도해 주세요.",
+  "cutoutMissing": "두 결과 중 하나는 만들지 못했어요. 다시 누르면 그 결과만 다시 시도해요.",
   "exampleRoleplay": "제주 공항에서 우리 이름이 적힌 웨딩드레스를 발견했다.",
   "exampleQuizQuestion": "여행 전날, 가장 먼저 챙기는 것은?",
   "exampleQuizTitle": "우리 여행에서 나는 어떤 캐릭터?",

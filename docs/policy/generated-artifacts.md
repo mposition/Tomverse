@@ -192,6 +192,19 @@ module에는 "그 텍스트"가 아닌 명세가 없다. 그래서 그 형식에
   배달할 수 없다.
 - **목록에 없는 확장자는 지원하지 않는다고 말한다.** 침묵이 가짜 링크의
   출발점이다.
+- **PDF는 글꼴을 문서에 넣는다**(`lib/fonts/noto-sans-kr-400-subset.ttf`, OFL).
+  범위는 라틴(베트남어 포함)·그리스·키릴, 문장부호·기호·원문자·박스 그리기,
+  `㈜ ㎡ ℃`, 가나, 한글 전부, 그리고 KS X 1001·GB 2312·Big5 1급·JIS X 0208의
+  한자(약 10,800자)다. 한국어 글꼴에 없는 간체자는 같은 릴리스의 Noto Sans SC에서
+  가져온다(`scripts/build-pdf-font-subset.mjs`). 이모지·`✔ ✗`·아랍어·히브리어·
+  태국어와 드문 한자는 없다. **글리프 없는 문자 한 글자로 파일 전체를 실패시키지
+  않는다**: 대체 상자(□)로 그리고, 바꾼 문자와 횟수를 tool 결과(`note`)에 넣어
+  모델이 사용자에게 말하게 한다(zip 안의 PDF와 표 변환도 같다). 보이는 문자의
+  25%를 넘게 바꿔야 하면(대부분 상자인 PDF는 불완전한 파일이 아니라 못 읽는
+  파일이다) 이전처럼 `UNSUPPORTED_CHARACTERS`로 실패하되, 지원하지 않는 문자
+  체계라는 사유와 못 그리는 문자(24종까지)를 적어 모델이 `.docx`를 권하게 한다.
+  보이지 않는 문자(variation selector, zero-width, 제어 문자)는 상자 없이
+  버리고 세지 않는다.
 
 ### OOXML package — 검사기 통과는 열린다는 뜻이 아니다
 
@@ -301,7 +314,7 @@ modelId. 서명 URL은 DB에 저장하지 않는다(애초에 만들지 않는�
   참조가 있으면 거절한다. HTML은 여기에 걸지 않는다: script가 있는 page가
   "웹 페이지를 만들어 달라"의 의미이고, 그것을 막는 것은 안전하게 만드는 것이
   아니라 형식을 거절하는 것이다. 둘 다 `nosniff`가 붙은 attachment로만 나가므로
-  이 애플리케이션의 origin에서는 어느 쪽도 실행되지 않는다.
+  이 애플리케이션의 origin에서는 어느 쪽도 실행되지 않는다. HTML이 실행되는 곳은 §9의 격리된 미리보기 frame 하나뿐이다(앱 origin 없음).
 - **아카이브 경로는 정규화하지 않고 거절한다.** 파일명은 label이라 다듬어도
   여전히 그 파일을 가리키지만, 경로는 **위치**다. `../../etc/passwd`를 조용히
   `etc/passwd`로 옮기면 모델이 말한 곳에 없는 내용을 담은 아카이브가 배달된다.
@@ -309,6 +322,14 @@ modelId. 서명 URL은 DB에 저장하지 않는다(애초에 만들지 않는�
   모두 거절한다(`isSafeArchivePath`).
 - **깨진 구조는 배달하지 않는다.** JSON·YAML은 파싱해 보고, XML·SVG·HTML은
   균형과 미종료 속성을 검사한다. 파싱되지 않는 설정 파일은 설정 파일이 아니다.
+  XML·SVG는 엄격하게 본다(대소문자, 따옴표 없는 속성, 중복 속성, 이스케이프되지
+  않은 `&`, 닫히지 않은 요소가 모두 거절 사유다). HTML은 브라우저가 읽는 만큼만
+  본다: `<script>`·`<style>`·`<textarea>`·`<title>`의 본문은 닫는 태그까지 글자로
+  건너뛰고(그래서 `i < n`이 든 script가 통과한다), 태그를 시작할 수 없는 `<`는
+  글자이며, HTML이 생략을 허용하는 닫는 태그(`</li>`·`</p>`·`</td>` 등)는 없어도
+  된다. 거절하는 것은 부서진 것이다: 끝나지 않은 태그·주석·raw text 요소, 생략할
+  수 없는 요소(`<div><span></div>`)를 가로지르는 닫는 태그, 파일 끝까지 열려 있는
+  요소(잘린 page). zip 안의 `.html`도 같은 검사를 거친다.
 - **파일명**: path separator, `..`, 제어문자, RTL override, Windows 예약어,
   `< > : " | ? * %`를 제거한다. 확장자는 format이 정하며 입력에서 가져오지
   않는다 — `report.xlsx.exe`도 `report.pdf`도 `report.xlsx`가 된다. 한국어
@@ -349,11 +370,31 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
   존재하거나 함께 없다.
 - `artifactsPersisted`가 true가 아닌 모든 종료 경로(취소, provider 오류, 클라이언트
   연결 끊김, fallback swap, 메시지 쓰기 실패)는 `releaseSafely()`에서
-  `discard()`로 객체를 회수한다. 기본값이 "회수"다.
-- **텍스트 없이 tool만 호출한 turn**은 빈 응답으로 보고되고 파일을 남기지
-  않는다(참조할 메시지가 없으므로 쓰는 순간 도달 불가능한 객체가 된다).
-  `generated_artifact_discarded_empty_answer`로 따로 기록하며, 이 비율이
-  0 근처를 벗어나면 지시문이 작동하지 않는다는 뜻이다.
+  `discard()`로 객체를 회수한다. 기본값이 "회수"다. **단, 메시지 쓰기의 결과를 알
+  수 없을 때**(COMMIT 결과 불명 + 커밋 확인 조회 실패)는 커밋된 행이 그 객체를
+  가리킬 수 있으므로 지우지 않고 아래 고아 sweep에 맡긴다(2026-11-27). durable turn은
+  attempt의 terminal CAS가 롤백을 확인하면 그때 회수한다.
+- **텍스트 없이 파일만 만든 turn**(모델이 본문 없이 끝났거나 tool step이 모두
+  소진된 turn)도 파일이 저장소에 하나라도 저장됐으면 답변이다. 빈 본문의
+  assistant 메시지와 파일 행을 같은 트랜잭션에 쓰고 `completed`로 정산한다(파일이
+  전달됐으므로). 서버는 본문에 어떤 언어의 문장도 써 넣지 않고, 카드 위의 한 문장
+  (`chat.artifactOnlyAnswer`)은 화면이 사용자 언어로 그린다. 2026-11-27 변경.
+  - 이 turn의 정산은 **저장 결과가 정해진 뒤**에 한다. 본문이 있는 답변은 사용자가
+    이미 읽었으므로 저장 전에 정산하지만, 파일만 있는 답변은 메시지와 파일 행이
+    생겨야 전달된다. 롤백이 확인되면 파일을 회수하고 `empty`(0 크레딧)로, 커밋됐거나
+    결과를 알 수 없으면(파일을 남겨 재조회에 맡긴다) 원래 정산으로 한다.
+  - provider가 도중에 끊은 파일만 있는 답변은 파일을 남기되 본문이 있는 끊긴 답변과
+    같이 비례 정산(`cancelled`)하고 provider 실패로 기록한다.
+- **본문도 저장된 파일도 없고 실패 카드만 있는 turn**(출력 한도에 걸린
+  `turn_incomplete`, 생성 실패 등)은 빈 본문의 메시지와 실패 카드 행을 저장해
+  §9의 "재조회 후에도 카드가 남는다"를 지킨다. 파일이 전달되지 않았으므로 정산은
+  빈 응답과 같은 `empty`(0 크레딧)이고 provider 기록·오류 보고도 빈 응답과 같다.
+  화면은 "빈 응답" 오류 대신 카드를 보여 주며, 카드 위에 문장을 붙이지 않는다.
+  durable attempt는 메시지 트랜잭션이 `completed`로 끝내므로 재조회와 attempt
+  복구가 같은 메시지를 본다. 2026-11-27 변경.
+- 메시지를 쓸 대화가 없는 turn(게스트 등)의 저장된 파일만 예전처럼 빈 응답으로
+  보고되고 파일을 남기지 않는다(참조할 메시지가 없으므로 쓰는 순간 도달 불가능한
+  객체가 된다). `generated_artifact_discarded_empty_answer`로 따로 기록한다.
 - **삭제**: 대화 삭제, 대화 일괄 삭제, 계정 삭제, 모델별 메시지 초기화 모두
   같은 트랜잭션에서 `MessageArtifactCleanup` tombstone을 남긴다.
 - **sweep**: 15분 유지보수 cron이 (a) tombstone queue를 drain하고,
@@ -434,6 +475,69 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
   - `alt`는 그림을 묘사하지 않고 **파일명을 말한다**. 생성된 그림을 묘사할 수
     있는 사람은 없고, 비워 두면 스크린 리더 사용자에게 미리보기가 있다는 사실
     자체가 숨겨진다.
+- **HTML은 옆 패널에서 미리 본다.** 준비된 `.html`·`.htm` 카드에는 다운로드 옆에 "미리보기"가 있고,
+  데스크톱은 오른쪽 패널, 모바일은 전체 화면 시트로 엽니다. 차트나 간단한 인터랙티브 페이지를 내려받지
+  않고 확인하는 것이 목적입니다(`lib/htmlArtifactPreview.ts`, `components/chat/HtmlArtifactPreviewPanel.tsx`).
+  모델이 쓴 HTML은 script를 실행할 수 있으므로 **앱 origin에 닿지 못하는 격리**가 전부입니다.
+  - `<iframe sandbox="allow-scripts">`**만** 줍니다. `allow-same-origin`이 없어 frame은 불투명 origin이고,
+    이 앱의 쿠키·저장소·DOM·API에 닿을 수 없습니다. top navigation·popup·form·modal·download도 없습니다.
+  - 내용은 `srcdoc`으로만 넣고 URL로 로드하지 않습니다. 문서 맨 앞에 CSP `<meta>`를 둡니다(page 안의
+    `<head>`를 패턴으로 찾아 끼우면 주석 안에 들어갈 수 있으므로 앞에 붙입니다): `default-src 'none'`,
+    `connect-src 'none'`, `form-action 'none'`, `base-uri 'none'`, `frame-src 'none'`, `object-src 'none'`,
+    script·style·글꼴은 inline과 cdnjs·jsdelivr·unpkg만, 이미지는 inline(`data:`·`blob:`)만, `'unsafe-eval'` 없음.
+    이미지 URL에 page의 글을 실어 어느 host로도 보낼 수 없습니다. React 미리보기 문서는 자기 `<head>` 맨 앞에
+    더 좁은 정책(`reactPreviewCsp`)을 하나 더 둡니다. 두 정책이 함께 적용되어 고정한 세 파일과 inline script만 실행됩니다.
+    그 세 파일은 **이 앱이 직접 제공합니다**(`public/vendor/artifact-preview/`, 아래). 그래서 React 미리보기에는 제3자 host가
+    하나도 없고, script URL의 경로나 query에 글을 실어도 이 앱 서버에만 닿습니다. 공통 정책은 앱 origin 중
+    `/vendor/artifact-preview/` 경로만 더 허용합니다(`htmlPreviewCsp(origin)`; `srcdoc` frame의 origin은 opaque라 `'self'`로는 안 됩니다).
+    한계: 모델이 쓴 HTML page(React가 아닌 것)는 차트·지도 라이브러리를 쓰려고 세 CDN의 script·style·글꼴을 계속 받을 수
+    있으므로, 그 page가 CDN 주소에 글을 실어 요청하면 CDN 운영자 로그에는 남을 수 있습니다(다른 host로는 못 보냄).
+  - 미리보기는 **frame 안의 frame**입니다. 안쪽이 모델의 page(위 sandbox·CSP)이고 바깥쪽은 우리 문서로
+    `frame-src 'none'`**만** 갖습니다(`srcdoc` 자식은 부모의 모든 정책을 상속하므로 다른 지시문을 더하면 page에
+    닿습니다). script가 `location`을 바꿔 자기 frame을 임의 주소로 보내는 것은 page 정책으로 막을 수 없는
+    유일한 통로인데(`navigate-to`는 출시되지 않았습니다), 브라우저는 frame의 모든 navigation을 그 frame을 담은
+    문서의 `frame-src`로 검사하므로 바깥 문서가 요청 전에 거절합니다. 최초 `srcdoc` 로드는 네트워크 navigation이
+    아니어서 영향받지 않습니다. 한계: 이 거절은 브라우저의 `frame-src` 의미에 기대며, Browser 창(샌드박스된 네트워크
+    문서를 열지 않는 환경)에서는 관찰하지 못했습니다. page가 파일에 담긴 민감 정보를 URL에 실어 보내는 유출은
+    이 한 겹과 앱 CSP의 `frame-src`(enforce 모드)에 의존합니다. 안내 문구도 "계정에 접근할 수 없다"까지만
+    말합니다.
+  - 파일은 다운로드와 **같은 인증된 경로**(`/api/artifacts/{id}`)로 읽으므로 소유자 확인·대화 잠금(423)·
+    rate limit이 그대로입니다. 1,000,000바이트를 넘으면 미리보기 대신 다운로드만 권합니다.
+  - `srcdoc` 문서는 앱의 CSP(nonce 기반 `script-src`·`style-src`)를 **상속**합니다. 그대로 두면 enforce 모드에서 page의
+    inline script·style이 막혀 스타일도 동작도 없는 화면이 됩니다(브라우저에서 확인). 그래서 패널이 앱 문서의 nonce를
+    page의 `<script>`·`<style>`·stylesheet `<link>`에 붙입니다(`withEmbedderNonce`, 텍스트 패턴이 아니라 브라우저
+    `DOMParser`로). frame에 `allow-same-origin`이 없으므로 nonce는 frame 안에서만 쓰이고 `HTML_PREVIEW_CSP`도 함께
+    적용됩니다. `DOMParser` 문서는 브라우저 맥락이 없어 자원을 가져오지 않습니다(img·link·script·iframe·video
+    poster·object·@import를 담은 page를 파싱해도 서버에 요청이 오지 않는 것을 확인). inline 이벤트 속성(`onclick="..."`)은 nonce 정책에서 막힌 채로 두며 `addEventListener`는 동작합니다.
+    frame 안에서 막힌 요청의 CSP 위반 보고가 앱의 보고 endpoint로 갈 수 있습니다.
+  - SVG 카드 미리보기(`<img>`)는 이것과 별개입니다.
+  - **답변 안 코드 블록과 React도 같은 패널에서 미리 봅니다**(`TOMVERSE_CHAT_ARTIFACT_WORKSPACE_ENABLED`, 기본 꺼짐).
+    스위치는 서버에서 읽어 `ReviewWorkspaceShell` → `ChatPageClient` → `ChatArtifactWorkspaceProvider`로 내려가고,
+    provider 밖(공유 페이지 등)에서는 아래 동작이 하나도 나타나지 않습니다. 격리(sandbox·CSP·중첩 frame)는 위와 **같은 것을
+    그대로** 쓰며 `lib/chatArtifactPreview.ts`가 frame에 넣을 문서만 만듭니다. 허용 CDN 목록은 넓히지 않았습니다.
+    - 답변이 **끝난 뒤** ```` ```html ````·```` ```svg ````·```` ```jsx ````·```` ```tsx ```` 블록에 "미리보기" 버튼이 붙습니다
+      (스트리밍 중인 블록에는 붙이지 않습니다). 버튼을 누르기 전에는 아무것도 실행되지 않습니다. 파일이 아니라 답변 본문
+      코드이므로 서버를 거치지 않고, 화면에 보이는 코드 텍스트를 그대로 frame에 넣습니다. 한도는 파일과 같은 1,000,000바이트입니다.
+    - HTML 블록은 그대로 page이고, SVG 블록은 흰 바탕 가운데에 놓입니다(XML 선언·doctype은 버립니다).
+    - **React(`jsx`/`tsx` 블록과 생성된 `.jsx`/`.tsx` 파일)**는 frame 안에서 컴파일합니다. 문서는 React 18.3.1 UMD,
+      ReactDOM 18.3.1, Babel standalone 7.26.2를 **이 앱의 `/vendor/artifact-preview/`에서 정확한 버전과 sha384 integrity**로
+      불러오고(`REACT_PREVIEW_SCRIPTS`; cdnjs 배포본과 바이트가 같고 테스트가 파일 해시를 고정), frame의 origin이 `null`이라 CORS로
+      받으므로 그 경로에만 `Access-Control-Allow-Origin: *`를 둡니다(`next.config.ts`, 공개 라이브러리 파일),
+      안쪽 script가 `Babel.transform`(presets `react`, TSX는 `typescript`; plugin `transform-modules-commonjs`)한 결과를
+      nonce를 단 `<script>` 요소의 텍스트로 넘깁니다. **`eval`·`new Function`을 쓰지 않으므로 CSP에 `'unsafe-eval'`이 없습니다.**
+      채팅 페이지는 아무것도 컴파일하거나 평가하지 않습니다. 기본 export 컴포넌트, 없으면 `App`을 mount하고,
+      `import`는 `react`·`react-dom`만 풀립니다(다른 패키지는 패널 안에 "미리보기에서 쓸 수 없다"는 안내). 코드는 문서 안
+      `<textarea>`에 HTML escape된 텍스트로 담겨 요소를 닫거나 더할 수 없습니다.
+    - **실패는 frame 안의 짧은 안내입니다.** 문법 오류, 실행 오류, 렌더 중 오류(error boundary), 컴포넌트 없음, 라이브러리 로드 실패는
+      frame 안 상단에 안내(첫 오류만, 최대 8줄)로 보이고 채팅 화면은 영향받지 않습니다.
+    - **"이 화면 고치기"**: 패널 아래 입력란에 바꿀 내용을 적으면, 생성 파일은 기존 "수정본 만들기" 경로(원본 복사본 첨부와 표준
+      요청문, 그 아래 입력한 내용)로, 답변 코드 블록은 입력창 맨 위에 "위 코드에서 다음을 고쳐 주세요: …"를 채워 넣고 패널을
+      닫습니다. 보내지는 않으며 **새 서버 API가 없습니다**. 입력란은 그 경로가 실제로 있는 곳에만 나타납니다(생성 파일은 계정과 수정본 만들기가 켜진 대화, 코드 블록은 채팅 입력창이 있는 화면).
+    - 공개 URL 게시, 서버 저장, 여러 모델 나란히 미리보기는 하지 않습니다(§12).
+  - 검증: `tests/htmlArtifactPreview.test.mjs`(sandbox·CSP 문자열 고정),
+    `tests/chatArtifactPreview.test.mjs`(코드 블록 판정, React 문서의 자체 호스팅 경로·파일 해시·escape, bootstrap에 eval 없음, 모든 문서가 같은
+    격리를 거침), `tests/client/htmlArtifactPreviewRender.test.tsx`(frame 속성·버튼 조건),
+    `tests/client/chatArtifactWorkspace.test.tsx`(스위치·스트리밍·언어별 버튼, 8개 언어 문구).
 - 버튼은 최소 44px 터치 영역과 `focus-visible` 링을 갖는다.
 - 스크린 리더는 하나의 accessible name으로 형식·파일명·크기·상태를 받는다.
 - 시각 role은 `accent-generated-artifact-*`(emerald)뿐이다. AI Review의
@@ -465,8 +569,9 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
 
 절대 조건:
 
-- **완료 판정이 `incomplete`(= `length`)일 때만** 기록한다
-  (`resolveChatCompletionOutcome`). 정상 종료나 취소는 대상이 아니다.
+- **완료 판정이 출력 한도(`incompleteReason: "length"`)로 `incomplete`일 때만**
+  기록한다(`resolveChatCompletionOutcome`). 정상 종료, 취소, provider가 도중에 끊은
+  `interrupted`는 대상이 아니다.
 - **artifact tool 호출이 시작되지 않은 길이 초과는 지금과 같다** — 일반
   incomplete 안내만 보이고 카드는 만들지 않는다.
 - **native tool은 절대 세지 않는다.** `web_search`·`google_search`도 같은
@@ -557,6 +662,8 @@ tool 호출 후의 두 번째 step은 출력 토큰이며, 둘 다 기존 reserv
 - 사용자가 만든 파일을 대화 밖에서 다시 찾는 목록 화면.
 - 수식, 차트, 조건부 서식, 피벗.
 - artifact 공유 링크. 공유 대화 스냅샷은 artifact를 포함하지 않는다.
+- 미리보기 페이지의 공개 URL 게시(외부 게시라 별도 승인·도메인·moderation이 먼저다), 서버 저장, 여러 모델의 결과 나란히 미리보기.
+- React 미리보기에서 React 밖의 패키지(차트·아이콘 라이브러리 등)와 Tailwind. 허용 CDN 목록을 넓히지 않고는 불가능하다.
 
 ## 13. 첨부된 템플릿에서 여러 문서 만들기
 

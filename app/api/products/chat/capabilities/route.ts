@@ -3,12 +3,20 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { voiceConversationConfig } from "@tomverse/chat-core";
 import { randomUUID } from "node:crypto";
+import { desktopBillingEnabled, desktopDeepResearchEnabled, desktopReviewDeepResearchEnabled, desktopDriveEnabled, desktopPluginSourcesEnabled, desktopPluginsEnabled, desktopPromptRefinerEnabled, desktopRemotePreviewEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
+import { reasoningEffortStepsEnabled } from "@/lib/reasoningEffort";
+import { desktopManagedCodeEnabled } from "@/lib/desktopManagedCodeSwitch";
+import { codeWebSearchOffered } from "@/lib/codeWebSearch";
+import { desktopCloudExecutionEnabled } from "@/lib/desktopCloudExecutionSwitch";
+import { mcpPreviewEnabled } from "@/lib/mcpConnectorPolicy";
+import { readGooglePickerConfig } from "@/lib/googleDrivePickerConfig";
+import { resolveProviderApiKey } from "@/lib/modelRegistryShared";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
-import { DESKTOP_APP_ORIGIN, desktopAttachmentEnabled, desktopChatWriteEnabled, desktopReviewWriteEnabled } from "@/lib/desktopReadApiContract";
+import { DESKTOP_APP_ORIGIN, desktopAttachmentEnabled, desktopChatWriteEnabled, desktopReviewWriteEnabled, desktopReviewAnalysisEnabled, desktopComposerToolsEnabled } from "@/lib/desktopReadApiContract";
 import {
-  getOperationalFeatureFlags, isChatStarterEnabled, isExternalContinuationEnabledCached, isExternalImportEnabled, isImageGenerationEnabledCached,
+  getOperationalFeatureFlags, isChatStarterEnabled, isExternalContinuationEnabledCached, isExternalImportEnabled, isImageGenerationEnabledCached, isVoiceInputEnabled,
 } from "@/lib/appSettings";
-import { CHAT_STARTER_MAX_VISIBLE, selectVisibleStarterCards } from "@/lib/chatStarterAvailability";
+import { CHAT_STARTER_MAX_VISIBLE, parseStarterOrderSeed, selectVisibleStarterCards } from "@/lib/chatStarterAvailability";
 import { chatStarterCatalogFor } from "@/lib/chatStarterCatalog";
 import { resolveChatStarterCapabilities } from "@/lib/chatStarterCapabilityResolution";
 import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime";
@@ -21,6 +29,7 @@ import { imageGroupMaxModels } from "@/lib/imageGroupLimits";
 
 import { autoAvailabilityFor } from "@/lib/autoAvailability";
 import { autoSelectionCapability } from "@/lib/autoRoutingUi";
+import { desktopLinkProviders } from "@/lib/desktopSocialLoginCore";
 import { identifyChatCaller } from "@/lib/chatSecurity";
 import {
   mintGuestChatAutoCapability,
@@ -36,12 +45,12 @@ import { promptRefinerChatExecutionRelease } from
 
 const NO_STORE_HEADERS = { "Cache-Control": "private, no-store" };
 
-async function desktopChatCapabilities(userId: string) {
+async function desktopChatCapabilities(userId: string, orderSeed: number | null) {
   const desktopWrite = desktopChatWriteEnabled();
   const desktopReview = desktopReviewWriteEnabled();
   const attachmentAccess = desktopAttachmentEnabled();
   const [startersEnabled, importEnabled, continuationEnabled, plan, attachments] = await Promise.all([
-    desktopWrite ? isChatStarterEnabled().catch(() => false) : false,
+    isChatStarterEnabled().catch(() => false),
     isExternalImportEnabled().catch(() => false),
     isExternalContinuationEnabledCached().catch(() => false),
     desktopWrite || desktopReview || attachmentAccess ? getUserBillingPlan(userId).catch(() => null) : null,
@@ -49,18 +58,6 @@ async function desktopChatCapabilities(userId: string) {
   ]);
   const reviewPlan = desktopReview ? plan : null;
   const desktopAttachments = attachments && plan?.allowAttachments === true;
-  const modelCapabilities = new Set(resolveChatStarterCapabilities({
-    webSearchBackendReadiness: resolveWebSearchBackendReadiness(),
-  }).filter((capability) => capability === "generated-artifact" ||
-    (desktopAttachments && (capability === "document-attachment" || capability === "image-input"))));
-  const starters = startersEnabled ? selectVisibleStarterCards({
-    signedIn: true, plan: plan?.tier ?? null, enabledFlags: new Set(), knownFlags: new Set(), modelCapabilities,
-  }, chatStarterCatalogFor("chat"), CHAT_STARTER_MAX_VISIBLE).flatMap(({ entry, availability }) => {
-    // Older clients use the fallback copy; current clients localize the ID using the selected device language.
-    const cards = workspaceWelcomeCopy.en.starter.cards;
-    const copy = cards[entry.labelKey.split(".")[2] as keyof typeof cards];
-    return copy && availability.state === "available" ? [{ id: entry.id, ...copy }] : [];
-  }) : [];
   const imageEnabled = reviewPlan && planAllowsFeature(reviewPlan, "imageGeneration") &&
     await isImageGenerationEnabledCached().catch(() => false);
   const catalog = imageEnabled ? await refreshImageModelCatalog().catch(() => []) : [];
@@ -68,8 +65,53 @@ async function desktopChatCapabilities(userId: string) {
     id: model.id, name: model.name, provider: imageModelOwner(model), pricingVersion: model.pricingVersion,
     prices: model.prices.map(({ quality, size, credits }) => ({ quality, size, credits })),
   }));
+  const modelCapabilities = new Set(resolveChatStarterCapabilities({
+    webSearchBackendReadiness: resolveWebSearchBackendReadiness(),
+  }).filter((capability) => (desktopWrite && capability === "generated-artifact") ||
+    (desktopAttachments && (capability === "document-attachment" || capability === "image-input"))));
+  const starters = startersEnabled && (desktopWrite || orderSeed !== null) ? selectVisibleStarterCards({
+    signedIn: true, plan: plan?.tier ?? null, enabledFlags: new Set(),
+    knownFlags: new Set(), modelCapabilities,
+  }, chatStarterCatalogFor("chat"), CHAT_STARTER_MAX_VISIBLE, orderSeed).flatMap(({ entry, availability }) => {
+    const cards = workspaceWelcomeCopy.en.starter.cards;
+    const copy = cards[entry.labelKey.split(".")[2] as keyof typeof cards];
+    return copy && availability.state === "available" ? [{ id: entry.id, ...copy }] : [];
+  }) : [];
   return { desktopWrite, desktopImport: importEnabled && continuationEnabled, desktopStarters: starters,
+    desktopReviewAnalysis: desktopReviewAnalysisEnabled(), desktopComposerTools: desktopComposerToolsEnabled(),
+    desktopSearchReadiness: resolveWebSearchBackendReadiness(),
     desktopAttachments,
+    desktopGoogleDrive: desktopAttachments && desktopDriveEnabled() && Boolean(readGooglePickerConfig()),
+    desktopDeepResearch: desktopDeepResearchEnabled() && Boolean(resolveProviderApiKey("perplexity")),
+    // A Deep Research column in a Review needs its own switch and the same provider key; a Desktop build offers it only on this signal.
+    desktopReviewDeepResearch: desktopReviewDeepResearchEnabled() && Boolean(resolveProviderApiKey("perplexity")),
+    desktopBilling: desktopBillingEnabled(),
+    desktopManagedCode: desktopManagedCodeEnabled(),
+    // The Code agent's web_search tool (POST /api/code/v1/web-search, the coding API's key and ledger). A Desktop build gives
+    // its runs the tool only where the server it reached says so; the route checks the key, plan and credits again.
+    desktopCodeWebSearch: codeWebSearchOffered(userId),
+    // Cloud execution of a Code task on a runner (docs/ops/desktop-cloud-execution.md). Desktop offers the cloud location only on this.
+    desktopCloudExecution: desktopCloudExecutionEnabled(),
+    desktopPlugins: desktopPluginsEnabled() && mcpPreviewEnabled(),
+    // Plugins from a zip file, an npm package or a private repository, and the marketplace Desktop carries (a switch of its own).
+    desktopPluginSources: desktopPluginSourcesEnabled(),
+    // What this server accepts in a Desktop turn. A Desktop build offers the device position, a chosen plugin in Chat
+    // and the "+" menu's choices for a Review only where the server it reached says so, whatever its own version.
+    desktopTurnLocation: desktopWrite || desktopReview,
+    desktopChatPlugin: desktopWrite && desktopPluginsEnabled() && mcpPreviewEnabled(),
+    desktopReviewContext: desktopReview,
+    desktopReviewTools: desktopReview && desktopComposerToolsEnabled(),
+    // The reasoning steps a Desktop turn may ask for (the catalogue lists them per model), and the Prompt Refiner
+    // decision a Chat turn may carry, which exists only while the server's own release lets Auto prepare one.
+    desktopReasoningSteps: (desktopWrite || desktopReview) && reasoningEffortStepsEnabled(),
+    desktopPromptRefiner: desktopWrite && desktopPromptRefinerEnabled() && (await promptRefinerChatExecutionRelease()).autoEnabled,
+    // Dictation and the Chat voice conversation, each only where its own switch is on as well as Desktop's.
+    desktopVoiceInput: desktopVoiceEnabled() && await isVoiceInputEnabled().catch(() => false),
+    desktopVoiceConversation: desktopVoiceEnabled() && voiceConversationConfig(process.env) !== null,
+    // The providers Desktop may add as a login method from its settings (empty while the switch is off).
+    desktopSocialLink: desktopLinkProviders(),
+    // Remote control's file-change counts and previews: a Desktop reports them only where this server says it takes them.
+    desktopRemotePreview: desktopRemotePreviewEnabled(),
     ...(reviewPlan ? { desktopReview: { easy: reviewEasyEnabled(), modelLimit: effectivePlanModelLimit(reviewPlan), plan: reviewPlan.tier } } : {}),
     ...(images.length ? { desktopImages: { maxModels: imageGroupMaxModels(), models: images } } : {}),
   };
@@ -150,7 +192,9 @@ export async function GET(request: Request) {
   try {
     const [availability, desktop] = await Promise.all([
       autoAvailabilityFor(session.user.id),
-      request.headers.get("origin") === DESKTOP_APP_ORIGIN ? desktopChatCapabilities(session.user.id) : null,
+      request.headers.get("origin") === DESKTOP_APP_ORIGIN
+        ? desktopChatCapabilities(session.user.id, parseStarterOrderSeed(new URL(request.url).searchParams.get("starterOrder")))
+        : null,
     ]);
     const voice = voiceConversationConfig(process.env);
     return NextResponse.json(

@@ -2,21 +2,16 @@ import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { consumeConversationUpdateLimit } from "@/lib/conversationUpdateRateLimit";
 ﻿export const dynamic = "force-dynamic";
 
-import {
-  applyNativeSourceDeletion,
-  updateConversationWithProjectGrounds,
-} from "@/lib/projectWorkspaceService";
+import { updateConversationWithProjectGrounds } from "@/lib/projectWorkspaceService";
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
-import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecycle";
-import { enqueueArtifactCleanupForConversations } from "@/lib/generatedArtifactStorage";
+import { deleteOwnedConversations } from "@/lib/conversationDeletion";
+import { temporaryConversationUpdateRefusal } from "@/lib/temporaryChatAccess";
 import {
   PUBLIC_CHAT_MESSAGE_SELECT,
   toPublicChatMessage,
 } from "@/lib/publicChatMessage";
 import { attachChatImageTurns } from "@/lib/chatImageTurnRead";
-import { enqueueMessageAttachmentCleanupForConversations } from "@/lib/messageAttachmentStorage";
-import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { publicChatResponseAttempt } from "@/lib/chatResponseAttemptCore";
 import { listChatResponseAttempts } from "@/lib/chatResponseAttemptPersistence";
 import { conversationSurface } from "@/lib/continuationRoutes";
@@ -75,7 +70,7 @@ import {
 import { describeAutoCohortRefusal } from "@/lib/autoCohort";
 import { CONVERSATION_TITLE_MAX_LENGTH } from "@/lib/conversationRename";
 import { isReservedContinuationTitle } from "@/lib/continuationTitlePreservation";
-import { DESKTOP_APP_ORIGIN, desktopConversationWriteProduct, desktopTextWriteEnabled } from "@/lib/desktopReadApiContract";
+import { DESKTOP_APP_ORIGIN, desktopComposerToolsEnabled, desktopConversationWriteProduct, desktopTextWriteEnabled } from "@/lib/desktopReadApiContract";
 
 const modelSchema = z.string().min(1).max(120);
 const updateConversationSchema = z
@@ -116,11 +111,18 @@ const updateConversationSchema = z
       body.assistantProfileId !== undefined,
     { message: "At least one update is required." }
   );
-const desktopConversationUpdateSchema = z.object({
+const desktopConversationFields = {
     title: z.string().trim().min(1).max(CONVERSATION_TITLE_MAX_LENGTH).optional(),
     selectedModels: z.array(modelSchema).min(1).max(APP_DEFAULTS.maxSelectedModels).optional(),
     selectionMode: z.enum(SELECTION_MODES).optional(),
-}).strict().refine((body) => Object.keys(body).length > 0);
+};
+const desktopConversationUpdateSchema = z.strictObject(desktopConversationFields).refine((body) => Object.keys(body).length > 0);
+const desktopComposerUpdateSchema = z.strictObject({
+    ...desktopConversationFields,
+    webSearchMode: updateConversationSchema.shape.webSearchMode,
+    memoryMode: updateConversationSchema.shape.memoryMode,
+    assistantProfileId: updateConversationSchema.shape.assistantProfileId,
+}).refine((body) => Object.keys(body).length > 0);
 const MESSAGE_PAGE_SIZE = 50;
 
 const safeParse = (data: unknown, fallback: string[]) => {
@@ -402,7 +404,7 @@ export async function PATCH(
         const body = await readLimitedJson<z.infer<typeof updateConversationSchema>>(
             req,
             16 * 1024,
-            desktop ? desktopConversationUpdateSchema : updateConversationSchema
+            desktop ? (desktopComposerToolsEnabled() ? desktopComposerUpdateSchema : desktopConversationUpdateSchema) : updateConversationSchema
         );
         const params = await context.params;
         const conversationId = params.conversationId;
@@ -435,6 +437,7 @@ export async function PATCH(
                 // Whether a title is a rename of a continuation, which may not
                 // take the writer's placeholder (lib/continuationTitlePreservation.ts).
                 continuationBridge: { select: { id: true } },
+                temporaryExpiresAt: true,
             }
         });
 
@@ -444,7 +447,16 @@ export async function PATCH(
         if (existingConv.userId !== userId) {
             return NextResponse.json({ error: "You do not have access to this conversation." }, { status: 403 });
         }
+        // A temporary Chat stays out of every project and keeps memory off.
+        const temporaryRefusal = temporaryConversationUpdateRefusal(existingConv.temporaryExpiresAt, body);
+        if (temporaryRefusal) {
+            return NextResponse.json(
+                { error: "A temporary chat cannot be moved into a project or use memory.", code: temporaryRefusal },
+                { status: 409 }
+            );
+        }
         const desktopProduct = desktop ? desktopConversationWriteProduct(existingConv) : null;
+        // The "+" menu's options (web search, memory, assistant) belong to a Review as much as to a Chat, as on the web.
         if (desktop && (!desktopProduct || (desktopProduct === "chat" && (body.selectedModels?.length ?? 1) > 1))) {
             return NextResponse.json({ error: "This conversation belongs to another workspace." }, { status: 403 });
         }
@@ -884,30 +896,20 @@ export async function DELETE(req: Request, { params }: Params) {
       return conversationLockedResponse();
     }
 
-    // DB-first tombstone: generated-image R2 keys are enqueued for cleanup
-    // in the same transaction that deletes the rows, and the fifteen-minute
-    // maintenance sweep deletes the objects afterwards. Deleting R2 first
-    // and the rows second would leave the database pointing at missing
-    // objects whenever the second step failed.
-    await prisma.$transaction(async (tx) => {
-      await enqueueImageAssetCleanupForConversations(tx, [conversationId]);
-      // Generated files follow the same order for the same reason
-      // (docs/policy/generated-artifacts.md section 8).
-      await enqueueArtifactCleanupForConversations(tx, [conversationId]);
-      // And the files the user uploaded into it. Deleting the conversation is
-      // the only ordinary act that removes them: clearing one model's answers
-      // must not, because the attachment belongs to the question every model
-      // in the comparison shares
-      // (docs/policy/user-attachment-persistence.md).
-      await enqueueMessageAttachmentCleanupForConversations(tx, [conversationId]);
-      await deleteDeepResearchJobsForConversations(tx, [conversationId]);
-      // Project memories grounded only in this conversation are deleted
-      // (derived) or suspended (user-edited/pinned) before the cascade.
-      await applyNativeSourceDeletion(tx, userId, [conversationId]);
-      await tx.conversation.delete({
-        where: { id: conversationId },
-      });
-    });
+    // DB-first tombstones for generated images, generated files and the
+    // files the user uploaded, Deep Research jobs and project memories
+    // grounded only here, then the row -- in one transaction, through the one
+    // deletion path the temporary Chat sweep also uses
+    // (lib/conversationDeletion.ts). Deleting the conversation is the only
+    // ordinary act that removes its attachments: clearing one model's answers
+    // must not, because the attachment belongs to the question every model in
+    // the comparison shares (docs/policy/user-attachment-persistence.md).
+    const deleted = await prisma.$transaction((tx) =>
+      deleteOwnedConversations(tx, { userId, conversationIds: [conversationId] })
+    );
+    if (deleted.count !== 1) {
+      return NextResponse.json({ error: "Conversation not found." }, { status: 404 });
+    }
     logSecurityAuditEvent("conversation.delete", {
       userId,
       resourceId: conversationId,

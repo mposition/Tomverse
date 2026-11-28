@@ -186,7 +186,7 @@ const requestSchema = z
         store: z.boolean().nullable().optional(),
         user: z.string().max(256).optional(),
         reasoning_effort: REASONING_EFFORT.nullable().optional(),
-        tomverse_effort: z.enum(["low", "high"]).optional(),
+        tomverse_effort: z.enum(["low", "medium", "high"]).optional(),
         // The Responses-API spelling. `effort` is applied as in
         // `requestReasoningEffort`; `summary` has no place in a Chat Completions
         // answer, so it is left out and named in

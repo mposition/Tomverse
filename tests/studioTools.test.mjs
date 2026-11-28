@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { test } from "node:test";
 import { fillStudioStickerCaptions, findStudioTool, studioObjectUrl, STUDIO_EXPORT_FORMATS, STUDIO_PHOTO_PRESETS, STUDIO_STICKER_KEYS, STUDIO_TOOLS, STUDIO_STICKER_LIMIT, studioStickerCrop, studioStickerLayout } from "../lib/studioTools.ts";
-import { parseStudioAnalysis } from "../lib/studioCreativeAnalysis.ts";
+import { parseStudioAnalysis, studioAnalysisPrompt, studioReportCrop } from "../lib/studioCreativeAnalysis.ts";
 import { studioCreativeCopy } from "../locales/studioCreative.ts";
 import { STUDIO_PHOTO_CATEGORIES, studioPresetName, studioPublicationPresets } from "../lib/studioPresetLibrary.ts";
 import {
   STUDIO_SOCIAL_FORMATS, studioOrderedSocialPresets,
-  studioPublishingDesign, studioPublishingPrompt, studioSocialFormat,
+  STUDIO_PUBLISHING_MIN_KEPT, studioPublishingDesign, studioPublishingPrompt, studioPublishingTrim, studioSocialFormat,
 } from "../lib/studioPublishing.ts";
 
 test("Studio lists the new creative tools in Everyday creations and isolates poster publishing", () => {
@@ -54,27 +54,71 @@ test("Poster and social exports retain their designed output ratios", () => {
   assert.deepEqual(STUDIO_EXPORT_FORMATS.map(({ width, height }) => width / height), [4 / 5, 1, 9 / 16]);
 });
 
-test("Poster briefs use the selected art direction and keep exact-copy or typeset generation distinct", () => {
+test("Poster briefs use the selected art direction and have the model set the headline once", () => {
   assert.deepEqual([STUDIO_EXPORT_FORMATS[0].width, STUDIO_EXPORT_FORMATS[0].height], [2160, 2700]);
   const posters = studioPublicationPresets("poster");
   const designs = posters.map(preset => studioPublishingDesign("poster", preset.id));
   assert.equal(new Set(designs.map(design => design.direction)).size, posters.length);
-  assert.equal(new Set(designs.map(design => design.composition)).size, 4);
   const input = {
     kind: "poster", design: studioPublishingDesign("poster", "cafe-menu"),
-    locale: "ko", brief: "여름 한정 메뉴", title: "콜드브루", details: "₩6,500",
+    language: "Korean", brief: "여름 한정 메뉴", title: "콜드브루 \"온도\"", details: "₩6,500",
     hasPhoto: true, hasLogo: true,
   };
   const exact = studioPublishingPrompt(input);
   assert.match(exact, /Premium tabletop food photography/);
-  assert.match(exact, /No letters, invented logos or additional copy/);
   assert.match(exact, /Use the reference as the featured subject/);
-  assert.ok(exact.includes('"headlineContext":"콜드브루"'));
-  const automatic = studioPublishingPrompt({ ...input, title: "", hasPhoto: false });
-  assert.match(automatic, /complete, professionally typeset artwork in ko/);
-  assert.match(automatic, /Keep important typography clear of the bottom edge/);
+  // A supplied headline reaches the model as the literal text to set; the canvas never sets it again.
+  assert.ok(exact.includes('Set this exact headline once, character for character, in its own script: "콜드브루 \\"온도\\"".'));
+  assert.equal(exact.split("콜드브루").length - 1, 1);
+  assert.match(exact, /Keep the bottom 22% free of typography/);
+  // The canvas places the details, so their text stays out of the prompt and cannot be drawn twice.
+  assert.doesNotMatch(exact, /6,500/);
+  assert.doesNotMatch(exact, /No letters/);
+  const story = studioPublishingPrompt({ ...input, kind: "social-post", placement: studioSocialFormat("instagram-story") });
+  assert.match(story, /Keep the bottom 35% free of typography/);
+  const automatic = studioPublishingPrompt({ ...input, title: "", details: "", hasPhoto: false, hasLogo: false });
+  assert.match(automatic, /Write one short headline in Korean based on the brief/);
   assert.match(automatic, /Continue the artwork to the frame edges/);
+  assert.match(automatic, /never a photograph or mockup of a poster/);
+  assert.doesNotMatch(automatic, /Keep the bottom/);
   assert.doesNotMatch(automatic, /Use the reference as the featured subject/);
+  assert.match(automatic, /Do not invent ratings, reviews, quotes, statistics, hashtags, small print, dates, prices/);
+});
+
+test("A design drawn in a nearby shape fills its placement, and the model is told what is trimmed", () => {
+  const tall = { width: 1024, height: 1536 }, wide = { width: 1536, height: 1024 }, square = { width: 1024, height: 1024 };
+  assert.equal(studioPublishingTrim(tall, studioSocialFormat("pinterest-pin")), null);
+  assert.equal(studioPublishingTrim(square, studioSocialFormat("instagram-square")), null);
+  for (const [drawn, id, sides, percent] of [
+    [tall, "instagram-feed", "top and bottom", 8], [tall, "instagram-tall", "top and bottom", 6], [tall, "instagram-story", "left and right", 8],
+    [wide, "youtube-thumbnail", "top and bottom", 8], [wide, "linkedin-landscape", "top and bottom", 11],
+  ]) {
+    const trim = studioPublishingTrim(drawn, studioSocialFormat(id));
+    assert.deepEqual([trim.sides, Math.round(trim.each * 100), trim.fills], [sides, percent, true], id);
+  }
+  // A square drawn for a story or a wide banner would lose too much: it is shown whole instead.
+  assert.equal(studioPublishingTrim(square, studioSocialFormat("instagram-story")).fills, false);
+  assert.equal(studioPublishingTrim(square, studioSocialFormat("x-feed")).fills, false);
+  assert.ok(STUDIO_PUBLISHING_MIN_KEPT <= studioPublishingTrim(wide, studioSocialFormat("linkedin-landscape")).kept);
+
+  const input = {
+    kind: "social-post", design: studioPublishingDesign("social-post", "travel-story"), language: "Korean",
+    brief: "제주 여행", title: "제주 3박 4일", details: "@tomverse", hasPhoto: false, hasLogo: false,
+  };
+  const story = studioPublishingPrompt({ ...input, placement: studioSocialFormat("instagram-story"), drawn: tall, finished: studioSocialFormat("instagram-story") });
+  assert.match(story, /trimmed to 9:16: 8% is cut off each of the left and right edges/);
+  assert.match(story, /Keep the bottom 35% free of typography/);
+  assert.doesNotMatch(story, /central safe area/);
+  // Trimmed from the bottom, the footer band is counted on the taller image the model draws.
+  const feed = studioPublishingPrompt({ ...input, placement: studioSocialFormat("instagram-feed"), drawn: tall, finished: studioSocialFormat("instagram-feed") });
+  assert.match(feed, /trimmed to 4:5: 8% is cut off each of the top and bottom edges/);
+  assert.match(feed, /Keep the bottom 28% free of typography/);
+  const poster = studioPublishingPrompt({ ...input, kind: "poster", design: studioPublishingDesign("poster", "cafe-menu"), drawn: tall, finished: STUDIO_EXPORT_FORMATS[0] });
+  assert.match(poster, /trimmed to 4:5: 8% is cut off each of the top and bottom edges/);
+  assert.match(poster, /Keep the bottom 27% free of typography/);
+  const fallback = studioPublishingPrompt({ ...input, placement: studioSocialFormat("instagram-story"), drawn: square, finished: studioSocialFormat("instagram-story") });
+  assert.match(fallback, /Compose for a 9:16 placement/);
+  assert.doesNotMatch(fallback, /trimmed to/);
 });
 
 test("Social placements have their own dimensions, safe areas and recommended styles", () => {
@@ -93,7 +137,7 @@ test("Social placements have their own dimensions, safe areas and recommended st
   assert.equal(studioOrderedSocialPresets("Instagram")[0].id, "photo-dump");
   assert.equal(studioOrderedSocialPresets("Pinterest")[0].id, "inspiration-pin");
   for (const preset of studioPublicationPresets("social-post")) {
-    assert.ok(studioPublishingDesign("social-post", preset.id).paper);
+    assert.ok(studioPublishingDesign("social-post", preset.id).direction.includes(preset.direction));
   }
 });
 
@@ -118,24 +162,29 @@ test("Every supported language includes Studio labels, examples, and twenty stic
   assert.notEqual(studioCopy.zh.playGroup, studioCopy["zh-Hant"].playGroup);
 });
 
+test("A report card shows the whole named area instead of the middle of a wide one", () => {
+  const image = { width: 880, height: 1168 }, card = { width: 160, height: 121 };
+  const within = (inner, outer) => outer[0] <= inner[0] + 1e-9 && outer[1] <= inner[1] + 1e-9 &&
+    outer[0] + outer[2] >= inner[0] + inner[2] - 1e-9 && outer[1] + outer[3] >= inner[1] + inner[3] - 1e-9;
+  for (const region of [[.30, .355, .41, .08], [.42, .40, .17, .13], [.215, .41, .58, .12], [.16, .025, .69, .26], [.0, .0, 1, .05], [.9, .2, .1, .7]]) {
+    const crop = studioReportCrop(region, image, card);
+    // Both eyes stay in an eye card, and the crop has the card's shape and stays on the photo.
+    assert.ok(within(region, crop), JSON.stringify(region));
+    assert.ok(Math.abs(image.width * crop[2] / (image.height * crop[3]) - card.width / card.height) < .01 || crop[2] === 1 || crop[3] === 1);
+    assert.ok(crop[0] >= 0 && crop[1] >= 0 && crop[0] + crop[2] <= 1 + 1e-9 && crop[1] + crop[3] <= 1 + 1e-9);
+  }
+});
+
 test("Studio renders only schema-checked, bounded analysis data", () => {
   assert.equal(parseStudioAnalysis("face-analysis", '{"status":"retry"}'), null);
   const feature = { color: "#889977", name: "Olive", region: [.2, .3, .4, .1] };
-  const color = {
-    status: "ok", season: "Soft autumn", summary: "Soft colors", features: { hair: feature, eyes: feature, skin: feature },
-    profile: {
-      undertone: { name: "Warm", color: "#dda88c" },
-      contrast: { name: "Medium", colors: ["#665550", "#d6baa2"] },
-      tone: { name: "Soft", colors: ["#bc855c", "#b6a791", "#657650", "#37505b"] },
-    },
-    recommended: Array(6).fill({ color: "#889977", name: "Olive" }),
-    comparison: Array(6).fill({ color: "#6464cc", name: "Periwinkle" }),
-    recommendedPalette: Array(10).fill("#889977"), comparisonPalette: Array(10).fill("#6464cc"), garment: null,
-  };
+  const color = { status: "ok", summary: "Even daylight", face: [.25, .3, .5, .5], features: { hair: feature, eyes: feature, skin: { name: "Light beige" } }, garment: null, unreliable: false };
   assert.deepEqual(parseStudioAnalysis("color-analysis", JSON.stringify(color)), color);
-  assert.throws(() => parseStudioAnalysis("color-analysis", JSON.stringify({
-    ...color, comparison: Array(6).fill({ color: "url(example)", name: "Invalid" }),
-  })));
+  // Anything else the model adds, a season included, is dropped; a colour that is not a hex value is refused.
+  assert.deepEqual(parseStudioAnalysis("color-analysis", JSON.stringify({ ...color, season: "Winter", unreliable: "maybe", features: { ...color.features, skin: { ...feature, name: "Light beige" } } })), color);
+  assert.throws(() => parseStudioAnalysis("color-analysis", JSON.stringify({ ...color, features: { ...color.features, hair: { ...feature, color: "url(example)" } } })));
+  // The face must be located: without its box there are no cheeks to measure.
+  assert.throws(() => parseStudioAnalysis("color-analysis", JSON.stringify({ ...color, face: null })));
   assert.throws(() => parseStudioAnalysis("face-analysis", '{"status":"ok","score":11}'));
   const metric = { score: 7.9, label: "Eyes" };
   const face = {
@@ -150,6 +199,34 @@ test("Studio renders only schema-checked, bounded analysis data", () => {
   assert.deepEqual(parseStudioAnalysis("face-analysis", fencedAnswer), partial);
   assert.throws(() => parseStudioAnalysis("face-analysis", JSON.stringify({ ...partial, metrics: [] })));
   assert.equal(parseStudioAnalysis("face-analysis", JSON.stringify({ ...face, guides: { ...face.guides, thirds: [.35, .2, .5, .7] } })).guides, null);
+});
+
+test("Analysis answers in the shapes the model really returns are read, and the overall score is the metrics' mean", () => {
+  // Seen from the default model on 2026-11-26: a one-iris region a few percent across, and an overall
+  // score that is not the mean of its own metrics.
+  const feature = { color: "#1b1a1b", name: "Black", region: [.385, .38, .045, .026] };
+  const color = parseStudioAnalysis("color-analysis", JSON.stringify({
+    status: "ok", summary: "Even light", face: [.25, .3, .5, .5], features: { hair: feature, eyes: feature, skin: { name: "Light beige" } }, garment: null, unreliable: false,
+  }));
+  assert.deepEqual(color.features.eyes.region, [.385, .38, .045, .026]);
+  // The card widens a tiny area before showing it, and keeps the iris inside.
+  const crop = studioReportCrop(color.features.eyes.region, { width: 772, height: 1024 }, { width: 200, height: 99 });
+  assert.ok(crop[2] >= .14 && crop[0] <= .385 && crop[0] + crop[2] >= .43 && crop[1] <= .38 && crop[1] + crop[3] >= .406);
+  const scores = [7, 7.5, 7.5, 7, 7, 7, 7, 7, 8, 8, 7.5];
+  const face = parseStudioAnalysis("face-analysis", JSON.stringify({
+    status: "ok", score: 6.7, summary: "Soft light",
+    metrics: scores.map((score, i) => ({ label: "Metric " + i, score })),
+    observations: Array(6).fill({ label: "Eyes", score: 7, note: "Clear", region: null }),
+    tips: Array(8).fill({ label: "Lighting", note: "Face a window" }), guides: null,
+  }));
+  assert.equal(face.score, 7.3);
+  for (const kind of ["face-analysis", "color-analysis"]) {
+    const prompt = studioAnalysisPrompt(kind, "Korean");
+    assert.match(prompt, /Return an object with exactly these keys: status, (score, )?summary/);
+    assert.match(prompt, /check that every bracket and brace closes/);
+  }
+  // The key the model used when it was only told "the numeric overall score" is not accepted silently.
+  assert.throws(() => parseStudioAnalysis("face-analysis", JSON.stringify({ status: "ok", overall: 7, summary: "x", metrics: [], observations: [], tips: [] })));
 });
 
 test("Random sticker captions fill every supported language to twenty while preserving custom text", () => {

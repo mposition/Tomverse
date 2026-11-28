@@ -7,8 +7,14 @@ import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecycle";
 import { enqueueArtifactCleanupForUser } from "@/lib/generatedArtifactStorage";
 import { enqueueMessageAttachmentCleanupForUser } from "@/lib/messageAttachmentStorage";
+import { enqueueCodeCloudCleanupForUser } from "@/lib/codeCloudDeletion";
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import {
+  keepDeletionCancellation,
+  stopDeletionPendingDraftRenewals,
+} from "@/lib/deletionCancellation";
 import { requestGa4UserIdDeletion } from "@/lib/ga4UserDeletion";
 import { recordMobileSessionsEndedByDeletion } from "@/lib/mobileAuthService";
 import { recordRelationshipEnded } from "@/lib/auRelationship";
@@ -64,6 +70,8 @@ export async function scheduleTomverseAccountDeletion(userId: string) {
   });
   if (!user) return { scheduled: false as const };
 
+  // Before the first Stripe write: a renewal paid from here on is reported.
+  const deletionStartedAt = new Date();
   await scheduleStripeSubscriptionCancellation(user.stripeSubscriptionId);
   const requestedAt = new Date();
   const scheduledFor = new Date(requestedAt.getTime() + ACCOUNT_DELETION_GRACE_MS);
@@ -96,6 +104,72 @@ export async function scheduleTomverseAccountDeletion(userId: string) {
       occurredAt: requestedAt,
     });
   });
+  // Reconciled once more now that pending_deletion is recorded, through the
+  // one locked reconciler (lib/deletionCancellation.ts): a renewal resume that
+  // read the account before this record and reached Stripe after the call
+  // above would otherwise leave this account renewing. Under the row lock it
+  // re-reads Stripe and writes only while the account is still pending
+  // deletion, so a restore and the customer's renewal after it are never
+  // undone by this.
+  //
+  // Not fatal: the deletion is recorded and committed, so failing the request
+  // here would tell the customer it did not happen while it did. If it fails a
+  // person verifies the subscription at Stripe (an unknown write outcome is
+  // checked, never blindly retried), the webhook reconciles on the next
+  // subscription event, and the permanent deletion at the end of the grace
+  // period cancels the subscription outright either way.
+  if (user.stripeSubscriptionId && isStripeConfigured()) {
+    try {
+      await keepDeletionCancellation(user.stripeSubscriptionId);
+    } catch (error) {
+      await reportOperationalIncident({
+        code: "ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED",
+        title: "Account deletion: reconciling the Stripe cancellation failed",
+        error,
+        severity: "error",
+        context: {
+          component: "account-deletion",
+          userId: user.id,
+          subscriptionId: user.stripeSubscriptionId,
+        },
+      }).catch(() => {});
+    }
+    // A renewal invoice created before the commit above slipped past its own
+    // invoice.created (the account was still active then); it is stopped here
+    // so it is never collected (docs/policy/plan-change.md section 10). Not
+    // fatal for the same reason; a person checks the draft at Stripe.
+    try {
+      const renewals = await stopDeletionPendingDraftRenewals(
+        user.stripeSubscriptionId,
+        deletionStartedAt
+      );
+      if (renewals.finalized > 0) {
+        await reportOperationalIncident({
+          code: "ACCOUNT_DELETION_RENEWAL_FINALIZED",
+          title: "Account deletion: a renewal invoice was already finalized; collection was stopped",
+          severity: "error",
+          context: {
+            component: "account-deletion",
+            userId: user.id,
+            subscriptionId: user.stripeSubscriptionId,
+            finalized: renewals.finalized,
+          },
+        }).catch(() => {});
+      }
+    } catch (error) {
+      await reportOperationalIncident({
+        code: "ACCOUNT_DELETION_RENEWAL_STOP_FAILED",
+        title: "Account deletion: a renewal invoice already drafted could not be stopped",
+        error,
+        severity: "error",
+        context: {
+          component: "account-deletion",
+          userId: user.id,
+          subscriptionId: user.stripeSubscriptionId,
+        },
+      }).catch(() => {});
+    }
+  }
   await revokeAllUserSessions(user.id);
   return {
     scheduled: true as const,
@@ -274,6 +348,10 @@ export async function deleteTomverseAccount(
     // including the uploads it finalised and never sent, which no conversation
     // would ever have named (docs/policy/user-attachment-persistence.md).
     await enqueueMessageAttachmentCleanupForUser(tx, user.id, "account_deleted");
+    // Desktop cloud Code jobs: their uploaded repository bundles and result
+    // patches get tombstones on the same queue, then the rows go. The User
+    // cascade would take the rows too, but not the objects they name.
+    await enqueueCodeCloudCleanupForUser(tx, user.id);
 
     // Not covered by any cascade: PerplexityAsyncJob names a conversationId
     // but declares no relation, so deleting the conversations would leave the

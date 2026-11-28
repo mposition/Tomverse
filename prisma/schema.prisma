@@ -15,6 +15,9 @@ model User {
   mcpOAuthFlows McpOAuthFlow[]
   mcpCustomServers McpCustomServer[]
   codeTaskReservations CodeTaskReservation[]
+  desktopRemotePasskeys DesktopRemotePasskey[]
+  desktopRemotePasskeyChallenges DesktopRemotePasskeyChallenge[]
+  codeCloudJobs CodeCloudJob[]
   id                            String        @id @default(cuid())
   name                          String?
   email                         String?       @unique
@@ -73,6 +76,7 @@ model User {
   emailLoginEnabled             Boolean       @default(true)
   sessionsInvalidatedAt         DateTime?
   settings                      UserSettings?
+  personalization               UserPersonalization?
   ga4UserId                     Ga4UserId?
 
   accounts                             Account[]
@@ -108,6 +112,7 @@ model User {
   conversations                        Conversation[]
   comparisonReviews                    ComparisonReview[]
   comparisonReviewItemFeedback         ComparisonReviewItemFeedback[]
+  chatAnswerRatings                    ChatAnswerRating[]
   productAnalyticsEvents               ProductAnalyticsEvent[]
   privacyRequests                      PrivacyRequest[]
   planChangeRequests                   PlanChangeRequest[]
@@ -144,6 +149,8 @@ model User {
   credentialBindings                   CredentialBinding[]
   deploymentCacheAffinities            DeploymentCacheAffinity[]
   routingCandidateVerdicts             RoutingCandidateVerdict[]
+  scheduledTasks                       ScheduledTask[]
+  scheduledTaskRuns                    ScheduledTaskRun[]
 
   @@index([plan, id])
   @@index([createdAt])
@@ -296,6 +303,29 @@ model UserSettings {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+/// What the account owner asked every Chat and Review answer to know and to
+/// follow (lib/chatPersonalizationCore.ts). Typed by the owner, so it is sent
+/// as the owner's preferences inside the turn's context block, below an
+/// assistant profile's and a project's instructions and never above
+/// Tomverse's own rules. Not sent on the external APIs.
+///
+/// A table of its own rather than UserSettings columns: that row is written
+/// by the settings panel's every-dirty-field save, and it cannot be created
+/// without naming a default model.
+model UserPersonalization {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// "What should Tomverse know about you". At most 1,500 characters (CHECK).
+  aboutMe             String   @default("")
+  /// "How should Tomverse answer". At most 1,500 characters (CHECK).
+  responsePreferences String   @default("")
+  /// One of RESPONSE_STYLES (CHECK UserPersonalization_responseStyle_check).
+  responseStyle       String   @default("default")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 }
 
 model Account {
@@ -502,6 +532,7 @@ model Conversation {
   cacheAffinities       DeploymentCacheAffinity[]
   continuationBridge    ConversationContinuationBridge?
   researchPreviewRuns   ResearchPreviewRun[]
+  scheduledTasks        ScheduledTask[]
   user                  User?                           @relation(fields: [userId], references: [id], onDelete: Cascade)
   project               ConversationProject?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdAt             DateTime                        @default(now())
@@ -558,9 +589,20 @@ model Conversation {
   passwordVersion  Int     @default(0)
   importedGuestKey String?
 
+  /// Set only when the conversation was started as a temporary Chat
+  /// (lib/temporaryChatAccess.ts), never written afterwards, and NULL for
+  /// every other conversation. The value is when the server deletes it; it is
+  /// the only column the deletion sweep may select on, so a conversation
+  /// without it can never be chosen (lib/temporaryConversationSweep.ts).
+  /// `Conversation_temporary_scope_check` keeps a temporary row out of every
+  /// project and its memory off.
+  temporaryExpiresAt DateTime?
+  answerRatings      ChatAnswerRating[]
+
   @@unique([userId, importedGuestKey])
   @@index([userId, projectId])
   @@index([userId, kind])
+  @@index([temporaryExpiresAt])
 }
 
 model ConversationProject {
@@ -659,6 +701,15 @@ model Message {
   /// The assistant id is deliberately not a Message relation: the attempt is
   /// claimed before an assistant Message exists.
   responseAttempts ChatResponseAttempt[] @relation("ChatResponseAttemptSource")
+
+  /// The signed-in owner's thumbs up or down on this answer.
+  answerRatings ChatAnswerRating[]
+
+  /// When "Regenerate" or "edit your last message" replaced this question or
+  /// answer (lib/chatSupersededMessages.ts). The row stays; a replaced message
+  /// is drawn dimmed and left out of later model context on every device.
+  /// NULL means the message stands.
+  supersededAt DateTime?
 
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -1020,6 +1071,38 @@ model ComparisonReviewItemFeedback {
   @@unique([comparisonReviewId, userId, reviewItemId])
   @@index([userId, createdAt])
   @@index([verdict, createdAt])
+}
+
+/// A signed-in owner's thumbs up or down on one assistant answer in Chat or
+/// Review (lib/chatAnswerRatingCore.ts). One row per person per answer:
+/// changed by updating, withdrawn by deleting.
+///
+/// `modelId` is copied from the answer's own Message row by the server, never
+/// taken from the request, so it names the model that actually answered
+/// (after any fallback). It is kept for a later Auto routing quality signal;
+/// nothing reads it for routing yet.
+///
+/// No free text: the optional reason is a closed list, and anything a person
+/// wants to say in prose belongs in the existing Feedback report.
+model ChatAnswerRating {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messageId      String
+  message        Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  modelId        String?
+  /// "up" | "down" (CHECK ChatAnswerRating_rating_check).
+  rating         String
+  /// One of CHAT_ANSWER_RATING_REASONS, only on "down" (two CHECKs).
+  reason         String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([messageId, userId])
+  @@index([userId, conversationId])
+  @@index([modelId, createdAt])
 }
 
 /// Content-free operational record of one AI Review run, written by the server
@@ -1525,6 +1608,98 @@ model ChatResponseAttempt {
   @@index([conversationId, updatedAt])
   @@index([status, leaseExpiresAt])
   @@index([sourceUserMessageId])
+}
+
+/// A question the server asks on the account's behalf on a schedule, answered
+/// into one dedicated Chat conversation (lib/scheduledTaskCore.ts). Created only
+/// by the account through /api/scheduled-tasks; run only while
+/// `feature.scheduledTasksEnabled` is on. Closed lists and the schedule shape
+/// are CHECKs in 20261128090000_scheduled_tasks.
+model ScheduledTask {
+  id                    String    @id @default(cuid())
+  userId                String
+  title                 String
+  /// The question, sent as one ordinary Chat turn each time.
+  prompt                String
+  modelId               String
+  webSearch             Boolean   @default(true)
+  /// once | daily | weekly | monthly -- never more often than daily.
+  frequency             String
+  /// "HH:MM", 24-hour, read in `timeZone`.
+  timeOfDay             String
+  dayOfWeek             Int?
+  dayOfMonth            Int?
+  /// "YYYY-MM-DD", once only.
+  runOnDate             String?
+  /// The account's zone when the schedule was saved (UserSettings.timeZone).
+  timeZone              String
+  /// active | paused | completed
+  status                String    @default("active")
+  /// Why the runner stopped it, or "user". NULL while active.
+  pauseReason           String?
+  /// The most one run may reserve, quoted from Chat pricing and approved by the
+  /// account on save. The reservation guard refuses anything above it.
+  creditsPerRun         Int
+  nextRunAt             DateTime? @db.Timestamptz(3)
+  consecutiveFailures   Int       @default(0)
+  /// The conversation the answers go to. Made on the first run; a deleted one
+  /// is replaced on the next.
+  conversationId        String?
+  revision              Int       @default(1)
+  createdAt             DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime  @updatedAt @db.Timestamptz(3)
+
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation Conversation?      @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  runs         ScheduledTaskRun[]
+
+  @@index([status, nextRunAt])
+  @@index([userId, createdAt])
+  @@index([conversationId])
+}
+
+/// One occurrence of a scheduled task. (taskId, scheduledFor) is unique, so an
+/// occurrence is claimed once. `runningUserId` is the account id while the run
+/// is `running` and NULL after (a CHECK ties the two), and it is unique: one
+/// scheduled run in flight per account, so scheduled work never takes more than
+/// one of its Chat slots -- the PlanChangeRequest.pendingForUserId pattern.
+/// `assistantMessageId` is derived from the run id and is the Chat attempt's
+/// identity, so a second dispatch of the same run can only reattach.
+model ScheduledTaskRun {
+  id                 String    @id @default(cuid())
+  taskId             String
+  userId             String
+  runningUserId      String?   @unique
+  /// The task's revision when the run was claimed. A pause or edit moves the
+  /// task's revision, after which this run may spend nothing and its verdict
+  /// no longer changes the task.
+  taskRevision       Int
+  scheduledFor       DateTime  @db.Timestamptz(3)
+  /// running | succeeded | failed | skipped | unknown
+  status             String    @default("running")
+  /// A short closed-vocabulary reason; never provider text.
+  outcome            String?
+  conversationId     String?
+  userMessageId      String?
+  assistantMessageId String    @unique
+  /// The first Chat reservation this run made, bound inside its transaction.
+  chatReservationId  String?
+  reservedCredits    Int       @default(0)
+  /// What the reservation settled at, read back after the run.
+  chargedCredits     Int?
+  leaseExpiresAt     DateTime  @db.Timestamptz(3)
+  /// When the run really began: its claim, or its resume after a lapsed lease
+  /// that never reached Chat. The minimum interval between runs is measured
+  /// from it.
+  startedAt          DateTime  @default(now()) @db.Timestamptz(3)
+  finishedAt         DateTime? @db.Timestamptz(3)
+
+  task ScheduledTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, scheduledFor])
+  @@index([userId, startedAt])
+  @@index([status, leaseExpiresAt])
 }
 
 /// One Router call per fresh saved question while its location decision can be resumed.
@@ -6931,6 +7106,7 @@ model MobileDevice {
 
   user     User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   families MobileTokenFamily[]
+  remoteControl DesktopRemoteDevice?
 
   @@index([userId, lastSeenAt])
   @@index([userId, revokedAt])
@@ -7064,6 +7240,107 @@ model MobileAuthEvent {
   @@index([userId, occurredAt])
   @@index([event, occurredAt])
   @@index([occurredAt])
+}
+
+/// A Tomverse Desktop that lets the account's other signed-in devices see its running Code tasks and answer its
+/// approval requests (docs/ops/desktop-remote-control.md). Written only by that device's own Desktop bearer. It
+/// lives a few minutes after the PC's last report, is deleted when the PC turns remote control off, and goes with
+/// the device (and so with the account). Never shown once the device's token family is revoked.
+model DesktopRemoteDevice {
+  deviceId  String   @id
+  /// The device's account, copied from the bearer; equal to `MobileDevice.userId`.
+  userId    String
+  /// The token family that wrote the latest report. A revoked family hides the row and it is deleted.
+  familyId  String
+  /// The PC's redacted report (lib/desktopRemoteControlContract.ts): task titles, states, a few progress lines and
+  /// the summary of the request on its screen. Never file contents, diffs, command output or environment values.
+  snapshot  Json
+  /// The number of the PC's request that wrote this row. A request with a number that is not higher changes nothing.
+  revision  BigInt
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @db.Timestamptz(3)
+  expiresAt DateTime @db.Timestamptz(3)
+  /// Set when the PC turned remote control off: the row is then an empty, hidden marker kept for two minutes.
+  withdrawnAt DateTime? @db.Timestamptz(3)
+
+  device   MobileDevice           @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  commands DesktopRemoteCommand[]
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+}
+
+/// One answer, stop or follow-up a signed-in web session sent to a PC. The PC picks it up once, decides whether it
+/// still applies, and reports the result; the server never applies it. The person's action is in the admin audit
+/// chain under the same id.
+model DesktopRemoteCommand {
+  id             String    @id
+  deviceId       String
+  userId         String
+  /// approval, stop or follow_up; a CHECK allows nothing else.
+  kind           String
+  taskKey        String
+  approvalId     String?
+  approvalDigest String?
+  /// once or deny, for an approval only; a CHECK allows nothing else.
+  decision       String?
+  text           String?
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+  /// Handed to the PC only before this.
+  expiresAt      DateTime  @db.Timestamptz(3)
+  deliveredAt    DateTime? @db.Timestamptz(3)
+  /// applied or refused, as the PC reported it; a CHECK allows nothing else.
+  result         String?
+  resultReason   String?
+  resultAt       DateTime? @db.Timestamptz(3)
+
+  device DesktopRemoteDevice @relation(fields: [deviceId], references: [deviceId], onDelete: Cascade)
+
+  @@unique([deviceId, approvalId])
+  @@index([deviceId, deliveredAt, expiresAt])
+  @@index([createdAt])
+}
+
+/// One WebAuthn credential an account registered to confirm "allow once" and follow-ups sent from another device
+/// (docs/ops/desktop-remote-control.md). The public key only; the private key stays in the person's authenticator.
+model DesktopRemotePasskey {
+  id           String    @id
+  userId       String
+  /// The credential id, base64url. Unique across accounts.
+  credentialId String    @unique
+  /// SubjectPublicKeyInfo (DER), base64url.
+  publicKey    String
+  /// COSE algorithm: -7 (ES256) or -257 (RS256); a CHECK allows nothing else.
+  alg          Int
+  signCount    BigInt    @default(0)
+  /// The relying party (host name) the credential was made for; an assertion for another one is refused.
+  rpId         String
+  label        String
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  lastUsedAt   DateTime? @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// One single-use challenge for registering a passkey, confirming that enrollment, one remote command, or a removal.
+/// Valid for two minutes; every purpose but registering is bound to the digest of the one thing it confirms.
+model DesktopRemotePasskeyChallenge {
+  id          String   @id
+  userId      String
+  /// register, enroll, command or remove; a CHECK allows nothing else.
+  purpose     String
+  challenge   String
+  /// Null for register; otherwise the digest of what is confirmed.
+  bindingHash String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  expiresAt   DateTime @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
 }
 
 // --- Prompt Refiner shadow reservation authority --------------------------
@@ -12836,6 +13113,52 @@ model CodingProviderTerms {
   updatedByEmail String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+}
+
+/// Desktop cloud execution (docs/ops/desktop-cloud-execution.md): one coding task a runner runs on a snapshot of the
+/// person's repository. Money is on the managed reservation named by reservationId; billing is its last receipt.
+/// Objects live at code-cloud/<id>/bundle and code-cloud/<id>/result.patch. Deleted seven days after the job ends.
+model CodeCloudJob {
+  id                   String    @id
+  userId               String
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientTaskId         String
+  /// uploading | queued | starting | running | completed | failed | cancelled (CODE_CLOUD_JOB_STATUSES)
+  status               String
+  instruction          String
+  catalogVersion       Int
+  contentHash          String
+  executorModelId      String
+  reviewerModelId      String
+  approvedCredits      Int
+  bundleBytes          Int
+  bundleSha256         String
+  baseCommit           String
+  bundleObjectKey      String?
+  reservationId        String?
+  billing              Json?
+  runnerId             String?
+  /// SHA-256 of the per-claim job token; cleared when the job ends.
+  runnerTokenHash      String?
+  runnerLeaseExpiresAt DateTime? @db.Timestamptz(3)
+  cancelRequestedAt    DateTime? @db.Timestamptz(3)
+  logs                 Json      @default("[]")
+  logSeq               Int       @default(0)
+  failureCode          String?
+  summary              String?
+  patchObjectKey       String?
+  patchBytes           Int?
+  patchSha256          String?
+  createdAt            DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime  @default(now()) @db.Timestamptz(3)
+  startedAt            DateTime? @db.Timestamptz(3)
+  finishedAt           DateTime? @db.Timestamptz(3)
+  expiresAt            DateTime  @db.Timestamptz(3)
+
+  @@unique([userId, clientTaskId])
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+  @@index([expiresAt])
 }
 
 /// Code financial metadata only. Generated text and prompts are never stored.

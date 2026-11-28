@@ -891,7 +891,7 @@ test.describe("Perplexity citations and incomplete answers", () => {
         `[data-testid="search-citation-item"][data-reference-number="${referenceNumber}"]`
       );
 
-  const expectCitationsAndNotice = async (page: Page) => {
+  const expectCitationsAndNotice = async (page: Page, notice: RegExp) => {
     const list = page
       .locator(
         `[data-testid="chat-message"][data-model-id="${PERPLEXITY_MODEL_ID}"][data-message-role="assistant"]`
@@ -920,9 +920,7 @@ test.describe("Perplexity citations and incomplete answers", () => {
     // implied -- with no follow-up request sent on the user's behalf.
     await expect(page.getByText(ANSWER_WITH_MARKERS)).toBeVisible();
     await expect(page.getByTestId("response-incomplete-notice")).toBeVisible();
-    await expect(page.getByTestId("response-incomplete-notice")).toContainText(
-      /output length limit|출력 길이 제한/
-    );
+    await expect(page.getByTestId("response-incomplete-notice")).toContainText(notice);
   };
 
   test("sources and the incomplete notice render immediately after streaming", async ({
@@ -957,7 +955,7 @@ test.describe("Perplexity citations and incomplete answers", () => {
     await selectModelsViaPicker(page, [PERPLEXITY_MODEL_ID]);
     await sendChatMessage(page, testInfo, "Are thought tokens counted separately?");
 
-    await expectCitationsAndNotice(page);
+    await expectCitationsAndNotice(page, /output length limit|출력 길이 제한/);
     // Perplexity searches as part of normal completion, so the badge still
     // reads as executed -- an incomplete answer is not a failed search.
     await expect(assistantBadge(page, PERPLEXITY_MODEL_ID)).toHaveAttribute(
@@ -993,6 +991,8 @@ test.describe("Perplexity citations and incomplete answers", () => {
     await openRecentConversation(page, { title: "QA conversation" });
     await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
 
-    await expectCitationsAndNotice(page);
+    // A reloaded answer carries no stop reason, so the notice only says it
+    // did not finish rather than naming the output limit.
+    await expectCitationsAndNotice(page, /did not finish/);
   });
 });

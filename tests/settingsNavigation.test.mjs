@@ -86,6 +86,7 @@ test("every entry names the tab it is actually in, and stays a separate row", ()
     "account-data",
     "email-notifications",
     "api-keys",
+    "scheduled-tasks",
   ]);
 
   // Pinned per section rather than "all of them are in `data`". They were all
@@ -105,6 +106,8 @@ test("every entry names the tab it is actually in, and stays a separate row", ()
     // The Developer tab: the key, the addresses and the CLI it is used with.
     // It left the account tab on 2026-11-21.
     "api-keys": "developer",
+    // What the AI does on the account's schedule, beside memory (2026-11-27).
+    "scheduled-tasks": "ai",
   };
 
   const elementIds = new Set();

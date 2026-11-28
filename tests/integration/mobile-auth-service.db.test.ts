@@ -165,6 +165,96 @@ test("Desktop settings credentials only authorize the same active Desktop sessio
   assert.equal((await requestSettings(limited.tokens.accessToken)).status, 429);
 });
 
+test("Desktop settings sessions carry the family sign-in time only when the recent sign-in switch is on", async (t) => {
+  const keep = {
+    TOMVERSE_DESKTOP_AUTH_ENABLED: process.env.TOMVERSE_DESKTOP_AUTH_ENABLED,
+    TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED: process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED,
+    TOMVERSE_DESKTOP_RECENT_AUTH_ENABLED: process.env.TOMVERSE_DESKTOP_RECENT_AUTH_ENABLED,
+    NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET,
+  };
+  process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+  process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED = "true";
+  process.env.NEXTAUTH_SECRET = "desktop-settings-local-fixture-secret";
+  t.after(() => {
+    for (const [name, value] of Object.entries(keep)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+  const { POST } = await import("@/app/api/auth/desktop/settings-session/route");
+  const { decode } = await import("next-auth/jwt");
+  const { issueMobileSession, rotateMobileSession, logoutMobileSession } = await service();
+  const settingsClaims = async (accessToken: string) => {
+    const response = await POST(new Request("https://tomverse.test/api/auth/desktop/settings-session", {
+      method: "POST", headers: { Authorization: `Bearer ${accessToken}` },
+    }));
+    if (response.status !== 200) return { status: response.status, claims: null };
+    const { token } = await response.json();
+    return { status: 200, claims: await decode({ token, secret: process.env.NEXTAUTH_SECRET! }) };
+  };
+
+  const user = await createUser();
+  const { tokens } = await issueMobileSession({ request: request(), userId: user.id, platform: "desktop", deviceLabel: "Desktop" });
+  // Back-date the sign-in in the row, not in the tokens: a token minted three hours ago would already be expired.
+  await prisma.mobileTokenFamily.updateMany({ where: { userId: user.id }, data: { createdAt: new Date(Date.now() - 3 * 60 * 60_000) } });
+  const family = await prisma.mobileTokenFamily.findFirstOrThrow({ where: { userId: user.id } });
+
+  delete process.env.TOMVERSE_DESKTOP_RECENT_AUTH_ENABLED;
+  const off = await settingsClaims(tokens.accessToken);
+  assert.equal(off.status, 200);
+  assert.equal(off.claims?.desktopSettings?.authenticatedAt, undefined);
+  assert.equal(off.claims?.authenticatedAt, undefined);
+
+  process.env.TOMVERSE_DESKTOP_RECENT_AUTH_ENABLED = "true";
+  const on = await settingsClaims(tokens.accessToken);
+  assert.equal(on.claims?.desktopSettings?.authenticatedAt, family.createdAt.toISOString());
+  assert.equal(on.claims?.authenticatedAt, undefined, "the administrator-visible claim stays absent");
+
+  // A refresh rotates the family; it is not a sign-in and must not renew the time.
+  const rotated = await rotateMobileSession({ request: request(), refreshToken: tokens.refreshToken, client: "desktop" });
+  assert.ok(rotated.ok);
+  const afterRefresh = await settingsClaims(rotated.tokens.accessToken);
+  assert.equal(afterRefresh.claims?.desktopSettings?.authenticatedAt, family.createdAt.toISOString());
+  const rotatedFamily = await prisma.mobileTokenFamily.findUniqueOrThrow({ where: { id: family.id } });
+  assert.equal(rotatedFamily.createdAt.getTime(), family.createdAt.getTime());
+  assert.ok(rotatedFamily.lastRotatedAt.getTime() >= family.lastRotatedAt.getTime());
+
+  // The session callback hands the time to account routes and never to the admin field.
+  const { authOptions } = await import("@/lib/auth");
+  const session = authOptions.callbacks?.session;
+  assert.ok(session);
+  const resolved = await session({
+    session: { user: { name: user.name, email: user.email, id: user.id }, expires: new Date(Date.now() + 300_000).toISOString() },
+    token: afterRefresh.claims!, user: { id: user.id, email: user.email!, emailVerified: null },
+    trigger: "update", newSession: undefined,
+  });
+  assert.equal(resolved.user && "desktopAuthenticatedAt" in resolved.user ? resolved.user.desktopAuthenticatedAt : undefined, family.createdAt.toISOString());
+  assert.equal(resolved.user && "authenticatedAt" in resolved.user ? resolved.user.authenticatedAt : undefined, undefined);
+  process.env.TOMVERSE_DESKTOP_RECENT_AUTH_ENABLED = "false";
+  const switchedOff = await session({
+    session: { user: { name: user.name, email: user.email, id: user.id }, expires: new Date(Date.now() + 300_000).toISOString() },
+    token: afterRefresh.claims!, user: { id: user.id, email: user.email!, emailVerified: null },
+    trigger: "update", newSession: undefined,
+  });
+  assert.equal(switchedOff.user && "desktopAuthenticatedAt" in switchedOff.user ? switchedOff.user.desktopAuthenticatedAt : undefined, undefined);
+  process.env.TOMVERSE_DESKTOP_RECENT_AUTH_ENABLED = "true";
+
+  // A second sign-in is a new family with its own, later time.
+  const second = await issueMobileSession({ request: request(), userId: user.id, platform: "desktop", deviceLabel: "Desktop" });
+  const secondClaims = await settingsClaims(second.tokens.accessToken);
+  assert.ok(Date.parse(secondClaims.claims!.desktopSettings!.authenticatedAt!) > family.createdAt.getTime());
+
+  // Another user's family is never read, and a revoked family issues nothing.
+  const other = await createUser();
+  const otherSession = await issueMobileSession({ request: request(), userId: other.id, platform: "desktop", deviceLabel: "Desktop" });
+  const otherFamily = await prisma.mobileTokenFamily.findFirstOrThrow({ where: { userId: other.id } });
+  const otherClaims = await settingsClaims(otherSession.tokens.accessToken);
+  assert.equal(otherClaims.claims?.desktopSettings?.authenticatedAt, otherFamily.createdAt.toISOString());
+  assert.notEqual(otherClaims.claims?.desktopSettings?.authenticatedAt, family.createdAt.toISOString());
+  await logoutMobileSession({ request: request(), refreshToken: second.tokens.refreshToken, client: "desktop" });
+  assert.equal((await settingsClaims(second.tokens.accessToken)).status, 401);
+});
+
 test("Desktop email verifies an existing single-use code without accepting browser requests", async (t) => {
   const settings = {
     TOMVERSE_DESKTOP_AUTH_ENABLED: process.env.TOMVERSE_DESKTOP_AUTH_ENABLED,
@@ -527,6 +617,35 @@ test("Desktop reads its own resources through the exact origin and route allowli
     }
     assert.equal((await rename(createdId, { title: "Renamed in Desktop" })).status, 200);
     assert.equal((await (await conversation(createdId)).json()).title, "Renamed in Desktop");
+    const composerFlag = "TOMVERSE_DESKTOP_COMPOSER_TOOLS_ENABLED";
+    const reviewFlag = "TOMVERSE_DESKTOP_REVIEW_ENABLED";
+    const previousComposer = process.env[composerFlag];
+    const previousReview = process.env[reviewFlag];
+    try {
+      const options = { webSearchMode: "always", memoryMode: "off", assistantProfileId: null };
+      delete process.env[composerFlag];
+      assert.equal((await rename(createdId, options)).status, 400);
+      assert.equal((await (await capabilities.GET(read("/api/products/chat/capabilities"))).json()).desktopComposerTools, false);
+      process.env[composerFlag] = "true";
+      process.env[reviewFlag] = "true";
+      assert.equal((await (await capabilities.GET(read("/api/products/chat/capabilities"))).json()).desktopComposerTools, true);
+      assert.equal((await rename(foreign.id, options)).status, 403);
+      // A Desktop Review takes the composer options as a Chat does.
+      assert.equal((await rename(review.id, options)).status, 200);
+      assert.equal((await (await conversation(review.id)).json()).webSearchMode, "always");
+      assert.equal((await rename(locked.id, options)).status, 423);
+      assert.equal((await rename(createdId, options, { Cookie: "session=ambient" })).status, 401);
+      assert.equal((await rename(createdId, { ...options, password: "will-not-change" })).status, 400);
+      const updated = await rename(createdId, options);
+      assert.equal(updated.status, 200, await updated.clone().text());
+      const savedOptions = await (await conversation(createdId)).json();
+      assert.equal(savedOptions.webSearchMode, "always");
+      assert.equal(savedOptions.memoryMode, "off");
+      assert.equal(savedOptions.assistantProfile, null);
+    } finally {
+      if (previousComposer === undefined) delete process.env[composerFlag]; else process.env[composerFlag] = previousComposer;
+      if (previousReview === undefined) delete process.env[reviewFlag]; else process.env[reviewFlag] = previousReview;
+    }
     assert.equal((await rename(createdId, { password: "will-not-change" })).status, 400);
     assert.equal((await rename(createdId, { title: "Ambient cookie" }, { Cookie: "session=ambient" })).status, 401);
     assert.equal((await rename(foreign.id, { title: "Wrong owner" })).status, 403);
@@ -1545,7 +1664,18 @@ test("Desktop Chat prepares signed memory only for its current saved question an
     assert.deepEqual(history?.history.map(({ id }) => id), [older.id, previous.id]);
     assert.equal((await context.POST(prepare({ ...payload, prompt: "A renderer-supplied query" }))).status, 400);
     assert.equal((await context.POST(prepare({ ...payload, conversationId: foreign.id, sourceUserMessageId: foreignQuestion.id }))).status, 403);
-    assert.equal((await context.POST(prepare({ ...payload, conversationId: review.id }))).status, 403);
+    // A Review is a writable Desktop conversation now; the question belongs to another conversation, so it is a conflict, not a refusal.
+    assert.equal((await context.POST(prepare({ ...payload, conversationId: review.id }))).status, 409);
+    // A Review turn that one model answers alone prepares its own context: the same memory, bound to the Review.
+    const reviewPayload = { conversationId: review.id, modelId,
+      sourceUserMessageId: (await save(review.id, "Recommend a decaffeinated coffee.", 1_000)).id };
+    const reviewContext = await context.POST(prepare(reviewPayload));
+    assert.equal(reviewContext.status, 200, await reviewContext.clone().text());
+    const reviewBody = await reviewContext.json();
+    assert.equal(reviewBody.memoryUsedCount, 1);
+    assert.ok(verifyChatContextBundle(reviewBody.contextBundle, { subjectKey: user.id, conversationId: review.id, modelId }).ok);
+    assert.equal(verifyChatContextBundle(reviewBody.contextBundle, { subjectKey: user.id, conversationId: own.id, modelId }).ok, false);
+    assert.equal((await context.POST(prepare({ ...reviewPayload, modelId: "another-model" }))).status, 409);
     assert.equal((await context.POST(prepare({ ...payload, conversationId: locked.id }))).status, 423);
     assert.equal((await context.POST(prepare({ ...payload, sourceUserMessageId: older.id }))).status, 409);
     assert.equal((await context.POST(prepare({ ...payload, modelId: "another-model" }))).status, 409);
@@ -1584,7 +1714,12 @@ test("Desktop Chat prepares signed memory only for its current saved question an
     assert.equal(stopped.status, 200);
     assert.deepEqual(await stopped.json(), { ok: true, contextBundle: null, memoryUsedCount: 0, reason: "account_off" });
     process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED = "false";
+    // The route is enrolled with Review writes too, so Chat writes off alone no longer unenrols it: a Chat is refused, not unauthenticated.
+    assert.equal((await context.POST(prepare(payload))).status, 403);
+    assert.equal((await context.POST(prepare(reviewPayload))).status, 200);
+    process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED = "false";
     assert.equal((await context.POST(prepare(payload))).status, 401);
+    assert.equal((await context.POST(prepare(reviewPayload))).status, 401);
   } finally {
     await prisma.appSetting.deleteMany({ where: { key: MEMORY_INJECTION_FLAG_KEY } });
     flags.forEach((key, index) => {

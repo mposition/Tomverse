@@ -1,0 +1,8 @@
+{
+  "name": "mf-rename-compute-total",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

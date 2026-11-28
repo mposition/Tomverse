@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { test } from "node:test";
+import sharp from "sharp";
 
 import { generateImageWithProvider } from "../lib/imageProviderAdapter.ts";
 import {
@@ -346,4 +347,57 @@ test("Qwen is never reached without its key, for an edit, or while held", async 
     (error) => /no Qwen request mapping/.test(error.message)
   );
   assert.equal(calls.length, 0);
+});
+
+test("registered Alibaba photo-edit models send one bounded reference without including it in the audit", async context => {
+  const previous = process.env.IMAGE_ALIBABA_EDIT_ENABLED;
+  context.after(() => {
+    if (previous === undefined) delete process.env.IMAGE_ALIBABA_EDIT_ENABLED;
+    else process.env.IMAGE_ALIBABA_EDIT_ENABLED = previous;
+  });
+  const { imageEditCredits } = createRequire(import.meta.url)("../lib/imageModelRegistry.ts");
+  const photo = await sharp({
+    create: { width: 400, height: 280, channels: 4, background: { r: 12, g: 50, b: 128, alpha: 0.5 } },
+  }).png().toBuffer();
+  const editImage = { bytes: photo, mimeType: "image/png", width: 400, height: 280, sha256: "a".repeat(64) };
+  for (const [id, outputCostMicroUsd, credits] of [
+    ["qwen-image-3.0", 30_000, 45], ["qwen-image-3.0-pro", 40_000, 60],
+    ["wan2.7-image", 30_000, 45], ["wan2.7-image-pro", 75_000, 100],
+  ]) {
+    const price = { ...QWEN_MODEL.prices[0], outputCostMicroUsd, credits };
+    const model = {
+      ...QWEN_MODEL, id, apiModelId: id, prices: [price],
+      billingTerms: { kind: "per_image_no_thinking" },
+    };
+    const calls = [];
+    const execute = () => withQwen(fakeFetch(calls, {
+      generation: () => Response.json(success(ASSET_URL, { output_image_count: 1, input_image_count: 1 })),
+    }), () => generate({ modelId: id, editImage }), { model });
+
+    delete process.env.IMAGE_ALIBABA_EDIT_ENABLED;
+    await assert.rejects(execute, /cannot edit/);
+    assert.equal(calls.length, 0);
+    process.env.IMAGE_ALIBABA_EDIT_ENABLED = "true";
+    assert.equal(imageEditCredits(model, price), credits);
+    assert.equal(imageEditCredits(model, { ...price, size: "1536x1024" }), null);
+    assert.equal(imageEditCredits(model, { ...price, outputCostMicroUsd: outputCostMicroUsd - 1 }), null);
+    assert.equal(imageEditCredits(model, { ...price, credits: 1 }), null);
+
+    const result = await execute();
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].init.redirect, "error");
+    const request = JSON.parse(calls[0].init.body);
+    const [source, prompt] = request.input.messages[0].content;
+    assert.deepEqual(prompt, { text: "a single red apple" });
+    const metadata = await sharp(Buffer.from(source.image.split(",")[1], "base64")).metadata();
+    assert.deepEqual([metadata.width, metadata.height, metadata.hasAlpha], [1024, 1024, false]);
+    assert.equal(request.parameters.n, 1);
+    if (id.startsWith("wan")) assert.equal(request.parameters.enable_sequential, false);
+    assert.equal(Object.hasOwn(result.requestParams, "input"), false);
+    assert.equal(result.requestParams.image.width, 1024);
+    assert.equal(result.requestParams.image.sha256.length, 64);
+    assert.equal(calls[1].init.headers?.Authorization, undefined);
+  }
+
+  assert.equal(parseQwenImageResponse(success(ASSET_URL, { output_image_count: 1, input_image_count: 0 }), 1), null);
 });

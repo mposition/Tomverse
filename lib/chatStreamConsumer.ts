@@ -17,7 +17,8 @@
  * left in for even one frame is a marker the user reads:
  *
  *   * lib/routingRetrySignal.ts     -- a fallback swapped the model
- *   * lib/chatStreamKeepalive.ts    -- the provider is still thinking, or the
+ *   * lib/chatStreamKeepalive.ts    -- the provider is still thinking or still
+ *                                      producing non-visible parts, or the
  *                                      server has stopped waiting for it
  *   * lib/generatedArtifactProgressSignal.ts -- a file is being built
  *   * lib/webSearchStreamTrailer.ts -- the closing metadata object
@@ -59,12 +60,14 @@ export type ChatStreamResult = ChatStreamProgress & {
 };
 
 /**
- * Only the two calls this loop makes, so a test can pass a counter and the
+ * Only the calls this loop makes, so a test can pass a counter and the
  * component can pass the real watchdog.
  */
 export type ChatStreamLivenessSink = {
-  noteKeepalive: () => void;
+  noteKeepalive: (serverIntervalMs?: number) => void;
   noteVisibleChunk: () => void;
+  /** Any other chunk the server wrote. Optional for older test sinks. */
+  noteServerSignal?: () => void;
 };
 
 export const consumeChatStream = async (input: {
@@ -98,6 +101,10 @@ export const consumeChatStream = async (input: {
   let isGeneratingArtifact = false;
   let generatingArtifactFormat: string | null = null;
   let serverStallCode: ChatTimeoutErrorCode | null = null;
+  // Complete keepalive markers already reported. The splitter runs over the
+  // whole accumulation each pass, so its last signal is the same object on
+  // every later pass; only a higher count is a keepalive that just arrived.
+  let keepalivesSeen = 0;
 
   for (;;) {
     let read: ReadableStreamReadResult<Uint8Array>;
@@ -118,15 +125,17 @@ export const consumeChatStream = async (input: {
     if (routing.signal) retryingWithModelId = routing.signal.modelId;
 
     const keepalive = splitStreamKeepaliveSignal(routing.text);
-    if (keepalive.signal) {
-      // Proof that the transport is alive and nothing else. It deliberately
-      // does not extend the first-response deadline -- see
-      // lib/chatStreamLiveness.ts -- or a provider that had permanently
-      // stopped would be hidden for as long as the server kept writing.
-      liveness.noteKeepalive();
-      if (keepalive.signal.state === "stalled") {
-        serverStallCode = keepalive.signal.code ?? "CHAT_FIRST_RESPONSE_TIMEOUT";
-      }
+    const keepaliveArrived = keepalive.count > keepalivesSeen;
+    if (keepaliveArrived) {
+      keepalivesSeen = keepalive.count;
+      // Resets the silence clock and nothing else. It deliberately does not
+      // extend the first-response deadline -- see lib/chatStreamLiveness.ts
+      // -- or a provider that had permanently stopped would be hidden for as
+      // long as the server kept writing.
+      liveness.noteKeepalive(keepalive.signal?.intervalMs);
+    }
+    if (keepalive.signal?.state === "stalled") {
+      serverStallCode = keepalive.signal.code ?? "CHAT_FIRST_RESPONSE_TIMEOUT";
     }
 
     const artifactProgress = splitArtifactProgressSignal(keepalive.text);
@@ -145,6 +154,10 @@ export const consumeChatStream = async (input: {
     const advanced =
       displayText.length > previousLength || Boolean(artifactProgress.signal);
     if (advanced) liveness.noteVisibleChunk();
+    // A routing notice, a progress marker, the trailer, or the torn first
+    // half of a keepalive: the server is writing, which is all the silence
+    // watchdog asks. It is not progress, so the phase stays where it was.
+    else if (!keepaliveArrived) liveness.noteServerSignal?.();
 
     onProgress({
       ...(mcpProgressFromStream(rawStreamText) ? { mcpProgress: mcpProgressFromStream(rawStreamText) } : {}),

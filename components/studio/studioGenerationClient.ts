@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { consumeChatStream } from "@/lib/chatStreamConsumer";
 import { discardResponseBody } from "@/lib/discardResponseBody";
-import type { ImageSize } from "@/lib/imageGenerationPricing";
+import type { StudioImageUseCase } from "@/lib/studioTools";
+import type { ImageQuality, ImageSize } from "@/lib/imageGenerationPricing";
 import { notifyUserUsageChanged } from "@/components/chat/useUserUsage";
 
 export type StudioImageQuote = {
@@ -11,7 +12,20 @@ export type StudioImageQuote = {
   model: string;
   credits: number;
   pricingVersion: string;
+  quality: ImageQuality;
+  useCase?: StudioImageUseCase;
+  requestedSize?: ImageSize;
+  squareFallback?: boolean;
+  /**
+   * Set when several tools serve the feature. Each is its own request with its
+   * own price (studioToolQuote); `credits` is their total.
+   */
+  targets?: { modelId: string; model: string; credits: number; pricingVersion: string }[];
 };
+
+/** The quote one tool of a several-tool feature is submitted with. */
+export const studioToolQuote = <Quote extends StudioImageQuote>(quote: Quote, target: NonNullable<StudioImageQuote["targets"]>[number]): Quote =>
+  ({ ...quote, modelId: target.modelId, model: target.model, credits: target.credits, pricingVersion: target.pricingVersion, targets: undefined });
 
 export class StudioGenerationError extends Error {
   constructor(readonly status: number, readonly code?: string, readonly details?: Record<string, unknown>) {
@@ -39,11 +53,16 @@ function postJson(path: string, body: object, signal: AbortSignal, method = "POS
 
 type SizedStudioImageQuote = StudioImageQuote & { size: ImageSize };
 
-export async function loadStudioImageQuote(size: ImageSize, edit: boolean, signal: AbortSignal, fallbackSize?: ImageSize): Promise<SizedStudioImageQuote> {
+export async function loadStudioImageQuote(size: ImageSize, edit: boolean, signal: AbortSignal, fallbackSize?: ImageSize, useCase?: StudioImageUseCase): Promise<SizedStudioImageQuote> {
   const requestQuote = async (requestedSize: ImageSize) => {
-    const quote = await fetch("/api/studio/images?" + new URLSearchParams({ size: requestedSize, edit: String(edit) }), { signal, cache: "no-store" })
-      .then(readJson<StudioImageQuote>);
-    return { ...quote, size: requestedSize };
+    const params = new URLSearchParams({ size: requestedSize, edit: String(edit) });
+    if (useCase) {
+      params.set("useCase", useCase);
+      if (fallbackSize === "1024x1024" && fallbackSize !== requestedSize) params.set("squareFallback", "true");
+    }
+    const quote = await fetch("/api/studio/images?" + params, { signal, cache: "no-store" })
+      .then(readJson<StudioImageQuote & { size?: ImageSize }>);
+    return { ...quote, size: quote.size ?? requestedSize };
   };
   try {
     return await requestQuote(size);
@@ -54,15 +73,15 @@ export async function loadStudioImageQuote(size: ImageSize, edit: boolean, signa
   }
 }
 
-export function useStudioImageQuote(size: ImageSize, edit: boolean, enabled = true, fallbackSize?: ImageSize) {
+export function useStudioImageQuote(size: ImageSize, edit: boolean, enabled = true, fallbackSize?: ImageSize, useCase?: StudioImageUseCase) {
   const [result, setResult] = useState<{ key: string; quote?: SizedStudioImageQuote; error?: number }>();
   const [version, setVersion] = useState(0);
-  const key = [size, edit, fallbackSize, version].join("/");
+  const key = [size, edit, fallbackSize, useCase, version].join("/");
   useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
     const signal = controller.signal;
-    void loadStudioImageQuote(size, edit, signal, fallbackSize)
+    void loadStudioImageQuote(size, edit, signal, fallbackSize, useCase)
       .then(quote => {
         if (!signal.aborted) setResult({ key, quote });
       })
@@ -70,12 +89,103 @@ export function useStudioImageQuote(size: ImageSize, edit: boolean, enabled = tr
         if (!signal.aborted) setResult({ key, error: error instanceof StudioGenerationError ? error.status : 503 });
       });
     return () => controller.abort();
-  }, [enabled, size, edit, fallbackSize, key]);
+  }, [enabled, size, edit, fallbackSize, useCase, key]);
   return {
     quote: enabled && result?.key === key ? result.quote : undefined,
     error: enabled && result?.key === key ? result.error : undefined,
     reload: () => setVersion(value => value + 1),
   };
+}
+
+/**
+ * Which tools of a several-tool feature a press of the button requests.
+ *
+ * A tool whose result for this photo is held was paid for, so it is not
+ * requested again while anything is still owed: another tool's result
+ * (`held` false), or its own cut-out, which was returned but is not on screen
+ * (`shown` false) and only needs cropping again. Only when every result is
+ * both held and shown does a press mean "make them again".
+ */
+export const studioToolsToRequest = <Target extends { modelId: string }>(
+  targets: readonly Target[], held: (modelId: string) => boolean, shown: (modelId: string) => boolean
+): Target[] => {
+  const missing = targets.filter(target => !held(target.modelId));
+  if (missing.length > 0) return missing;
+  return targets.every(target => shown(target.modelId)) ? [...targets] : [];
+};
+
+/**
+ * The failure that decides what happens next when one or more tools failed: a
+ * credit shortfall first (it opens credit recovery), then a changed quote (it
+ * reloads the quote), then whichever came first. A later tool's shortfall must
+ * not be lost behind an earlier tool's ordinary error.
+ */
+export const studioToolFailure = (failures: readonly unknown[], isShortfall: (error: unknown) => boolean): unknown =>
+  failures.find(isShortfall) ?? failures.find(quoteChanged) ?? failures[0];
+
+const quoteChanged = (error: unknown) => error instanceof StudioGenerationError && error.status === 409;
+
+/**
+ * The order a press works through the tools: any whose request is unfinished
+ * first, then the rest as quoted. An unfinished request may already be paid
+ * for, so it is resumed before anything new is sent; a refusal of a new
+ * request (a credit shortfall) then finds nothing left to lose and can go to
+ * checkout.
+ */
+export const studioToolOrder = <Target extends { modelId: string }>(targets: readonly Target[], pending: (modelId: string) => boolean): Target[] =>
+  [...targets.filter(target => pending(target.modelId)), ...targets.filter(target => !pending(target.modelId))];
+
+/**
+ * Whether the tools after a failed one are still worth sending. Not after a
+ * credit shortfall or a changed quote, which hold for every tool, and not
+ * while the failed request is unfinished (`pending`): it may already be paid
+ * for and only its runner can resume it.
+ */
+export const studioToolSequenceStops = (error: unknown, pending: boolean, isShortfall: (error: unknown) => boolean): boolean =>
+  pending || isShortfall(error) || quoteChanged(error);
+
+/**
+ * What the editor does once the tools have run and at least one failed.
+ *
+ *   - `throw`: the caller's ordinary handling takes the error, which for a
+ *     shortfall opens credit recovery and for a changed quote reloads it.
+ *     Nothing made is always thrown.
+ *   - `notice`: something was made; say that one result is missing.
+ *
+ * While any tool's request is unfinished a shortfall is never thrown as one:
+ * the trip to checkout would drop the runner that can resume a request that
+ * may already be paid for. It becomes an ordinary failure until that request
+ * has been resumed.
+ */
+export const studioToolOutcome = (input: {
+  failures: readonly unknown[];
+  made: number;
+  unfinished: boolean;
+  isShortfall: (error: unknown) => boolean;
+}): { action: "throw"; error: unknown } | { action: "notice" } => {
+  const failure = studioToolFailure(input.failures, input.isShortfall);
+  if (input.isShortfall(failure) && input.unfinished) {
+    return input.made === 0 ? { action: "throw", error: new StudioGenerationError(503, "STUDIO_TOOL_UNFINISHED") } : { action: "notice" };
+  }
+  return input.made === 0 || input.isShortfall(failure) || quoteChanged(failure) ? { action: "throw", error: failure } : { action: "notice" };
+};
+
+/**
+ * Runs one tool of a several-tool feature after another has finished. The
+ * slot the previous request held is given back a moment after its result
+ * becomes readable, so a refusal for a busy slot is waited out twice before it
+ * counts. Nothing was reserved by a refused request.
+ */
+export async function runStudioTool<Result>(run: () => Promise<Result>, signal: AbortSignal, waitMs = 2_000): Promise<Result> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await run();
+    } catch (error) {
+      const busy = error instanceof StudioGenerationError && error.status === 429 && error.code === "IMAGE_CONCURRENCY_EXCEEDED";
+      if (!busy || attempt >= 2 || signal.aborted) throw error;
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+    }
+  }
 }
 
 async function uploadStudioReference(blob: Blob, signal: AbortSignal) {
@@ -114,7 +224,7 @@ type StudioSubmission = { groupId: string };
 type StudioImageRun = { inputKey: string; idempotencyKey: string; uploadId?: string; groupId?: string };
 export function createStudioImageRunner() {
   let current: StudioImageRun | undefined;
-  return async (input: {
+  const run = async (input: {
     inputKey: string;
     prompt: string;
     size: ImageSize;
@@ -123,7 +233,7 @@ export function createStudioImageRunner() {
     signal: AbortSignal;
   }): Promise<Blob> => {
     const { signal, quote } = input;
-    const key = JSON.stringify([input.inputKey, input.prompt, input.size, quote.modelId, quote.pricingVersion]);
+    const key = JSON.stringify([input.inputKey, input.prompt, input.size, quote.modelId, quote.pricingVersion, quote.quality, quote.credits, quote.useCase]);
     if (current?.inputKey !== key) current = { inputKey: key, idempotencyKey: crypto.randomUUID() };
     const run = current;
     if (!run.groupId) {
@@ -134,7 +244,8 @@ export function createStudioImageRunner() {
       try {
         submitted = await readJson<StudioSubmission>(await postJson("/api/studio/images", {
           prompt: input.prompt, size: input.size, modelId: quote.modelId, pricingVersion: quote.pricingVersion,
-          idempotencyKey: run.idempotencyKey, ...(run.uploadId ? { uploadId: run.uploadId } : {}),
+          quality: quote.quality, credits: quote.credits, requestedSize: quote.requestedSize, squareFallback: quote.squareFallback,
+          useCase: quote.useCase, idempotencyKey: run.idempotencyKey, ...(run.uploadId ? { uploadId: run.uploadId } : {}),
         }, signal));
       } catch (error) {
         if (signal.aborted || (error instanceof StudioGenerationError && error.status < 500)) {
@@ -184,6 +295,12 @@ export function createStudioImageRunner() {
     }
     throw new StudioGenerationError(504);
   };
+  /**
+   * True while a request this runner sent is unfinished: it may be reserved or
+   * already paid for, and the next call with the same input resumes it under
+   * the same key. False after a result, a refusal or a failed generation.
+   */
+  return Object.assign(run, { pending: () => current !== undefined });
 }
 
 export async function generateStudioText(prompt: string, signal: AbortSignal, reference?: Blob) {

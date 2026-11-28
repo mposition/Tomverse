@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  studioStickerBounds, studioStickerCaptionOutside, studioStickerCaptionSlot, studioStickerCells, studioStickerCrossesSeam,
+  studioStickerBounds, studioStickerCaptionOutside, studioStickerCaptionSlot, studioStickerCells, studioStickerCrossesSeam, studioStickerRowEdge,
 } from "../lib/studioStickerGeometry.ts";
-import { studioStickerPrompt } from "../lib/studioStickerPrompt.ts";
+import { estimatePromptTokens } from "../lib/chatTokenEstimate.ts";
+import { IMAGE_PROMPT_MAX_TOKENS } from "../lib/imageGenerationPricing.ts";
+import { studioStickerBrief } from "../lib/studioStickerPrompt.ts";
+import { STUDIO_STICKER_KEYS } from "../lib/studioTools.ts";
+import { studioCopy } from "../locales/studio.ts";
 
 function fill(data, stride, left, top, width, height) {
   for (let y = top; y < top + height; y++) {
@@ -11,17 +15,76 @@ function fill(data, stride, left, top, width, height) {
   }
 }
 
-test("Studio gives every sticker an ordered pose cue while keeping original identity and text separate", () => {
-  const cues = Array.from({ length: 20 }, (_, i) => "문구 " + (i + 1));
-  const pack = studioStickerPrompt("real", cues);
-  assert.match(pack, /fixed 5-column by 4-row grid/);
-  assert.match(pack, /quoted captions are acting cues only/);
-  assert.match(pack, /Preserve face shape, eye shape and spacing/);
-  const rows = pack.split("\n").filter(line => /^Row \d+: /.test(line));
-  assert.deepEqual(rows.flatMap(row => row.replace(/^Row \d+: /, "").split(" | ").map(value => JSON.parse(value))), cues);
-  const short = studioStickerPrompt("character", cues.slice(0, 7));
-  assert.match(short, /Row 3: "문구 7" \| \[empty\] \| \[empty\]/);
-  assert.match(studioStickerPrompt("real", [cues[0]]), /Make one centered chat sticker/);
+test("Studio letters the exact submitted captions in reading order for either face style", () => {
+  const captions = Array.from({ length: 20 }, (_, i) => `문구 ${i + 1}`);
+  const { prompt } = studioStickerBrief("real", captions);
+  assert.match(prompt, /5-column by 4-row grid/);
+  assert.match(prompt, /lettering specimens/);
+  const rows = prompt.split("\n").filter(line => /^Row \d+: /.test(line));
+  assert.deepEqual(rows.flatMap(row => row.replace(/^Row \d+: /, "").split(" | ").map(word => JSON.parse(word))), captions);
+  const partial = studioStickerBrief("character", captions.slice(0, 7));
+  assert.match(partial.prompt, /Row 3: "문구 7"$/);
+  assert.match(partial.prompt, /unused trailing cells blank/);
+  for (const [style, caption] of [["character", "加油！"], ["real", 'He said "hi"!'], ["real", "좋아!"]]) {
+    const single = studioStickerBrief(style, [caption]).prompt;
+    assert.match(single, /one finished chat sticker/);
+    assert.ok(single.includes(JSON.stringify(caption)));
+  }
+});
+
+test("Known poses still carry the exact word the model must letter", () => {
+  const captions = ["굿굿!", "사랑해", "Good night", "배고파"];
+  const { prompt } = studioStickerBrief("real", captions);
+  assert.match(prompt, /foreshortened thumbs-up.*huge red felt heart/);
+  assert.match(prompt, /huge pillow.*improbably tall burger/);
+  for (const caption of captions) assert.equal(prompt.split(JSON.stringify(caption)).length - 1, 1);
+});
+
+test("Dense multilingual packs preserve every spelling within the image prompt limit", () => {
+  for (const word of ["의견을모아서결정한뒤에다시연락할게요!", "龜".repeat(30)]) {
+    const captions = Array.from({ length: 20 }, (_, i) => word + (i + 1));
+    const { prompt, spellingKey } = studioStickerBrief("real", captions);
+    assert.ok(estimatePromptTokens(prompt) <= IMAGE_PROMPT_MAX_TOKENS);
+    if (spellingKey) assert.deepEqual(spellingKey, captions);
+    else for (const caption of captions) assert.ok(prompt.includes(JSON.stringify(caption)));
+  }
+  assert.equal(studioStickerBrief("real", Array(20).fill("龜".repeat(32))).spellingKey.length, 20);
+});
+
+test("Every default pack keeps all its pose cues, and a longer pack gives them up one at a time", () => {
+  const cueCount = prompt => prompt.split(" — ").length - 1;
+  for (const copy of Object.values(studioCopy)) {
+    const captions = STUDIO_STICKER_KEYS.map(key => copy[key]);
+    for (const style of ["real", "character"]) {
+      const { prompt, spellingKey } = studioStickerBrief(style, captions);
+      assert.equal(spellingKey, undefined);
+      assert.equal(cueCount(prompt), 20);
+      assert.ok(estimatePromptTokens(prompt) <= IMAGE_PROMPT_MAX_TOKENS);
+    }
+  }
+  const korean = STUDIO_STICKER_KEYS.map(key => studioCopy.ko[key]);
+  const longer = [...korean.slice(0, 16), ...Array.from({ length: 4 }, (_, i) => "오늘도정말정말수고많았어요고마워요".repeat(2) + i)];
+  const { prompt, spellingKey } = studioStickerBrief("real", longer);
+  assert.equal(spellingKey, undefined);
+  assert.ok(estimatePromptTokens(prompt) <= IMAGE_PROMPT_MAX_TOKENS);
+  assert.ok(cueCount(prompt) > 0 && cueCount(prompt) < 16);
+  for (const caption of longer) assert.ok(prompt.includes(JSON.stringify(caption)));
+});
+
+test("The photo style asks for a painted likeness and never a photograph of the person", () => {
+  const { prompt } = studioStickerBrief("real", ["좋아!"]);
+  assert.match(prompt, /semi-realistic illustration/);
+  assert.match(prompt, /Likeness comes first/);
+  assert.doesNotMatch(prompt, /^Photograph|lifelike/m);
+});
+
+test("Two native captions keep all their ink when they overhang the same gutter at different heights", () => {
+  const ink = new Uint8ClampedArray(80 * 40 * 4);
+  fill(ink, 80, 12, 4, 30, 9);
+  fill(ink, 80, 37, 18, 25, 8);
+  assert.equal(studioStickerRowEdge(ink, 80, 40, 7, 6), 42);
+  assert.equal(studioStickerRowEdge(ink, 80, 40, 20, 6), 37);
+  assert.equal(studioStickerRowEdge(ink, 80, 40, 16, 6), 40);
 });
 
 test("Studio sticker crop follows gutters offset from the nominal center", () => {
@@ -47,6 +110,17 @@ test("Studio flags a tile when a seam would cut solid artwork", () => {
   const [first, second] = studioStickerCells(data, 100, 100, 2, 1);
   assert.equal(studioStickerCrossesSeam(data, 100, 100, first), true);
   assert.equal(studioStickerCrossesSeam(data, 100, 100, second), true);
+});
+
+test("a color break separates two silhouettes that meet at the crop edge", () => {
+  const data = new Uint8ClampedArray(100 * 100 * 4);
+  fill(data, 100, 20, 18, 60, 32);
+  fill(data, 100, 20, 50, 60, 32);
+  for (let y = 50; y < 82; y++) {
+    for (let x = 20; x < 80; x++) data[(y * 100 + x) * 4] = 150;
+  }
+  assert.equal(studioStickerCrossesSeam(data, 100, 100, { left: 0, top: 0, width: 100, height: 50 }), false);
+  assert.equal(studioStickerCrossesSeam(data, 100, 100, { left: 0, top: 50, width: 100, height: 50 }), false);
 });
 
 test("Studio keeps all stickers when adjacent rows or columns have staggered gutters", () => {

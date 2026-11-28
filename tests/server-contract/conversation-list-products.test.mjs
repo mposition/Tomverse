@@ -3,6 +3,7 @@ import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import { createApiTransport } from "../../apps/mobile/src/apiTransport.ts";
+import { STUDIO_RUN_CONVERSATION } from "../../lib/conversationProduct.ts";
 
 const mod = path => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
 const date = new Date("2026-10-27T00:00:00.000Z");
@@ -28,7 +29,9 @@ mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   userSettings: { findUnique: async () => null },
   conversation: { findMany: async ({ where, select }) => {
-    assert.deepEqual(where, { userId: "fixture-owner" });
+    // The account's own rows, without Studio tool runs (one-off, not history)
+    // and without temporary Chats, which are never listed.
+    assert.deepEqual(where, { userId: "fixture-owner", NOT: STUDIO_RUN_CONVERSATION, temporaryExpiresAt: null });
     assert.equal(select.productKey, true);
     listQueries++;
     return rows;

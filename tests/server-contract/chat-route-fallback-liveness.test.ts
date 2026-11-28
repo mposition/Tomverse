@@ -105,6 +105,8 @@ const presearchCalls: unknown[] = [];
 const presearchSettlements: Record<string, unknown>[] = [];
 let testBudgetNotice: (() => Promise<void>) | undefined;
 let failEvidenceSetup: (() => never) | undefined;
+// Thrown by the reservation seam, to say a database blinked before anything was dispatched.
+let databaseFailureAtAccess: unknown;
 const realPresearch = require(resolve(ROOT, "lib/chatRouterPresearch.ts")) as typeof import("../../lib/chatRouterPresearch");
 mock.module(mod("lib/chatRouterPresearch.ts"), { namedExports: {
   ...realPresearch,
@@ -1441,6 +1443,7 @@ mock.module(mod("lib/chatSecurity.ts"), {
           },
     acquireChatAccess: async (_access: unknown, budget: Parameters<typeof import("../../lib/chatSecurity").acquireChatAccess>[1]) => {
       ledger.admittedBudgets.push(budget);
+      if (databaseFailureAtAccess) throw databaseFailureAtAccess;
       if (refusePresearchAdmission) throw new (realChatSecurity.ChatAccessError as typeof import("../../lib/chatSecurity").ChatAccessError)(402, "CREDIT_BALANCE_INSUFFICIENT", "fixture");
       ledger.accessAcquisitions += 1;
       return {
@@ -1794,7 +1797,7 @@ const ask = async (
     | "during_record_dispatched"
     | "during_primary_reader_cancel" = "none",
   requestedModelId = REQUESTED_MODEL_ID,
-  reasoningEffort?: "low" | "high",
+  reasoningEffort?: "low" | "medium" | "high",
 ) => {
   activeSession = {
     user: { id: USER_ID, email: "fallback-qa@tomverse.app" },
@@ -1923,9 +1926,14 @@ const ask = async (
   }
   if (behaviour === "silent") {
     // A first-token deadline closes the response before asynchronous cleanup.
-    // Wait for its final lease release before inspecting settlement or resetting
-    // the shared fixtures for the next test.
-    await until("the stalled fallback cleanup", () => ledger.releases.length > 0);
+    // Wait for its settlement and its lease release before inspecting either or
+    // resetting the shared fixtures for the next test. Both, because neither is
+    // last: the pull that the cancelled read resolves can release the lease
+    // while the settlement is still awaiting the attempt's final checkpoint.
+    await until(
+      "the stalled fallback cleanup",
+      () => ledger.releases.length > 0 && ledger.settlements.length > 0
+    );
   }
   return { response, ...read };
 };
@@ -1984,6 +1992,23 @@ test("reasoning effort preserves Auto model selection and the answering model re
   assert.deepEqual(attempts.map(attempt => attempt.modelId), ["command-a-plus", "deepseek-v4-flash"]);
   const trailer = parseChatStreamTrailer(splitSearchMetadataTrailer(body).searchMetadataJson);
   assert.equal(trailer?.appliedReasoningEffort, "default");
+});
+
+test("the middle reasoning step is refused to a web request even while both effort switches are on", async t => {
+  const keys = ["TOMVERSE_REASONING_EFFORT_ENABLED", "TOMVERSE_DESKTOP_REASONING_STEPS_ENABLED"] as const;
+  const original = keys.map(key => process.env[key]);
+  for (const key of keys) process.env[key] = "true";
+  t.after(() => {
+    keys.forEach((key, index) => {
+      if (original[index] === undefined) delete process.env[key];
+      else process.env[key] = original[index];
+    });
+  });
+  await assert.rejects(
+    ask("answers", "claimed", 200, false, undefined, true, true, undefined, "off", "none", REQUESTED_MODEL_ID, "medium"),
+    /status 409[\s\S]*REASONING_EFFORT_UNAVAILABLE/
+  );
+  assert.equal(attempts.length, 0, "a refused step reaches no provider");
 });
 
 test("both attempts log a stream error by its metadata, never the model's content", async () => {
@@ -4036,6 +4061,70 @@ test("router presearch stays behind admission, preserves search recovery policy 
     if (oldBrave === undefined) delete process.env.BRAVE_SEARCH_API_KEY; else process.env.BRAVE_SEARCH_API_KEY = oldBrave;
     failPresearchBackend = false; turnLocation = undefined; forceNativeSearch = false; forceAppManagedSearch = false; llmSearchQueries = undefined; llmSearchModelId = undefined; llmSearchFileIntent = undefined; refusePresearchAdmission = false; throwAfterPresearch = false;
   }
+});
+
+/*
+  A transient database error is answered as a resend (503 DATABASE_TEMPORARILY_UNAVAILABLE)
+  unless this request already ran work a resend would pay for again: a
+  pre-answer search (settled), a scanned OCR page or a Deep Research submission.
+  Auto's router is a small unbilled internal call and does not count.
+*/
+const transientDatabaseFault = () =>
+  Object.assign(new Error("connection closed"), { name: "DriverAdapterError", cause: { kind: "ConnectionClosed" } });
+
+test("a database blink after the pre-answer search ran is not a resend, and the search ran once", async () => {
+  const oldFlag = process.env.CHAT_ROUTER_PRESEARCH_ENABLED;
+  const oldBrave = process.env.BRAVE_SEARCH_API_KEY;
+  process.env.CHAT_ROUTER_PRESEARCH_ENABLED = "true";
+  process.env.BRAVE_SEARCH_API_KEY = "synthetic-never-sent";
+  forceAppManagedSearch = true;
+  llmSearchQueries = ["one fact", "another fact"];
+  llmSearchModelId = "gpt-6-luna";
+  llmSearchFileIntent = false;
+  try {
+    presearchCalls.length = 0;
+    presearchSettlements.length = 0;
+    failEvidenceSetup = () => { throw transientDatabaseFault(); };
+    const { response, body } = await ask("answers", "claimed", 500, false, undefined, true, true, undefined, "always");
+    assert.equal(response.headers.get("Retry-After"), null);
+    assert.notEqual((JSON.parse(body) as { code?: string }).code, "DATABASE_TEMPORARILY_UNAVAILABLE");
+    // The search is not repeated by the server, and what it cost is still settled.
+    assert.equal(presearchCalls.length, 2);
+    assert.equal(presearchSettlements.length, 1);
+    assert.equal(presearchSettlements[0].searchBackendRequestCount, 2);
+  } finally {
+    failEvidenceSetup = undefined;
+    if (oldFlag === undefined) delete process.env.CHAT_ROUTER_PRESEARCH_ENABLED; else process.env.CHAT_ROUTER_PRESEARCH_ENABLED = oldFlag;
+    if (oldBrave === undefined) delete process.env.BRAVE_SEARCH_API_KEY; else process.env.BRAVE_SEARCH_API_KEY = oldBrave;
+    forceAppManagedSearch = false; llmSearchQueries = undefined; llmSearchModelId = undefined; llmSearchFileIntent = undefined;
+  }
+});
+
+test("a database blink at the reservation of an Auto turn, after the router was asked, is still a resend", async () => {
+  // The router is a small internal call that is never billed to the user and
+  // the browser resends once, so it does not take an Auto turn out of the fix.
+  databaseFailureAtAccess = transientDatabaseFault();
+  presearchCalls.length = 0;
+  try {
+    const { response, body } = await ask("answers", "claimed", 503, false, undefined, true, false);
+    assert.equal(response.headers.get("Retry-After"), "2");
+    assert.equal((JSON.parse(body) as { code?: string }).code, "DATABASE_TEMPORARILY_UNAVAILABLE");
+    assert.equal(presearchCalls.length, 0, "no search ran, so nothing settled is repeated");
+  } finally { databaseFailureAtAccess = undefined; }
+});
+
+test("a database blink before anything outside the database ran is still a resend", async () => {
+  // A manual turn has no router, no classifier and no search: the reservation
+  // failing is the first thing that can go wrong and nothing has been spent.
+  presearchCalls.length = 0;
+  conversationSelectionMode = "manual";
+  databaseFailureAtAccess = transientDatabaseFault();
+  try {
+    const { response, body } = await ask("answers", "claimed", 503, false, undefined, true, false);
+    assert.equal(response.headers.get("Retry-After"), "2");
+    assert.equal((JSON.parse(body) as { code?: string }).code, "DATABASE_TEMPORARILY_UNAVAILABLE");
+    assert.equal(presearchCalls.length, 0);
+  } finally { databaseFailureAtAccess = undefined; conversationSelectionMode = "auto"; }
 });
 
 test("grounded answer guidance and Qwen first-step thinking follow independent gates on the same search turn", async t => {

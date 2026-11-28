@@ -85,9 +85,18 @@ const eslintConfig = defineConfig([
     // produces hundreds of warnings -- enough to fail `npm run check`, which
     // runs with --max-warnings=0.
     "apps/*/dist/**",
+    // React and Babel as published, served to the chat preview frame and pinned
+    // by sha384 (lib/chatArtifactPreview.ts). Third-party minified files.
+    "public/vendor/artifact-preview/**",
     // AMUX has its own ESLint config and CI step.
     "vendor/amux/**",
   ]),
+  {
+    // Electron renders local assets and blob previews without a Next.js image server.
+    name: "tomverse/desktop-renderer-images",
+    files: ["apps/desktop/src/renderer/**/*.tsx"],
+    rules: { "@next/next/no-img-element": "off" },
+  },
   {
     // The one rule PACKAGE-01 is measured on. `npm run check:shared-packages`
     // counts violations of it through ESLint's own API rather than

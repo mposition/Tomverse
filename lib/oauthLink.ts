@@ -3,6 +3,13 @@ import "server-only";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { encryptOAuthAccountTokens } from "@/lib/oauthTokenCrypto";
+import {
+    desktopLinkLoopbackTarget,
+    desktopLinkStateOwnedBy,
+    desktopLinkVerifierMatches,
+    issueDesktopLinkState,
+    readDesktopLinkState,
+} from "@/lib/desktopSocialLoginCore";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
 import { logSecurityAuditEvent } from "@/lib/securityAudit";
 import {
@@ -170,6 +177,68 @@ export function buildOAuthLinkAuthorizeRedirect(
 }
 
 /**
+ * Desktop: the authorize URL for a Desktop settings session, with the Desktop app's own PKCE challenge. Nothing is
+ * kept here and no cookie is set; the returned `linkState` is the provider's `state` (lib/desktopSocialLoginCore.ts).
+ * The provider returns to the same registered callback as the web flow.
+ */
+export function buildDesktopLinkProviderUrl(
+    request: Request,
+    userId: string,
+    provider: LinkableProvider,
+    desktop: { redirectUri: string; codeChallenge: string }
+) {
+    const config = providerConfig(provider);
+    const linkState = issueDesktopLinkState({
+        secret: secret(),
+        userId,
+        provider,
+        redirectUri: desktop.redirectUri,
+        codeChallenge: desktop.codeChallenge,
+        now: Date.now(),
+    });
+    const params = new URLSearchParams({
+        client_id: config.clientId,
+        redirect_uri: redirectUriFor(request),
+        response_type: "code",
+        scope: config.scope,
+        state: linkState,
+        code_challenge: desktop.codeChallenge,
+        code_challenge_method: "S256",
+        prompt: "select_account",
+    });
+    return { url: `${config.authorizeUrl}?${params.toString()}`, linkState };
+}
+
+/**
+ * Desktop: the provider has returned to the callback in the system browser, which holds no session. The only thing
+ * this may do is hand `code` to the loopback address that the signed state carries. Null when the state is not ours.
+ */
+export function resolveDesktopOAuthLinkCallback(request: Request): string | null {
+    const url = new URL(request.url);
+    const token = url.searchParams.get("state");
+    const payload = readDesktopLinkState(secret(), token, Date.now());
+    return payload && token ? desktopLinkLoopbackTarget(payload, token, url.searchParams) : null;
+}
+
+/** Desktop: the second call, from the settings session that started the link, spends the code with its verifier. */
+export async function completeDesktopOAuthLink(
+    request: Request,
+    currentUserId: string,
+    input: { linkState: string; code: string; codeVerifier: string }
+): Promise<LinkableProvider> {
+    const payload = readDesktopLinkState(secret(), input.linkState, Date.now());
+    if (
+        !payload ||
+        !desktopLinkStateOwnedBy(secret(), payload, currentUserId) ||
+        !desktopLinkVerifierMatches(payload.c, input.codeVerifier)
+    ) {
+        throw new OAuthLinkError("INVALID_STATE", "This link request expired or is invalid.");
+    }
+    await linkAccountFromAuthorizationCode(request, currentUserId, payload.p, input.code, input.codeVerifier);
+    return payload.p;
+}
+
+/**
  * Carries the same attributes the setter does, `Secure` included.
  *
  * A browser keys a cookie by name, domain and path, so a clear works whether or
@@ -220,6 +289,18 @@ export async function completeOAuthLink(
         throw new OAuthLinkError("SESSION_MISMATCH", "Please retry linking from your account settings.");
     }
 
+    await linkAccountFromAuthorizationCode(request, currentUserId, provider, code, stateData.codeVerifier);
+}
+
+// The provider half of a link, shared by the web flow above and the Desktop flow below: they differ only in how the
+// authorization code and the PKCE verifier reached the server, and in who has been shown to own them.
+async function linkAccountFromAuthorizationCode(
+    request: Request,
+    currentUserId: string,
+    provider: LinkableProvider,
+    code: string,
+    codeVerifier: string
+): Promise<void> {
     const config = providerConfig(provider);
     const tokenResponse = await fetch(config.tokenUrl, {
         method: "POST",
@@ -230,7 +311,7 @@ export async function completeOAuthLink(
             redirect_uri: redirectUriFor(request),
             client_id: config.clientId,
             client_secret: config.clientSecret,
-            code_verifier: stateData.codeVerifier,
+            code_verifier: codeVerifier,
         }),
     });
     if (!tokenResponse.ok) {

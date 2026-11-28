@@ -351,6 +351,16 @@ export const parseFalImageResponse = (payload: unknown): FalImageAsset | null =>
 };
 
 /**
+ * The one image of an endpoint that answers with `image` rather than
+ * `images` (Bria's background remover). The same checks: a fal CDN URL and an
+ * allowlisted type, or nothing.
+ */
+export const parseFalSingleImageResponse = (payload: unknown): FalImageAsset | null =>
+  payload && typeof payload === "object"
+    ? parseFalImageResponse({ images: [(payload as { image?: unknown }).image] })
+    : null;
+
+/**
  * An edit: the generation's body, every priced field unchanged, plus the photo
  * as a data URI. fal sells Nano Banana 2's edit endpoint per output image at
  * the generation's price (its pricing API, 2026-10-29), so nothing priced

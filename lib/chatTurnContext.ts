@@ -21,6 +21,7 @@ import {
     type ChatProfileContext,
 } from "@/lib/chatProfileContext";
 import type { ModelTier } from "@/lib/models";
+import { readPersonalizationTurnBlock } from "@/lib/chatPersonalization";
 import { buildChatProjectContext, NO_PROJECT_CONTEXT, type ChatProjectContext } from "@/lib/chatProjectContext";
 import { turnMemoryScope, type ProjectTurnScope } from "@/lib/projectWorkspaceCore";
 import { prisma } from "@/lib/prisma";
@@ -68,6 +69,12 @@ export type ChatTurnContext = {
     profileTokens: number;
     /** The project's own blocks, counted apart from memory's and the profile's. */
     projectTokens: number;
+    /**
+     * The account owner's personal instructions (lib/chatPersonalization.ts),
+     * counted apart from the rest. Optional so fixtures written before the
+     * block existed still type; the builder always sets it.
+     */
+    preferenceTokens?: number;
     /** Everything the §10 bundle binds. */
     fingerprintInput: ContextBundleFingerprintInput;
     fingerprint: string;
@@ -176,9 +183,18 @@ export async function buildChatTurnContext(input: {
           })
         : NO_PROJECT_CONTEXT;
 
+    // The owner's personal instructions, for every signed-in Chat and Review
+    // turn. Read here because this is the one builder preflight, the context
+    // preparation and the send all use, so the block is priced where it is sent.
+    const preferences = await readPersonalizationTurnBlock(input.userId);
+
     const systemPrompt = buildProfileSystemPrompt({
         // Profile instructions first, then the project's: both are owner-written.
-        instructions: [profile.instructionsPrompt, project.instructionsPrompt]
+        // Personal instructions follow them: they apply to every conversation,
+        // so an assistant's or a project's own instructions win (their rules
+        // say so), and they sit above memory and knowledge. Unchanged from
+        // turn to turn, so the cached prompt prefix stays the same.
+        instructions: [profile.instructionsPrompt, project.instructionsPrompt, preferences.prompt]
             .filter((part): part is string => Boolean(part)).join("\n\n") || null,
         memory: memory.prompt.rules,
         knowledge: [profile.knowledgePrompt, project.materialPrompt]
@@ -190,6 +206,7 @@ export async function buildChatTurnContext(input: {
         profileVersion: profile.profileVersion,
         knowledgeHash: profile.knowledgeHash,
         ...(project.projectHash !== "none" ? { projectHash: project.projectHash } : {}),
+        ...(preferences.hash !== "none" ? { preferencesHash: preferences.hash } : {}),
     };
 
     return {
@@ -207,6 +224,7 @@ export async function buildChatTurnContext(input: {
         memoryTokens: memory.memoryTokens,
         profileTokens: profile.profileTokens,
         projectTokens: project.projectTokens,
+        preferenceTokens: preferences.tokens,
         fingerprintInput,
         fingerprint: contextFingerprint(fingerprintInput),
         binding: profile.version

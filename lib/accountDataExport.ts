@@ -66,6 +66,7 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       arguments: row.state === "pending" && row.expiresAt > new Date() && row.argumentsCiphertext
         ? JSON.parse(decryptOAuthToken(row.argumentsCiphertext) || "null") : null })),
   codeTaskReservation: (userId) => prisma.$queryRaw<unknown[]>`SELECT "id","clientTaskId","status","reservedCredits","settledCredits","releasedCredits","createdAt","updatedAt" FROM "CodeTaskReservation" WHERE "userId"=${userId} ORDER BY "createdAt" LIMIT 5000`,
+  codeCloudJob: (userId) => prisma.$queryRaw<unknown[]>`SELECT "id","clientTaskId","status","instruction","executorModelId","reviewerModelId","approvedCredits","failureCode","summary","logs","patchBytes","createdAt","startedAt","finishedAt","expiresAt" FROM "CodeCloudJob" WHERE "userId"=${userId} ORDER BY "createdAt" LIMIT 5000`,
   userSettings: (userId) =>
     prisma.userSettings.findMany({
       where: { userId },
@@ -96,6 +97,18 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       },
     }),
 
+  userPersonalization: (userId) =>
+    prisma.userPersonalization.findMany({
+      where: { userId },
+      select: {
+        aboutMe: true,
+        responsePreferences: true,
+        responseStyle: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    }),
+
   analyticsUserId: (userId) =>
     prisma.ga4UserId.findMany({
       where: { userId },
@@ -118,6 +131,11 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         // every device it signs in on, so an export without it would be
         // narrower than the screen.
         pinnedAt: true,
+        // A temporary Chat is still held until it is deleted, so the account's
+        // copy of its data includes it, with when it will be deleted. The
+        // conversation's own export and the all-conversations download leave
+        // it out, as the temporary Chat promises.
+        temporaryExpiresAt: true,
         createdAt: true,
         updatedAt: true,
         messages: {
@@ -130,6 +148,7 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
     })).map((conversation) => ({
       id: conversation.id, title: conversation.title, kind: conversation.kind,
       productKey: conversation.productKey, pinnedAt: conversation.pinnedAt,
+      temporaryExpiresAt: conversation.temporaryExpiresAt,
       createdAt: conversation.createdAt, updatedAt: conversation.updatedAt,
       messages: conversation.messages.map(toAccountExportMessage),
     })),
@@ -333,6 +352,53 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         updatedAt: true,
       },
       orderBy: { updatedAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  scheduledTask: (userId) =>
+    prisma.scheduledTask.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        title: true,
+        prompt: true,
+        modelId: true,
+        webSearch: true,
+        frequency: true,
+        timeOfDay: true,
+        dayOfWeek: true,
+        dayOfMonth: true,
+        runOnDate: true,
+        timeZone: true,
+        status: true,
+        pauseReason: true,
+        creditsPerRun: true,
+        nextRunAt: true,
+        consecutiveFailures: true,
+        conversationId: true,
+        revision: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  scheduledTaskRun: (userId) =>
+    prisma.scheduledTaskRun.findMany({
+      where: { userId },
+      select: {
+        taskId: true,
+        scheduledFor: true,
+        status: true,
+        outcome: true,
+        conversationId: true,
+        reservedCredits: true,
+        chargedCredits: true,
+        startedAt: true,
+        finishedAt: true,
+      },
+      orderBy: { startedAt: "asc" },
       take: EXPORT_ROW_CAP,
     }),
 
@@ -860,6 +926,22 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         reviewItemId: true,
         section: true,
         verdict: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  chatAnswerRating: (userId) =>
+    prisma.chatAnswerRating.findMany({
+      where: { userId },
+      select: {
+        messageId: true,
+        conversationId: true,
+        modelId: true,
+        rating: true,
+        reason: true,
         createdAt: true,
         updatedAt: true,
       },

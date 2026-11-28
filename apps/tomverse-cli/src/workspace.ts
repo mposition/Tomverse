@@ -83,12 +83,21 @@ export const isSecretPath = (relativePath: string) => {
 };
 
 /** Generated or vendored folders that listing and search skip. */
-const SKIPPED_DIRS = new Set([
+export const SKIPPED_DIRS = new Set([
     "node_modules", ".git", "dist", "build", "out", ".next", ".nuxt", "target", "coverage", ".cache",
     "__pycache__", ".venv", "venv", ".tox", ".gradle", ".idea", ".turbo", ".parcel-cache", ".tomverse",
 ]);
 
 export type ResolvedPath = { absolute: string; relative: string; exists: boolean };
+export type WorkspaceReference = { path: string; kind: "file" | "folder" };
+
+const IMAGE_REFERENCE = /\.(png|jpe?g|gif|webp)$/i;
+
+export function withWorkspaceReferences(prompt: string, references: readonly WorkspaceReference[]) {
+    if (!references.length) return prompt;
+    const images = references.some((reference) => reference.kind === "file" && IMAGE_REFERENCE.test(reference.path));
+    return `${prompt}\n\nUser-selected project references (workspace-relative path identifiers):\n${JSON.stringify(references)}\nUse normal workspace tools to inspect relevant references.${images ? " Image files among them can be looked at with view_image, when that tool is available to you." : ""}`;
+}
 
 export class Workspace {
     /**
@@ -146,10 +155,24 @@ export class Workspace {
             throw new PathError(`${rel} can hold credentials, so the CLI does not ${purpose === "read" ? "read" : "change"} it. You can open it yourself.`);
         }
         const exists = missing.length === 0;
-        if (exists && purpose === "write" && lstatSync(absolute).isSymbolicLink()) {
+        if (purpose === "write" && (!same(lexical, absolute) || (exists && lstatSync(lexical).isSymbolicLink()))) {
             throw new PathError(`${rel} is a link; the CLI does not write through links.`);
         }
         return { absolute, relative: rel || ".", exists };
+    }
+
+    reference(input: string): WorkspaceReference {
+        const resolved = this.resolve(input, "read");
+        if (!resolved.exists) throw new PathError("The project reference no longer exists.");
+        const stat = statSync(resolved.absolute);
+        if (!stat.isFile() && !stat.isDirectory()) throw new PathError("Choose a project file or folder.");
+        const kind = stat.isDirectory() ? "folder" : "file";
+        const segments = resolved.relative.split("/");
+        if (kind === "file") segments.pop();
+        if (segments.some((segment) => SKIPPED_DIRS.has(segment.toLowerCase()))) {
+            throw new PathError("The project reference is in an excluded folder.");
+        }
+        return { path: resolved.relative, kind };
     }
 
     /** Editor-safe listing: bounded Git subprocess, then a yielding directory walk. */

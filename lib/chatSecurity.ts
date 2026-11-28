@@ -1321,6 +1321,60 @@ export const createChatBudget = (
     };
 };
 
+/** The model id a search-only reservation and its receipt carry: no model answers it. */
+export const SEARCH_ONLY_CHAT_BUDGET_MODEL_ID = "tomverse-web-search";
+
+/**
+ * A reservation for a web search on its own, with no model generation: the
+ * agent engine's `web_search` tool on the coding API (lib/codeWebSearch.ts).
+ *
+ * It carries exactly the two numbers a Chat turn's application-managed search
+ * carries -- the flat surcharge in credits, and the search vendor's worst case
+ * in that vendor's own bucket -- and nothing else. No tokens, so nothing is held
+ * against a model provider's budget. It settles through `settleChatUsage` like
+ * every reservation: `searchExecuted: false` refunds the surcharge, and the
+ * vendor's bucket settles to the requests it served.
+ */
+export const createSearchOnlyChatBudget = (input: {
+    searchBackend: NonNullable<ChatBudget["searchBackend"]>;
+    surchargeCredits: number;
+}): ChatBudget => {
+    if (!Number.isSafeInteger(input.surchargeCredits) || input.surchargeCredits <= 0) {
+        throw new Error("A search-only reservation needs a positive surcharge.");
+    }
+    const { searchBackend } = input;
+    if (!(searchBackend.reservedCostMicroUsd > 0) || !Number.isSafeInteger(searchBackend.maxQueries) || searchBackend.maxQueries <= 0) {
+        throw new Error("A search-only reservation needs a bounded, priced search.");
+    }
+    return {
+        modelId: SEARCH_ONLY_CHAT_BUDGET_MODEL_ID,
+        // Standard class: no higher-cost model quota is counted for a search.
+        minimumPlan: "Free",
+        modelUsageClass: "standard",
+        usageCredits: input.surchargeCredits,
+        longContextSettlement: null,
+        inputTokens: 0,
+        maxOutputTokens: 0,
+        providerMaxOutputTokens: null,
+        reservedOutputTokens: 0,
+        inputUsdPerMillionTokens: 0,
+        outputUsdPerMillionTokens: 0,
+        cachedInputPriceMultiplier: 1,
+        cacheWriteUsdPerMillionTokens: null,
+        promptCacheWriteReservedPremiumMicroUsd: 0,
+        nativeSearchReservedCostMicroUsd: 0,
+        nativeSearchCostPerQueryMicroUsd: 0,
+        nativeSearchMaxQueries: 0,
+        searchBackend,
+        // The vendor that is paid, as the receipt's provider. Its model-provider
+        // bucket is never touched: the reserved model cost is zero.
+        provider: searchBackend.backend as AiModel["provider"],
+        pricingVersion: searchBackend.pricingVersion,
+        costSource: "search_backend",
+        longContextThresholdTokens: null,
+    };
+};
+
 const decisionModelsFromBudgets = (budgets: readonly ChatBudget[]) =>
     budgets.map((budget) => ({
         modelId: budget.modelId,
@@ -2745,6 +2799,14 @@ export const acquireChatAccess = async (
             tx: Prisma.TransactionClient,
             reservation: { reservationId: string; usageCredits: number }
         ) => Promise<void>;
+        /**
+         * Subject slots this request must leave free, enforced where the
+         * lease is claimed (inside the reservation transaction, under the
+         * concurrency locks). A scheduled run passes 1 so an unattended turn
+         * never takes the account's last Chat slot. With a limit of one
+         * there is none to keep free and the request is refused.
+         */
+        subjectSlotsKeptFree?: number;
         /** Tool names enabled for this turn, recorded on the limit decision. */
         enabledTools?: string[];
         /**
@@ -2832,7 +2894,20 @@ export const acquireChatAccess = async (
     let addOnReservations: AddOnCreditReservationEntry[] = [];
     let durableReservation: ChatUsageReservation | null = null;
     let guestAutoConversionAuditLogId: string | null = null;
-    const concurrencyPlan = resolveChatConcurrencyPlan(access);
+    const resolvedConcurrencyPlan = resolveChatConcurrencyPlan(access);
+    const subjectSlotsKeptFree = Math.max(0, Math.floor(options?.subjectSlotsKeptFree ?? 0));
+    const concurrencyPlan: typeof resolvedConcurrencyPlan = subjectSlotsKeptFree > 0
+        ? {
+              ...resolvedConcurrencyPlan,
+              subject: {
+                  ...resolvedConcurrencyPlan.subject,
+                  // Down to zero: with a limit of one there is no slot to
+                  // keep free, so the caller is refused rather than given
+                  // the account's only slot.
+                  limit: Math.max(0, resolvedConcurrencyPlan.subject.limit - subjectSlotsKeptFree),
+              },
+          }
+        : resolvedConcurrencyPlan;
     const leaseTtlSeconds = resolveLeaseTtlSeconds();
     // Signature and subject binding are verified here; whether the slot is
     // still available is decided by the conditional claim inside the
@@ -2916,6 +2991,11 @@ export const acquireChatAccess = async (
                 textDetail(error?.details, "resetAt") ?? decisionState.resetAt,
         }).catch(() => undefined);
 
+    // The transaction below takes the same bounds as the comparison preflight
+    // (`{ maxWait: 5_000, timeout: 15_000 }`). Without them Prisma's defaults
+    // (2 s to get a connection, 5 s to finish) turned a slow database into a
+    // refusal of a request that only needed a few more seconds. Options only:
+    // nothing about what the transaction reserves changes.
     try {
     await prisma.$transaction(async (tx) => {
         if (guestAutoPrehold) {
@@ -4292,7 +4372,7 @@ export const acquireChatAccess = async (
                 usageCredits: budget.usageCredits,
             });
         }
-    });
+    }, { maxWait: 5_000, timeout: 15_000 });
     } catch (error) {
         if (error instanceof ChatAccessError) {
             await recordDecision(error);
@@ -6089,8 +6169,12 @@ export const reconcileExpiredChatCreditReservations = async (
                               // the provider side keeps the reservation's own
                               // estimate rather than a cost of zero
                               // (docs/policy/external-api.md section 4).
+                              // Searches are unobserved the same way: a reservation
+                              // that authorized a search vendor (the coding API's
+                              // web search) keeps that vendor's authorized ceiling.
+                              // One without an authorization is unaffected.
                               if (reservation.source === "external_api") {
-                                  return { turnUsage: { outcome: "failed", usageFromProvider: false } };
+                                  return { turnUsage: { outcome: "failed", usageFromProvider: false, searchQueriesObserved: false } };
                               }
                               const researchUsage = await researchPreviewSettlementForExpiry(tx, reservation.reservationId, now);
                               if (researchUsage) { researchHandoff = true; return { turnUsage: researchUsage }; }
@@ -6382,7 +6466,7 @@ export const validateChatPayload = (body: unknown) => {
             "Invalid guest verification token."
         );
     }
-    if (payload.reasoningEffort !== undefined && payload.reasoningEffort !== "low" && payload.reasoningEffort !== "high") {
+    if (payload.reasoningEffort !== undefined && payload.reasoningEffort !== "low" && payload.reasoningEffort !== "medium" && payload.reasoningEffort !== "high") {
         throw new ChatAccessError(400, "INVALID_REASONING_EFFORT", "Invalid reasoning effort.");
     }
 
@@ -6588,7 +6672,7 @@ export const validateChatPayload = (body: unknown) => {
         sourceUserMessageId?: string;
         turnstileToken?: string;
         deepResearchDepth?: "quick" | "standard" | "deep";
-        reasoningEffort?: "low" | "high";
+        reasoningEffort?: "low" | "medium" | "high";
         webSearchMode?: WebSearchMode;
         mcpConnectionId?: string;
         admissionToken?: string;

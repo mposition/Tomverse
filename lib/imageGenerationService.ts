@@ -53,7 +53,9 @@ import {
   getImageModelPrice,
   imageMeasuredOutputLimitBound,
   imageEditCredits,
+  imagePhotoToolAdmitted,
   imageThinkingBilling,
+  isImagePhotoTool,
   maxImageEditRequestCostMicroUsd,
   maxImageRequestCostMicroUsd,
   type ImageModelProvider,
@@ -80,6 +82,10 @@ import {
 } from "@/lib/imageGenerationPricing";
 import {
   imageAssetR2Key,
+  imagePendingRedriveEnabled,
+  IMAGE_PENDING_REDRIVE_AFTER_MS,
+  IMAGE_PENDING_REDRIVE_MAX_AGE_MS,
+  IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP,
   STALE_IMAGE_GENERATION_AFTER_MS,
   STALE_IMAGE_SETTLING_AFTER_MS,
   type ImageGenerationFailurePhase,
@@ -172,6 +178,23 @@ const promptCostMicroUsd = (inputTokens: number) =>
   );
 
 /**
+ * What a provider-reported request cost adds past what an edit was priced at
+ * (output plus photo). 0 when nothing is reported, the report is within the
+ * price, or the job is not an edit. The provider budget is charged this, so a
+ * provider price that moved under a fixed option still drains the budget the
+ * money leaves from.
+ */
+export const reportedEditOverageMicroUsd = (
+  snapshotOutputCost: number | null,
+  editBudget: unknown,
+  reportedCostMicroUsd: number | null | undefined
+): number =>
+  snapshotOutputCost !== null && typeof editBudget === "number" &&
+  typeof reportedCostMicroUsd === "number" && Number.isFinite(reportedCostMicroUsd)
+    ? Math.max(0, reportedCostMicroUsd - (snapshotOutputCost + editBudget))
+    : 0;
+
+/**
  * What an edit's photo settles at, from the rate and budget its reservation
  * recorded -- never the live constants, which a deploy may have moved since.
  * 0 for a generation; the budget for a photo billed per edit (no rate); the
@@ -255,6 +278,17 @@ export type ImageGenerationRequestInput = {
    * model's edit surcharge (lib/imageGenerationPricing.ts).
    */
   editSource?: { attachmentId: string } | { bindAttachment: (tx: Prisma.TransactionClient, conversationId: string) => Promise<string> };
+  /**
+   * Server-only: runs once inside the reservation transaction of a new request, with the conversation
+   * it belongs to, and rolls back with it. Studio records a photo-less request here.
+   */
+  onReserved?: (tx: Prisma.TransactionClient, conversationId: string) => Promise<unknown>;
+  /**
+   * The photo tools this request is for, set only by the server feature that
+   * owns them (Studio's transparent PNG). A photo tool's id that is not
+   * listed here is refused like an unknown model, whatever the caller attached.
+   */
+  photoTools?: readonly string[];
 };
 
 export type ImageGenerationTargetResult = {
@@ -419,8 +453,10 @@ export const requestImageGeneration = async (
     const price = getImageModelPrice(modelId, input.quality, input.size);
     return { modelId, model, price };
   });
+  // A photo tool has a price row but is no model a caller may pick.
   const unavailable = targetPlans.filter(
-    (plan) => !plan.model || plan.model.disabledReason !== null || !plan.price
+    (plan) => !plan.model || plan.model.disabledReason !== null || !plan.price ||
+      !imagePhotoToolAdmitted(plan.modelId, { photoTools: input.photoTools, hasPhoto: Boolean(input.editSource) })
   );
   if (unavailable.length > 0) {
     throw new ChatAccessError(
@@ -556,7 +592,6 @@ export const requestImageGeneration = async (
   }
 
   const scope = imageConcurrencyScope(input.userId);
-  const generationId = randomUUID();
   const leaseId = randomUUID();
   const ttlSeconds = resolveLeaseTtlSeconds();
 
@@ -779,54 +814,25 @@ export const requestImageGeneration = async (
         }
       }
 
-      // Add-on credits are reserved once for the whole group and split
-      // across targets proportionally to what each one costs, so a per-target
-      // refund gives back exactly that target's share.
-      const totalMaxCost = [...targetCosts.values()].reduce(
-        (sum, cost) => sum + cost,
-        0
-      );
-      const addOnFundedCostMicroUsd =
-        allocation.addOnCreditsRequired > 0
-          ? Math.ceil(
-              (totalMaxCost * allocation.addOnCreditsRequired) / totalCredits
-            )
-          : 0;
-
-      let entries: AddOnCreditReservationEntry[] = [];
-      if (allocation.addOnCreditsRequired > 0) {
-        entries = await reserveAddOnCredits(tx, {
-          userId: input.userId,
-          reservationId: reservationIdFor(generationId),
-          credits: allocation.addOnCreditsRequired,
-          fundedCostMicroUsd: addOnFundedCostMicroUsd,
-          now,
-        });
-      }
-
-      const editAttachmentId = edit && ("attachmentId" in edit
-        ? edit.attachmentId
-        : await edit.bindAttachment(tx, conversationId));
-      const group = await tx.imageGenerationGroup.create({
-        data: {
-          userId: input.userId,
-          conversationId,
-          groupIdempotencyKey: input.idempotencyKey,
-        },
-        select: { id: true },
-      });
-
       // Plan and add-on credits were allocated for the group as a whole;
-      // each target's reservation records its own slice so settlement and
-      // refunds stay per attempt (policy §11).
+      // each target takes its own slice so settlement and refunds stay per
+      // attempt (policy §11).
       let planCreditsLeft = allocation.planReservedCredits;
       let addOnCreditsLeft = allocation.addOnCreditsRequired;
-      const createdTargets: ImageGenerationTargetResult[] = [];
-
+      let addOnCreditsHeld = 0;
+      let fundedCostHeld = 0;
+      const slices: Array<{
+        generationId: string;
+        planShare: number;
+        addOnShare: number;
+        maxCost: number;
+        fundedCost: number;
+        entries: AddOnCreditReservationEntry[];
+      }> = [];
       for (const [index, target] of resolvedTargets.entries()) {
         const isLast = index === resolvedTargets.length - 1;
         // The last target absorbs the rounding remainder so the per-target
-        // slices always sum back to exactly what was reserved.
+        // slices always sum back to exactly what was allocated.
         const planShare = isLast
           ? planCreditsLeft
           : Math.min(
@@ -842,12 +848,75 @@ export const requestImageGeneration = async (
           : Math.min(addOnCreditsLeft, target.credits - planShare);
         addOnCreditsLeft -= addOnShare;
 
-        const targetMaxCost = targetCosts.get(target.modelId)!;
-        const targetGenerationId = randomUUID();
-        const targetFundedCost =
+        const maxCost = targetCosts.get(target.modelId)!;
+        const fundedCost =
           addOnShare > 0
-            ? Math.ceil((targetMaxCost * addOnShare) / target.credits)
+            ? Math.ceil((maxCost * addOnShare) / target.credits)
             : 0;
+        const targetGenerationId = randomUUID();
+        // Each target reserves its add-on credits under its own reservation
+        // id. The lot payload stored on its row is then exactly what it took,
+        // so its settlement or refund never reaches a sibling's share, and
+        // the ledger's reserve rows carry the id its settle rows will.
+        let entries: AddOnCreditReservationEntry[] = [];
+        if (addOnShare > 0) {
+          try {
+            entries = await reserveAddOnCredits(tx, {
+              userId: input.userId,
+              reservationId: reservationIdFor(targetGenerationId),
+              credits: addOnShare,
+              fundedCostMicroUsd: fundedCost,
+              now,
+            });
+          } catch (error) {
+            // Earlier targets already hold part of the balance in this
+            // transaction; the refusal reports what the user actually has.
+            if (error instanceof AddOnCreditError) {
+              throw new AddOnCreditError(
+                error.code,
+                error.availableCredits + addOnCreditsHeld,
+                error.availableFundedCostMicroUsd + fundedCostHeld
+              );
+            }
+            throw error;
+          }
+          addOnCreditsHeld += addOnShare;
+          fundedCostHeld += fundedCost;
+        }
+        slices.push({
+          generationId: targetGenerationId,
+          planShare,
+          addOnShare,
+          maxCost,
+          fundedCost,
+          entries,
+        });
+      }
+
+      const editAttachmentId = edit && ("attachmentId" in edit
+        ? edit.attachmentId
+        : await edit.bindAttachment(tx, conversationId));
+      await input.onReserved?.(tx, conversationId);
+      const group = await tx.imageGenerationGroup.create({
+        data: {
+          userId: input.userId,
+          conversationId,
+          groupIdempotencyKey: input.idempotencyKey,
+        },
+        select: { id: true },
+      });
+
+      const createdTargets: ImageGenerationTargetResult[] = [];
+
+      for (const [index, target] of resolvedTargets.entries()) {
+        const {
+          generationId: targetGenerationId,
+          planShare,
+          addOnShare,
+          maxCost: targetMaxCost,
+          fundedCost: targetFundedCost,
+          entries,
+        } = slices[index];
 
         const targetRow = await tx.imageGenerationTarget.create({
           data: {
@@ -942,12 +1011,9 @@ export const requestImageGeneration = async (
                   }
                 : {}),
             },
-            // The per-lot payload belongs to the group's single add-on
-            // reservation; it is stored on the first target that holds
-            // add-on credits so crash recovery finds it exactly once.
-            reservationPayload: (addOnShare > 0 && index === 0
-              ? entries
-              : []) as unknown as Prisma.InputJsonValue,
+            // The lots this target's own add-on reservation took, so crash
+            // recovery settles or refunds exactly this target's share.
+            reservationPayload: entries as unknown as Prisma.InputJsonValue,
           },
         });
 
@@ -1128,6 +1194,20 @@ export const failureIncurredCostMicroUsd = (
   return nonImage + prompt + image;
 };
 
+/**
+ * What a failed request cost past its whole reservation, by the provider's own
+ * report: a refused or unstored answer is still billed, and a failure keeps
+ * the reservation charged, so only the part above it is missing. 0 when
+ * nothing was reported.
+ */
+export const failureReportedOverageMicroUsd = (
+  reservedCostMicroUsd: number,
+  reportedCostMicroUsd: number | null | undefined
+): number =>
+  typeof reportedCostMicroUsd === "number" && Number.isFinite(reportedCostMicroUsd)
+    ? Math.max(0, reportedCostMicroUsd - reservedCostMicroUsd)
+    : 0;
+
 /** Adds spend the reservation did not hold to the windows it was reserved in. */
 export const chargeProviderBudgetOverage = async (
   tx: Prisma.TransactionClient,
@@ -1166,6 +1246,42 @@ const parseReservationPayload = (
       )
     : [];
 
+/**
+ * Gives a reservation's user credits back: the plan buckets it incremented and
+ * the purchased-credit lots it reserved. Never the provider budget -- whether
+ * that is released depends on whether the provider may have been called, which
+ * only the caller knows. Call it only after winning the reservation's
+ * `reserved -> settling` claim, inside the same transaction.
+ */
+const refundReservedUserCredits = async (
+  tx: Prisma.TransactionClient,
+  userId: string,
+  reservation: {
+    id: string;
+    planReservedCredits: number;
+    reservationPayload: Prisma.JsonValue;
+    createdAt: Date;
+  }
+) => {
+  await refundPlanCredits(
+    tx,
+    userId,
+    reservation.planReservedCredits,
+    reservation.createdAt
+  );
+  const entries = parseReservationPayload(reservation.reservationPayload);
+  if (entries.length > 0) {
+    await settleAddOnCredits(tx, {
+      userId,
+      reservationId: reservation.id,
+      entries,
+      settledCredits: 0,
+      settledFundedCostMicroUsd: 0,
+      outcome: "failed",
+    });
+  }
+};
+
 const finalizeFailure = async (input: {
   generationId: string;
   failurePhase: ImageGenerationFailurePhase;
@@ -1200,6 +1316,8 @@ const finalizeFailure = async (input: {
     imageCount: number;
     inputTokens?: number;
   };
+  /** The request's cost as the provider reported it, where a reached provider reports one. */
+  reportedCostMicroUsd?: number | null;
   /**
    * Whether this caller may also claim a row already in `settling`, and on
    * what grounds. Omitted means no -- the ordinary failure paths must never
@@ -1257,30 +1375,16 @@ const finalizeFailure = async (input: {
         where: { generationId: input.generationId },
       });
       if (reservation) {
-        await refundPlanCredits(
-          tx,
-          generation.userId,
-          reservation.planReservedCredits,
-          reservation.createdAt
-        );
-        const entries = parseReservationPayload(reservation.reservationPayload);
-        if (entries.length > 0) {
-          await settleAddOnCredits(tx, {
-            userId: generation.userId,
-            reservationId: reservation.id,
-            entries,
-            settledCredits: 0,
-            settledFundedCostMicroUsd: 0,
-            outcome: "failed",
-          });
-        }
+        await refundReservedUserCredits(tx, generation.userId, reservation);
         const incurredCostMicroUsd = input.releaseProviderBudget
           ? null
           : failureIncurredCostMicroUsd(reservation.pricingSnapshot, input.billed);
-        const failureOverageMicroUsd =
+        const failureOverageMicroUsd = input.releaseProviderBudget ? 0 : Math.max(
           incurredCostMicroUsd === null
             ? 0
-            : Math.max(0, incurredCostMicroUsd - Number(reservation.reservedCostMicroUsd));
+            : Math.max(0, incurredCostMicroUsd - Number(reservation.reservedCostMicroUsd)),
+          failureReportedOverageMicroUsd(Number(reservation.reservedCostMicroUsd), input.reportedCostMicroUsd)
+        );
         if (input.releaseProviderBudget) {
           await refundProviderBudget(
             tx,
@@ -1575,6 +1679,7 @@ export const processImageGeneration = async (
         // The provider was reached (or unreachable in a way that may still
         // have billed); keep the budget charge -- conservative direction.
         releaseProviderBudget: false,
+        reportedCostMicroUsd: providerError.reportedCostMicroUsd,
         billed: {
           nonImageBillableTokens: providerError.nonImageBillableTokens,
           imageTokens: providerError.billedImageTokens,
@@ -1611,6 +1716,8 @@ export const processImageGeneration = async (
         providerRequestId: result.providerRequestId,
         providerRequestParams: result.requestParams,
         releaseProviderBudget: false,
+        // This path settles its own failure and returns, so the outer catch never sees the answer.
+        reportedCostMicroUsd: result.reportedCostMicroUsd,
         billed: {
           nonImageBillableTokens: result.nonImageBillableTokens,
           imageTokens: result.billedImageTokens,
@@ -1629,19 +1736,40 @@ export const processImageGeneration = async (
     const requestedSize = parseSize(generation.size);
     const width = result.outputWidth ?? requestedSize.width;
     const height = result.outputHeight ?? requestedSize.height;
-    await prisma.imageAsset.create({
-      data: {
-        generationId,
-        role: "original",
-        status: "ready",
-        r2Key: originalKey,
-        mimeType: result.mimeType,
-        width,
-        height,
-        byteSize: result.imageBytes.byteLength,
-        sha256: sha256Hex(result.imageBytes),
-      },
-    });
+    try {
+      await prisma.imageAsset.create({
+        data: {
+          generationId,
+          role: "original",
+          status: "ready",
+          r2Key: originalKey,
+          mimeType: result.mimeType,
+          width,
+          height,
+          byteSize: result.imageBytes.byteLength,
+          sha256: sha256Hex(result.imageBytes),
+        },
+      });
+    } catch (error) {
+      // The bytes are in R2 and no row names them: the conversation was deleted
+      // under this run, cascading the generation away, or the write failed.
+      // The deletion's own tombstones came from the rows it saw, so nothing
+      // else would ever remove the object. Checked first, because a create
+      // that reported failure may still have committed, and a tombstone on a
+      // key a row names deletes a live original.
+      const recorded = await prisma.imageAsset
+        .findUnique({ where: { r2Key: originalKey }, select: { id: true } })
+        .catch(() => undefined);
+      if (recorded === null) {
+        await prisma.imageAssetCleanup
+          .createMany({
+            data: [{ r2Key: originalKey, reason: "storage_rollback" }],
+            skipDuplicates: true,
+          })
+          .catch(() => undefined);
+      }
+      throw error;
+    }
 
     // Thumbnail is a derived asset: its failure never demotes the original
     // (policy section 9). Derivation re-encodes on purpose -- only the
@@ -1784,19 +1912,15 @@ export const processImageGeneration = async (
       // edit reserved for output and photo together.
       const editBudget = (reservation.pricingSnapshot as { edit?: { inputBudgetMicroUsd?: unknown } } | null)
         ?.edit?.inputBudgetMicroUsd;
-      if (
-        typeof editBudget === "number" &&
-        snapshotOutputCost !== null &&
-        typeof result.reportedCostMicroUsd === "number" &&
-        result.reportedCostMicroUsd > snapshotOutputCost + editBudget
-      ) {
+      const reportedOverage = reportedEditOverageMicroUsd(snapshotOutputCost, editBudget, result.reportedCostMicroUsd);
+      if (reportedOverage > 0) {
         console.error(
           JSON.stringify({
             event: "image_edit_input_over_budget",
             generationId,
             modelId: generation.modelId,
             reportedCostMicroUsd: result.reportedCostMicroUsd,
-            reservedMicroUsd: snapshotOutputCost + editBudget,
+            reservedMicroUsd: (result.reportedCostMicroUsd as number) - reportedOverage,
             timestamp: new Date().toISOString(),
           })
         );
@@ -1817,6 +1941,8 @@ export const processImageGeneration = async (
           ? Number(reservation.reservedCostMicroUsd)
           : snapshotOutputCost +
             extraImageCost +
+            // Reported past the price: the provider budget sees what was actually billed.
+            reportedOverage +
             promptCostMicroUsd(result.inputTokens) +
             editInputCost +
             thinkingCost;
@@ -1902,6 +2028,7 @@ export const processImageGeneration = async (
       // would have charged its overage rolled back with this failure.
       ...(answered
         ? {
+            reportedCostMicroUsd: answered.reportedCostMicroUsd,
             billed: {
               nonImageBillableTokens: answered.nonImageBillableTokens,
               imageTokens: answered.billedImageTokens,
@@ -1930,24 +2057,200 @@ export const processImageGeneration = async (
   }
 };
 
+export type ImageStaleRecoveryOptions = {
+  /**
+   * Runs the re-driven attempts once the sweep has answered, inside the
+   * caller's own budget -- the maintenance route passes `after`. Used only
+   * while IMAGE_PENDING_REDRIVE_ENABLED is `on`. Absent or switched off,
+   * nothing is re-driven or marked and a pending row is refunded on the stale
+   * window as before: a sweep that will not run the work must not leave it
+   * waiting.
+   */
+  scheduleRedrive?: (run: () => Promise<void>) => void;
+};
+
 /**
- * The refund arm of the stale recovery promised in PR 2: a generation still
- * in a live status past the stale window has lost its executor. The
- * settling claim inside finalizeFailure makes this race-safe against a
- * worker that is merely slow.
+ * The re-drive arm: run a `pending` generation whose executor died before
+ * claiming it, instead of refunding it.
+ *
+ * Safe because a pending row's provider was never called -- the claim into
+ * `processing` precedes the call -- and because the re-drive goes through the
+ * same conditional claim as every executor, so a merely slow one and the
+ * sweep cannot both call the provider or both settle.
+ *
+ * At most once per row. The mark is the reservation's `reconciledAt`, which
+ * nothing else writes for an image reservation; the conditional update that
+ * sets it is what a second sweep loses. A marked row the re-drive never
+ * claimed is refunded a stale window later by the refund arm.
+ */
+const redrivePendingImageGenerations = async (
+  now: Date,
+  limit: number,
+  staleBefore: Date,
+  redriveOldest: Date,
+  schedule: (run: () => Promise<void>) => void
+): Promise<number> => {
+  const candidates = await prisma.imageGeneration.findMany({
+    where: {
+      status: "pending",
+      updatedAt: {
+        lt: new Date(now.getTime() - IMAGE_PENDING_REDRIVE_AFTER_MS),
+        gte: redriveOldest,
+      },
+      // A target queued behind a live sibling is waiting for its own executor,
+      // which has the budget for it; the maintenance route's does not.
+      target: {
+        group: {
+          targets: {
+            none: {
+              generations: {
+                some: {
+                  status: { in: ["processing", "settling"] },
+                  updatedAt: { gte: staleBefore },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    orderBy: { updatedAt: "asc" },
+    take: limit,
+    select: { id: true, groupId: true },
+  });
+
+  const groups = new Map<string, string[]>();
+  let marked = 0;
+  for (const candidate of candidates) {
+    if (marked >= IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP) break;
+    // Only a reservation still holding the credits is run: a row without one
+    // would be an image nobody pays for, and the refund arm closes it instead.
+    // A mark that fails leaves its row unmarked for the next sweep, and does
+    // not cost the rows already marked their run.
+    const mark = await prisma.imageCreditReservation
+      .updateMany({
+        where: { generationId: candidate.id, status: "reserved", reconciledAt: null },
+        data: { reconciledAt: now },
+      })
+      .catch(() => ({ count: 0 }));
+    if (mark.count === 0) continue;
+    marked += 1;
+    groups.set(candidate.groupId, [...(groups.get(candidate.groupId) ?? []), candidate.id]);
+  }
+  if (marked === 0) return 0;
+
+  try {
+    schedule(async () => {
+      // Each group at its own per-provider job cap, all at once, so a small
+      // batch starts immediately rather than queueing behind itself.
+      await Promise.all(
+        [...groups.values()].map((ids) =>
+          processImageGenerationGroup(ids).catch((error) =>
+            console.error("Image generation re-drive failed:", {
+              errorName: error instanceof Error ? error.name : "UnknownError",
+            })
+          )
+        )
+      );
+    });
+  } catch (error) {
+    // The rows stay marked and pending, so the refund arm returns their
+    // credits a stale window from now rather than anything running twice.
+    console.error("Image generation re-drive could not be scheduled:", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+  }
+  return marked;
+};
+
+/**
+ * Which stale pending rows the refund arm may take while a re-drive is
+ * possible: only those no re-drive will run. Its one re-drive was scheduled a
+ * whole stale window ago and never claimed it, it is too old to run, or its
+ * reservation no longer holds credits to run it with. Anything else is left to
+ * the re-drive arm.
+ */
+const pendingRowsNoRedriveWillTake = async (
+  rows: readonly { id: string; updatedAt: Date }[],
+  staleBefore: Date,
+  redriveOldest: Date
+): Promise<Set<string>> => {
+  if (rows.length === 0) return new Set();
+  const reservations = new Map(
+    (
+      await prisma.imageCreditReservation.findMany({
+        where: { generationId: { in: rows.map((row) => row.id) } },
+        select: { generationId: true, status: true, reconciledAt: true },
+      })
+    ).map((reservation) => [reservation.generationId, reservation])
+  );
+  return new Set(
+    rows
+      .filter((row) => {
+        const reservation = reservations.get(row.id);
+        return (
+          !reservation ||
+          reservation.status !== "reserved" ||
+          row.updatedAt < redriveOldest ||
+          (reservation.reconciledAt !== null && reservation.reconciledAt < staleBefore)
+        );
+      })
+      .map((row) => row.id)
+  );
+};
+
+/**
+ * The stale recovery promised in PR 2, in two arms.
+ *
+ * Re-drive (redrivePendingImageGenerations above): a `pending` row is run
+ * once instead of refunded, when IMAGE_PENDING_REDRIVE_ENABLED is `on` (off by
+ * default) and the caller can schedule it. Otherwise this is the sweep from
+ * before the re-drive: nothing is marked and every stale pending row is
+ * refunded.
+ *
+ * Refund: a generation still in a live status past its window has lost its
+ * executor. A `processing` or `settling` one may already have reached the
+ * provider, so it is failed and refunded and never run again -- an unknown
+ * outcome is not retried blindly. A `pending` one is refunded only when no
+ * re-drive will take it. The settling claim inside finalizeFailure makes this
+ * race-safe against a worker that is merely slow.
  */
 export const reconcileStaleImageGenerations = async (
   now = new Date(),
-  limit = 25
+  limit = 25,
+  options: ImageStaleRecoveryOptions = {}
 ): Promise<{
   examined: number;
   refunded: number;
   settlementStranded: number;
+  /** Pending generations handed to a re-drive by this sweep. */
+  redriven: number;
 }> => {
   const staleBefore = new Date(now.getTime() - STALE_IMAGE_GENERATION_AFTER_MS);
   const settlingStaleBefore = new Date(
     now.getTime() - STALE_IMAGE_SETTLING_AFTER_MS
   );
+  const redriveOldest = new Date(now.getTime() - IMAGE_PENDING_REDRIVE_MAX_AGE_MS);
+  // Read once per sweep, so both arms below see the same answer: switched off,
+  // neither the re-drive nor the refund arm's pending filter runs.
+  const scheduleRedrive = imagePendingRedriveEnabled()
+    ? options.scheduleRedrive
+    : undefined;
+  // First, so a row it marks now is one the refund arm below leaves alone.
+  const redriven = scheduleRedrive
+    ? await redrivePendingImageGenerations(
+        now,
+        limit,
+        staleBefore,
+        redriveOldest,
+        scheduleRedrive
+      ).catch((error) => {
+        console.error("Image generation re-drive sweep failed:", {
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        });
+        return 0;
+      })
+    : 0;
   const stale = await prisma.imageGeneration.findMany({
     where: {
       OR: [
@@ -1965,11 +2268,28 @@ export const reconcileStaleImageGenerations = async (
     },
     orderBy: { updatedAt: "asc" },
     take: limit,
-    select: { id: true, status: true },
+    select: { id: true, status: true, updatedAt: true },
   });
+  // Unreadable means no pending row is refunded this sweep: waiting one more
+  // sweep costs minutes, while refunding a row a re-drive is about to run
+  // loses the request it was meant to save.
+  const refundablePending = scheduleRedrive
+    ? await pendingRowsNoRedriveWillTake(
+        stale.filter((generation) => generation.status === "pending"),
+        staleBefore,
+        redriveOldest
+      ).catch(() => new Set<string>())
+    : null;
   let refunded = 0;
   let settlementStranded = 0;
   for (const generation of stale) {
+    if (
+      generation.status === "pending" &&
+      refundablePending &&
+      !refundablePending.has(generation.id)
+    ) {
+      continue;
+    }
     const stranded = generation.status === "settling";
     const finalized = await finalizeFailure({
       generationId: generation.id,
@@ -2003,7 +2323,94 @@ export const reconcileStaleImageGenerations = async (
       },
     });
   }
-  return { examined: stale.length, refunded, settlementStranded };
+  return { examined: stale.length, refunded, settlementStranded, redriven };
+};
+
+/**
+ * Refunds the user credits of reservations whose generation is gone.
+ *
+ * Deleting a conversation cascades its generations away and leaves their
+ * reservations -- which deliberately have no foreign key, so the financial
+ * record survives -- in `reserved`. Every other path that closes one
+ * (finalizeFailure, the stale sweep, the success settlement) starts from the
+ * generation row, so nothing else could reach it, and the person's plan
+ * credits and purchased lots stayed held for good.
+ *
+ * Exactly once by the claim every settler uses: `reserved -> settling` inside
+ * the transaction that closes the row. A settlement that committed first left
+ * it `settled`, and one still open holds the row until it does, so this then
+ * sees nothing to claim.
+ *
+ * The provider budget keeps its hold: the generation may have reached the
+ * provider before it was deleted -- a live executor keeps running -- so the
+ * reservation is recorded as spent, finalizeFailure's rule for an unknown
+ * outcome. A reservation with no user left (the account was deleted) has no
+ * credits to return and is not touched.
+ */
+export const refundOrphanedImageCreditReservations = async (
+  now = new Date(),
+  limit = 25
+): Promise<{ examined: number; refunded: number }> => {
+  const orphans = await prisma.$queryRaw<
+    { id: string; userId: string; generationId: string }[]
+  >`
+    SELECT r."id", r."userId", r."generationId"
+    FROM "ImageCreditReservation" r
+    WHERE r."status" = 'reserved'
+      AND r."userId" IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM "ImageGeneration" g WHERE g."id" = r."generationId"
+      )
+    ORDER BY r."createdAt" ASC
+    LIMIT ${limit}
+  `;
+  let refunded = 0;
+  for (const orphan of orphans) {
+    const closed = await prisma
+      .$transaction(async (tx) => {
+        await lockCreditAccount(tx, orphan.userId);
+        // A generation id is never reused, so a missing row stays missing;
+        // checked again under the lock all the same, before anything moves.
+        const generation = await tx.imageGeneration.findUnique({
+          where: { id: orphan.generationId },
+          select: { id: true },
+        });
+        if (generation) return false;
+        const claim = await tx.imageCreditReservation.updateMany({
+          where: { id: orphan.id, status: "reserved" },
+          data: { status: "settling" },
+        });
+        if (claim.count === 0) return false;
+        const reservation = await tx.imageCreditReservation.findUniqueOrThrow({
+          where: { id: orphan.id },
+        });
+        await refundReservedUserCredits(tx, orphan.userId, reservation);
+        await tx.imageCreditReservation.update({
+          where: { id: reservation.id },
+          data: {
+            status: "settled",
+            outcome: "failed",
+            settledCredits: 0,
+            settledCostMicroUsd: reservation.reservedCostMicroUsd,
+            settledFundedCostMicroUsd: BigInt(0),
+            refundedAt: now,
+            settledAt: now,
+            // The generation that would have said why is gone; the record says it.
+            lastError: "generation_missing",
+          },
+        });
+        return true;
+      })
+      .catch((error) => {
+        console.error("Orphaned image reservation refund failed:", {
+          reservationId: orphan.id,
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        });
+        return false;
+      });
+    if (closed) refunded += 1;
+  }
+  return { examined: orphans.length, refunded };
 };
 
 /**
@@ -2205,6 +2612,9 @@ export const retryImageGenerationTarget = async (
         ? { expectedPricingVersions: { [target.modelId]: failedReservation.pricingVersion } }
         : {}),
       ...(retryEditAttachmentId ? { editSource: { attachmentId: retryEditAttachmentId } } : {}),
+      // A photo tool's target exists only because its feature admitted it; the
+      // id retried is that stored target's, never one the caller sent.
+      ...(isImagePhotoTool(target.modelId) ? { photoTools: [target.modelId] } : {}),
       // The retry stays in the conversation its group already lives in. A
       // chat conversation holds a group only through a Chat image turn
       // (lib/chatImageTurn.ts), so its retry keeps that host -- while the

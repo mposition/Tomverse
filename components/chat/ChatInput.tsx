@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { isGooglePickerConfig, loadGoogleDrivePicker } from "@/lib/googleDrivePickerClient";
 import type { ReviewWorkspaceControls } from "./useReviewWorkspace";
 import type { ResearchPreviewControls } from "./useResearchPreview";
 import { DeepResearchEngineRow, DeepResearchEngineSheet, useDeepResearchEngineOffer } from "./DeepResearchEngine";
@@ -134,6 +135,7 @@ import {
 } from "@/lib/productAnalyticsClient";
 import {
   CHAT_MODEL_PICKER_OPEN_EVENT,
+  notifyChatModelPickerClosed,
   type ChatModelPickerOpenDetail,
 } from "@/lib/chatModelPickerEvents";
 import {
@@ -189,12 +191,7 @@ const MAX_ATTACHMENTS = CHAT_MAX_ATTACHMENTS_PER_MESSAGE;
 const MAX_ATTACHMENT_SIZE = CHAT_MAX_ATTACHMENT_BYTES;
 const attachmentBytesTotal = (list: readonly ChatAttachment[]) =>
   list.reduce((sum, item) => sum + (Number.isFinite(item.size) ? item.size : 0), 0);
-const GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
-const GOOGLE_WORKSPACE_TYPES = [
-  "application/vnd.google-apps.document",
-  "application/vnd.google-apps.spreadsheet",
-  "application/vnd.google-apps.presentation",
-].join(",");
+
 const RECENT_MODEL_STORAGE_KEY = "recent_model_ids";
 const GUEST_QUICK_START_STORAGE_KEY = "tomverse_guest_quick_start_seen_v2";
 const GUEST_QUICK_START_ACTIVE_KEY = "tomverse_guest_quick_start_active_v2";
@@ -694,38 +691,6 @@ const getAttachmentIcon = (attachment: ChatAttachment) => {
   return <FileIcon className="h-5 w-5" />;
 };
 
-const loadExternalScript = (src: string) =>
-  new Promise<void>((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>(
-      `script[src="${src}"]`
-    );
-    if (existing?.dataset.loaded === "true") {
-      resolve();
-      return;
-    }
-
-    const script = existing || document.createElement("script");
-    script.addEventListener(
-      "load",
-      () => {
-        script.dataset.loaded = "true";
-        resolve();
-      },
-      { once: true }
-    );
-    script.addEventListener(
-      "error",
-      () => reject(new Error(`Failed to load ${src}`)),
-      { once: true }
-    );
-
-    if (!existing) {
-      script.src = src;
-      script.async = true;
-      document.head.appendChild(script);
-    }
-  });
-
 type ChatInputProps = {
   workspaceAppearance?: "studio" | "classic";
   review?: ReviewWorkspaceControls;
@@ -962,79 +927,6 @@ type ChatInputProps = {
    * step and error copy live here and stay in one place.
    */
   conversationDropSurface?: HTMLElement | null;
-};
-
-type GooglePickerConfig = {
-  clientId: string;
-  apiKey: string;
-  appId: string;
-};
-
-type GoogleTokenResponse = {
-  access_token?: string;
-  error?: string;
-};
-
-interface GooglePickerView {
-  setIncludeFolders(value: boolean): GooglePickerView;
-  setMimeTypes(value: string): GooglePickerView;
-}
-
-interface GooglePickerInstance {
-  setVisible(value: boolean): void;
-}
-
-interface GooglePickerBuilder {
-  setAppId(value: string): GooglePickerBuilder;
-  setOAuthToken(value: string): GooglePickerBuilder;
-  setDeveloperKey(value: string): GooglePickerBuilder;
-  addView(value: GooglePickerView): GooglePickerBuilder;
-  enableFeature(value: unknown): GooglePickerBuilder;
-  setCallback(
-    callback: (data: Record<string, unknown>) => void
-  ): GooglePickerBuilder;
-  build(): GooglePickerInstance;
-}
-
-interface GooglePickerWindow extends Window {
-  gapi: {
-    load(
-      name: string,
-      options: { callback: () => void; onerror: () => void }
-    ): void;
-  };
-  google: {
-    accounts: {
-      oauth2: {
-        initTokenClient(config: {
-          client_id: string;
-          scope: string;
-          callback: (response: GoogleTokenResponse) => void;
-        }): {
-          requestAccessToken(options: { prompt: string }): void;
-        };
-      };
-    };
-    picker: {
-      DocsView: new (viewId: unknown) => GooglePickerView;
-      PickerBuilder: new () => GooglePickerBuilder;
-      ViewId: { DOCS: unknown };
-      Feature: { MULTISELECT_ENABLED: unknown };
-      Response: { ACTION: string; DOCUMENTS: string };
-      Action: { PICKED: unknown; CANCEL: unknown };
-      Document: { ID: string; NAME: string; MIME_TYPE: string };
-    };
-  };
-}
-
-const isGooglePickerConfig = (value: unknown): value is GooglePickerConfig => {
-  if (!value || typeof value !== "object") return false;
-  const config = value as Record<string, unknown>;
-  return (
-    typeof config.clientId === "string" &&
-    typeof config.apiKey === "string" &&
-    typeof config.appId === "string"
-  );
 };
 
 export function ChatInput({
@@ -1987,6 +1879,15 @@ export function ChatInput({
       window.removeEventListener(CHAT_MODEL_PICKER_OPEN_EVENT, openModelPicker);
   }, []);
 
+  // A control that opened the picker for one purpose ("Try another model")
+  // ends its wait when the picker closes, however it was closed.
+  const modelPickerOpen = isMenuOpen && menuView === "models";
+  const modelPickerWasOpenRef = useRef(false);
+  useEffect(() => {
+    if (modelPickerWasOpenRef.current && !modelPickerOpen) notifyChatModelPickerClosed();
+    modelPickerWasOpenRef.current = modelPickerOpen;
+  }, [modelPickerOpen]);
+
   const currentPlan = isGuestMode ? "Guest" : accountUsage?.plan ?? "Free";
   const effortCopy = reasoningEffortCopy[lang];
   const showReasoningEffort = Boolean(currentProduct && review?.mode !== "easy" &&
@@ -2924,79 +2825,10 @@ export function ChatInput({
         throw new Error("Google Picker configuration is invalid.");
       }
 
-      await Promise.all([
-        loadExternalScript("https://accounts.google.com/gsi/client"),
-        loadExternalScript("https://apis.google.com/js/api.js"),
-      ]);
-
-      const browserWindow = window as unknown as GooglePickerWindow;
-      await new Promise<void>((resolve, reject) => {
-        browserWindow.gapi.load("picker", {
-          callback: resolve,
-          onerror: () => reject(new Error("Google Picker failed to load.")),
-        });
-      });
-
-      const accessToken = await new Promise<string>((resolve, reject) => {
-        const tokenClient = browserWindow.google.accounts.oauth2.initTokenClient({
-          client_id: config.clientId,
-          scope: GOOGLE_DRIVE_SCOPE,
-          callback: (response: GoogleTokenResponse) => {
-            if (response.error || !response.access_token) {
-              reject(new Error(response.error || "Google authorization failed."));
-              return;
-            }
-            resolve(response.access_token);
-          },
-        });
-        tokenClient.requestAccessToken({ prompt: "" });
-      });
-
-      const selectedFiles = await new Promise<
-        Array<{ id: string; name: string; mimeType: string }>
-      >((resolve) => {
-        const google = browserWindow.google;
-        const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
-          .setIncludeFolders(false)
-          .setMimeTypes(GOOGLE_WORKSPACE_TYPES);
-        const picker = new google.picker.PickerBuilder()
-          .setAppId(config.appId)
-          .setOAuthToken(accessToken)
-          .setDeveloperKey(config.apiKey)
-          .addView(view)
-          .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
-          .setCallback((data: Record<string, unknown>) => {
-            const action = data[google.picker.Response.ACTION];
-            if (action === google.picker.Action.PICKED) {
-              const documents = data[google.picker.Response.DOCUMENTS];
-              resolve(
-                (Array.isArray(documents) ? documents : []).flatMap(
-                  (document): Array<{
-                    id: string;
-                    name: string;
-                    mimeType: string;
-                  }> => {
-                    if (!document || typeof document !== "object") return [];
-                    const record = document as Record<string, unknown>;
-                    const id = record[google.picker.Document.ID];
-                    const name = record[google.picker.Document.NAME];
-                    const mimeType =
-                      record[google.picker.Document.MIME_TYPE];
-                    return typeof id === "string" &&
-                      typeof name === "string" &&
-                      typeof mimeType === "string"
-                      ? [{ id, name, mimeType }]
-                      : [];
-                  }
-                )
-              );
-            } else if (action === google.picker.Action.CANCEL) {
-              resolve([]);
-            }
-          })
-          .build();
-        picker.setVisible(true);
-      });
+      const picker = await loadGoogleDrivePicker();
+      const selection = await picker(config, availableSlots);
+      if (!selection) return;
+      const { accessToken, files: selectedFiles } = selection;
 
       const importedAttachments: ChatAttachment[] = [];
       // Drive files are sized by the import, so the message total is checked

@@ -54,6 +54,11 @@ mock.module(mod("lib/chatProfileContext.ts"), { namedExports: {
     NO_PROFILE_CONTEXT: noProfile,
     buildChatProfileContext: async (input) => { knowledgeQueries.push(input.query); return noProfile; },
 } });
+// No personal instructions: the turn context reads them from a table this
+// fixture's prisma does not have.
+mock.module(mod("lib/chatPersonalization.ts"), { namedExports: {
+    readPersonalizationTurnBlock: async () => ({ prompt: null, tokens: 0, hash: "none" }),
+} });
 const { retrieveMemoryContext } = await import(mod("lib/memoryRetrievalService.ts"));
 const { buildChatMemoryContext } = await import(mod("lib/chatMemoryContext.ts"));
 const { buildChatTurnContext } = await import(mod("lib/chatTurnContext.ts"));

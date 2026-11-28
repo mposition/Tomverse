@@ -5,13 +5,15 @@ import {
     copyFileSync,
     existsSync,
     fsyncSync,
+    lstatSync,
     mkdirSync,
     openSync,
     readFileSync,
     readdirSync,
+    realpathSync,
     renameSync,
     rmSync,
-    statSync,
+    rmdirSync,
     unlinkSync,
     linkSync,
     writeFileSync,
@@ -40,7 +42,9 @@ export const SESSION_SCHEMA_VERSION = 1;
 
 export type GenerationRecord = {
     seq: number;
-    purpose: "agent" | "compact";
+    purpose: "agent" | "compact" | "goal" | "subagent" | "review";
+    /** The subagent run this request was made for (purpose "subagent"). */
+    subagentId?: string;
     idempotencyKey: string;
     /**
      * intent: recorded, maybe sent, no answer seen (unknown until looked up).
@@ -51,8 +55,10 @@ export type GenerationRecord = {
     httpStatus?: number;
     requestId?: string | null;
     routedModel?: string | null;
+    catalogProvider?: string;
     appliedEffort?: import("./effort.js").Effort;
-    error?: { kind: string; code?: string; message: string };
+    transmission?: import("./transmission.js").RequestTransmission;
+    error?: { kind: string; code?: string; message: string; resetAt?: string };
     receipt?: Receipt | null;
     lookup?: "found" | "not_found";
     lookupAt?: string;
@@ -74,14 +80,133 @@ export type ApprovalRecord = {
     toolName: string;
     inputDigest: string;
     /** What the decision was bound to, checked again right before execution. */
-    binding: { files?: Array<{ path: string; preimage: string | null }>; cwd?: string; program?: string };
+    binding: {
+        files?: Array<{ path: string; preimage: string | null; disk?: import("./patch.js").FileBinding }>;
+        cwd?: string;
+        program?: string;
+        envNames?: string[];
+        /** The command was approved as one that keeps running in the background. */
+        background?: boolean;
+        /** The web page request was approved for this site. */
+        host?: string;
+        /** The MCP tool call was approved for this server definition (its hash); a changed definition is not run. */
+        mcp?: { server: string; tool: string; definition: string };
+    };
     decision: "approved" | "denied";
-    /** Approved without asking, by an earlier "always" answer in the same process. */
-    by?: "remembered_answer";
-    rule?: "file_edits" | "same_command";
+    /** Decided without asking: by an earlier "always" answer in the same process, or by the permission mode and rules. */
+    by?: "remembered_answer" | "permission_policy";
+    /** What the permission policy decided on (a boundary, a rule, the mode, or an auto review), for either answer. */
+    policy?: import("./permissions.js").PolicyNote;
+    rule?: "file_edits" | "same_command" | "web_host" | "browser_origin" | "mcp_tool" | "computer_window" | "web_search";
     /** This answer was "always" for the rest of that process. */
-    remember?: "file_edits" | "same_command";
+    remember?: "file_edits" | "same_command" | "web_host" | "browser_origin" | "mcp_tool" | "computer_window" | "web_search";
     decidedAt: string;
+};
+
+/** A command a task kept running in the background, and how it ended. Processes never outlive the task that started them. */
+export type BackgroundRecord = {
+    handle: string;
+    toolCallId: string;
+    display: string;
+    cwd: string;
+    startedAt: string;
+    state: "running" | "exited" | "stopped";
+    endedAt?: string;
+    exitCode?: number | null;
+    endReason?: "exited" | "stopped" | "task_ended" | "failed_to_start";
+    /** Which run of the CLI started it; a record from another run is one a resume tells the model about. */
+    epoch: string;
+    /** The model has been told how it ended. */
+    acknowledged?: boolean;
+};
+
+/**
+ * One run of a subagent (the delegate tool): what it was asked, how far it got, and what became of it. Its requests are in
+ * `generations` (purpose "subagent") and count against the task's limits like any other request; its conversation is not kept.
+ */
+export type SubagentRecord = {
+    id: string;
+    toolCallId: string;
+    kind: "explore" | "worker";
+    /** The assignment the main agent gave, shortened. */
+    task: string;
+    /** unknown: the process ended while it ran, so what it did is not known (files it changed are still in `changes`). */
+    state: "running" | "completed" | "failed" | "cancelled" | "limit" | "unknown";
+    requests: number;
+    startedAt: string;
+    endedAt?: string;
+    /** Which run of the CLI started it; a record from another run is one a resume tells the model about. */
+    epoch: string;
+    /** The first part of its report, or why it failed. */
+    summary?: string;
+    filesRead?: string[];
+    filesChanged?: string[];
+    /** The model has been told how it ended after a resume. */
+    acknowledged?: boolean;
+    /** Orchestration: the subtask this run belongs to, what it did for it (work or verification) and which attempt it was. */
+    subtask?: string;
+    role?: "work" | "verify";
+    attempt?: number;
+};
+
+/**
+ * One subtask of an orchestrated delegate call (orchestrate.ts): what it was for, which files it could change, how its result was
+ * checked, and how it ended. Its runs are `subagents` records that name it in `subtask`.
+ */
+export type SubtaskRecord = {
+    id: string;
+    toolCallId: string;
+    title: string;
+    kind: "explore" | "worker";
+    agent?: string;
+    /** The write scope a worker declared (workspace-relative files or folders). */
+    paths?: string[];
+    /** The completion criteria the result is checked against. */
+    criteria?: string;
+    /** The check command the subtask declared, as shown to the person. */
+    check?: string;
+    state: "queued" | "running" | "verifying" | "success" | "failed" | "rejected" | "cancelled";
+    reason?: string;
+    attempts: number;
+    requests: number;
+    /** The newest thing the subtask did, one line. Kept in memory between commits. */
+    activity?: string;
+    runIds: string[];
+    filesChanged?: string[];
+    verification?: { state: "passed" | "failed" | "unverified" | "skipped"; reason: string; check?: "passed" | "failed" | "denied" | "error" | "not_run" };
+    startedAt: string;
+    endedAt?: string;
+    epoch: string;
+};
+
+/**
+ * The start of one user message (a task's prompt, or a follow-up sent while it ran): where the conversation and the list of
+ * file changes stood just before it. Rewinding to it cuts the conversation back to `messageIndex` and undoes the changes from
+ * `changeStart` on; forking copies the conversation before the message that came after it.
+ */
+export type CheckpointRecord = {
+    kind: "prompt" | "follow_up";
+    /** Index into `tasks` of the task the message belongs to. */
+    task: number;
+    /** Position of the message in the saved messages; null once a compaction folded it into a summary. */
+    messageIndex: number | null;
+    changeStart: number;
+    toolStart: number;
+    at: string;
+    /** The first part of the message, to tell the turns apart in a list. */
+    text: string;
+};
+
+/** A rewind that was carried out, kept so the session says what happened to its history. */
+export type RewindRecord = {
+    at: string;
+    /** The turn rewound to (its message and everything after it were taken out). */
+    turn: number;
+    conversation: boolean;
+    undone: string[];
+    conflicts: Array<{ changeId: string; path: string; reason: string }>;
+    /** Commands that ran in the part that was taken out: their effects cannot be undone. */
+    commands: string[];
 };
 
 export type ToolRecord = {
@@ -91,6 +216,8 @@ export type ToolRecord = {
     state: "started" | "completed" | "failed";
     startedAt: string;
     endedAt?: string;
+    /** Actual spawn plan with environment names and no environment values. */
+    command?: Omit<import("./commands.js").CommandPlan, "shell" | "display">;
     /** The bounded result the model received, so it can be given back without re-running. */
     output?: unknown;
 };
@@ -101,14 +228,15 @@ export type ChangeRecord = {
     path: string;
     kind: "create" | "update" | "delete";
     /** mode: the permission bits before the change (POSIX), restored by undo. */
-    preimage: { sha256: string | null; backup: string | null; mode?: number };
-    postimage: { sha256: string | null };
+    preimage: { sha256: string | null; backup: string | null; mode?: number; identity?: string | null };
+    postimage: { sha256: string | null; backup?: string | null; identity?: string | null };
+    directory?: string;
     state: "writing" | "applied" | "failed" | "undone";
     appliedAt?: string;
     undoneAt?: string;
 };
 
-export type PendingApproval = { approvalId: string; toolCallId: string; toolName: string; input: unknown };
+export type PendingApproval = { approvalId: string; toolCallId: string; toolName: string; input: unknown; blockedDuringAnalysis?: true };
 
 export type SessionStatus =
     | "idle"
@@ -130,6 +258,9 @@ export type SessionState = {
     /** Full API base and non-secret credential identity for embedded hosts. */
     endpointBase?: string;
     keyIdentity?: string;
+    codeContinuation?: { segmentId: string; maximumKeyCreditCap: number };
+    codeMode?: "ask" | "plan" | "agent";
+    codePermission?: "desktop-accept-edits-v1";
     /** The key's public prefix: lookups are scoped to the key that sent a request. */
     keyPrefix: string;
     readOnly: boolean;
@@ -141,7 +272,16 @@ export type SessionState = {
         contextWindowTokens: number;
         maxOutputTokens: number;
     };
-    limits: { maxRequests: number; timeoutMs: number; commandTimeoutMs: number };
+    /** profile: the named limit set the numbers came from; absent on sessions written before profiles existed (standard). */
+    limits: { maxRequests: number; timeoutMs: number; commandTimeoutMs: number; profile?: "standard" | "extended" | "unlimited" };
+    /**
+     * Goal mode, chosen when the session started: after the model says it is
+     * done, one more request asks whether the goal is verified, and an unmet
+     * goal continues on its own, at most `maxContinuations` times in a row.
+     */
+    goal?: { maxContinuations: number };
+    /** Subagent orchestration, chosen when the session started (orchestrate-config.ts). Absent: delegate works as it always did. */
+    orchestrate?: { maxSubagents: number; maxRequests: number };
     usage: { requests: number; activeMs: number };
     messages: ModelMessage[];
     compactions: Array<{ at: string; requestSeq: number; replacedMessages: number }>;
@@ -149,6 +289,14 @@ export type SessionState = {
     approvals: ApprovalRecord[];
     tools: ToolRecord[];
     changes: ChangeRecord[];
+    background?: BackgroundRecord[];
+    subagents?: SubagentRecord[];
+    subtasks?: SubtaskRecord[];
+    /** One entry per user message, in order. Absent on sessions saved before checkpoints existed (they cannot be rewound or forked). */
+    checkpoints?: CheckpointRecord[];
+    rewinds?: RewindRecord[];
+    /** Where this session was forked from: the session and how many of its turns were copied. */
+    forkedFrom?: { sessionId: string; turns: number; at: string };
     pendingApprovals: PendingApproval[];
     /**
      * One entry per user prompt. Limits apply per task and are never reset by
@@ -158,6 +306,17 @@ export type SessionState = {
     tasks: Array<{
         effort?: import("./effort.js").Effort;
         prompt: string;
+        references?: import("./workspace.js").WorkspaceReference[];
+        plan?: import("./task-plan.js").TaskPlan;
+        /** Model routing at accepted plan activations, kept outside the plan for older journal readers. */
+        planAssignments?: import("./task-plan.js").TaskPlanAssignments;
+        /** A missing index is queued. A null index was included before compaction. */
+        followUps?: Array<{ text: string; messageIndex?: number | null; /** Written by goal mode, not by the person. */ auto?: boolean }>;
+        /** Messages held for after the model finishes: the first one becomes a follow-up when it does. */
+        queued?: Array<{ id: string; text: string }>;
+        /** Automatic continuations goal mode has made in this task, and what each check said. */
+        goalContinuations?: number;
+        goalChecks?: Array<{ at: string; met: boolean; summary: string; next?: string; continuation: number }>;
         startedAt: string;
         endedAt?: string;
         status?: SessionStatus;
@@ -248,9 +407,10 @@ export class Journal {
     static create(
         home: string | null,
         init: Omit<SessionState, "schemaVersion" | "id" | "createdAt" | "updatedAt" | "usage" | "messages" | "compactions" | "generations" | "approvals" | "tools" | "changes" | "pendingApprovals" | "tasks" | "status">,
-        io: JournalIo = { writeFileAtomic }
+        io: JournalIo = { writeFileAtomic },
+        id = Journal.newId(),
     ) {
-        const id = Journal.newId();
+        if (!/^s-[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$/.test(id)) throw new JournalError("Invalid session id.");
         const state: SessionState = {
             schemaVersion: SESSION_SCHEMA_VERSION,
             id,
@@ -269,9 +429,12 @@ export class Journal {
             status: "idle",
         };
         if (home === null) return new Journal(state, null, io);
-        const dir = join(sessionsDir(home), id);
-        const sessionsCreated = !existsSync(sessionsDir(home));
-        mkdirSync(join(dir, "backups"), { recursive: true, mode: 0o700 });
+        const parent = sessionsDir(home);
+        const dir = join(parent, id);
+        const sessionsCreated = !existsSync(parent);
+        mkdirSync(parent, { recursive: true, mode: 0o700 });
+        mkdirSync(dir, { mode: 0o700 });
+        mkdirSync(join(dir, "backups"), { mode: 0o700 });
         if (process.platform !== "win32") {
             // The sessions folder only when the CLI created it; each session's own folder always.
             if (sessionsCreated) chmodSync(sessionsDir(home), 0o700);
@@ -280,19 +443,35 @@ export class Journal {
         }
         const journal = new Journal(state, dir, io);
         journal.acquireLock();
-        journal.commit();
-        return journal;
+        try {
+            journal.commit();
+            return journal;
+        } catch (error) {
+            journal.release();
+            try {
+                rmdirSync(join(dir, "backups"));
+                rmdirSync(dir);
+            } catch { /* Preserve an existing checkpoint or backup. */ }
+            throw error;
+        }
     }
 
     static open(home: string, id: string, io: JournalIo = { writeFileAtomic }) {
         if (!/^s-[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$/.test(id)) throw new JournalError(`'${id}' is not a session id.`);
         const dir = join(sessionsDir(home), id);
         if (!existsSync(join(dir, "session.json"))) throw new JournalError(`No session ${id}.`);
-        const journal = new Journal(Journal.read(dir), dir, io);
-        journal.acquireLock();
-        // Re-read under the lock: another writer may have just finished.
-        Object.assign(journal.state, Journal.read(dir));
-        return journal;
+        const lock = join(dir, "lock");
+        claimLock(lock, id);
+        try {
+            const state = Journal.read(dir);
+            if (state.id !== id) throw new JournalError(`Session ${id} does not match its checkpoint.`);
+            const journal = new Journal(state, dir, io);
+            journal.lockPath = lock;
+            return journal;
+        } catch (error) {
+            try { unlinkSync(lock); } catch { /* Keep the checkpoint error. */ }
+            throw error;
+        }
     }
 
     /** Reads a checkpoint; falls back to the previous one only to report, never silently. */
@@ -357,9 +536,9 @@ export class Journal {
     /** --no-persist keeps backups in memory: undo works until the process exits. */
     private readonly memoryBackups = new Map<string, Buffer>();
 
-    saveBackup(changeId: string, bytes: Buffer) {
+    saveBackup(changeId: string, bytes: Buffer, image: "pre" | "post" = "pre") {
         if (this.broken) throw this.broken;
-        const name = `${changeId}.pre`;
+        const name = `${changeId}.${image}`;
         if (!this.dir) {
             this.memoryBackups.set(name, Buffer.from(bytes));
             return name;
@@ -373,6 +552,7 @@ export class Journal {
     }
 
     readBackup(name: string) {
+        if (!/^[A-Za-z0-9_-]+\.(pre|post)$/.test(name)) throw new JournalError("Invalid recorded file snapshot.");
         if (!this.dir) return this.memoryBackups.get(name) ?? null;
         return readFileSync(join(this.dir, "backups", name));
     }
@@ -427,15 +607,16 @@ export type SessionSummary = {
     readable: boolean;
 };
 
-export const listSessions = (home: string): SessionSummary[] => {
+export const listSessions = (home: string, include: (state: SessionState) => boolean = () => true): SessionSummary[] => {
     const dir = sessionsDir(home);
     if (!existsSync(dir)) return [];
     const out: SessionSummary[] = [];
     for (const id of readdirSync(dir)) {
         const path = join(dir, id);
-        if (!statSync(path).isDirectory()) continue;
         try {
+            if (!lstatSync(path).isDirectory() || (!existsSync(join(path, "session.json")) && !existsSync(join(path, "session.prev.json")))) continue;
             const state = Journal.read(path);
+            if (state.id !== id || !include(state)) continue;
             out.push({
                 id: state.id,
                 root: state.workspace.root,
@@ -447,6 +628,7 @@ export const listSessions = (home: string): SessionSummary[] => {
                 readable: true,
             });
         } catch {
+            if (!existsSync(path)) continue;
             out.push({ id, root: "?", model: "?", status: "unreadable", requests: 0, updatedAt: "", firstTask: "", readable: false });
         }
     }
@@ -454,13 +636,36 @@ export const listSessions = (home: string): SessionSummary[] => {
 };
 
 /** Deletes a session folder and its backups. The caller has confirmed. */
-export const deleteSession = (home: string, id: string) => {
+export const deleteSession = (home: string, id: string, authorize?: (directory: string) => boolean) => {
     if (!/^s-[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$/.test(id)) throw new JournalError(`'${id}' is not a session id.`);
-    const dir = join(sessionsDir(home), id);
-    if (!existsSync(dir)) throw new JournalError(`No session ${id}.`);
-    // Held while removing, so no process opens the session meanwhile.
-    claimLock(join(dir, "lock"), id);
-    rmSync(dir, { recursive: true, force: true });
+    const location = sessionsDir(home);
+    if (!existsSync(join(location, id))) throw new JournalError(`No session ${id}.`);
+    const parent = realpathSync(location);
+    const dir = join(parent, id);
+    const original = lstatSync(dir, { bigint: true });
+    const isOriginal = () => {
+        const current = lstatSync(dir, { bigint: true });
+        return current.isDirectory() && current.dev === original.dev && current.ino === original.ino && realpathSync(dir) === dir;
+    };
+    if (!isOriginal()) throw new JournalError(`Session ${id} does not resolve to a local record.`);
+    const lock = join(dir, "lock");
+    claimLock(lock, id);
+    let ownsLock = true;
+    try {
+        if (authorize && !authorize(dir)) throw new JournalError(`Session ${id} could not be verified for deletion.`);
+        const checkpoints = new Set(["session.json", "session.prev.json"]);
+        const entries = readdirSync(dir).filter((name) => name !== "lock");
+        for (const name of [...entries.filter((name) => !checkpoints.has(name)), ...entries.filter((name) => checkpoints.has(name))]) {
+            if (!isOriginal()) throw new JournalError(`Session ${id} changed before deletion.`);
+            rmSync(join(dir, name), { recursive: true });
+        }
+        if (!isOriginal()) throw new JournalError(`Session ${id} changed before deletion finished.`);
+        unlinkSync(lock);
+        ownsLock = false;
+        rmdirSync(dir);
+    } finally {
+        try { if (ownsLock && isOriginal()) unlinkSync(lock); } catch { /* The record may already be gone. */ }
+    }
 };
 
 /**

@@ -66,6 +66,27 @@ const REGISTRY = {
     reason:
       "Optional explicit assessment of an owned assistant answer. The request schema and client payload share this list; NULL represents reports without a verified answer link or assessment.",
   },
+  UserPersonalization_responseStyle_check: {
+    owner: "list",
+    module: "lib/chatPersonalizationCore.ts",
+    list: "RESPONSE_STYLES",
+    reason:
+      "The answer style an account owner picks in personal instructions. The settings form, the PUT schema and the prompt builder read this list; 'default' adds no instruction.",
+  },
+  ChatAnswerRating_rating_check: {
+    owner: "list",
+    module: "lib/chatAnswerRatingCore.ts",
+    list: "CHAT_ANSWER_RATINGS",
+    reason:
+      "A thumbs up or down on one assistant answer. Withdrawing a rating deletes the row, so there is no neutral value.",
+  },
+  ChatAnswerRating_reason_check: {
+    owner: "list",
+    module: "lib/chatAnswerRatingCore.ts",
+    list: "CHAT_ANSWER_RATING_REASONS",
+    reason:
+      "The optional reason for a down rating, a closed list so no prose is stored. NULL is a rating without a reason; a separate CHECK refuses a reason on an up rating.",
+  },
   ProductAnalyticsEvent_name_check: {
     owner: "list",
     module: "lib/productAnalyticsShared.ts",
@@ -695,6 +716,74 @@ const REGISTRY = {
     list: "MOBILE_DEVICE_REVOKED_REASONS",
     reason:
       "user_revoked, and deliberately nothing else. Account deletion is the other way a device stops being usable and is absent on purpose: it takes the row with it through the cascade, so a value for it would be one nothing could ever write and a state nobody could query for.",
+  },
+  ScheduledTask_frequency_check: {
+    owner: "list",
+    module: "lib/scheduledTaskCore.ts",
+    list: "SCHEDULED_TASK_FREQUENCIES",
+    reason:
+      "How often a scheduled task runs. Daily is the most frequent on purpose: there is no hourly value, so unattended spend is bounded by the schedule itself before the runner's minimum-interval guard. The route parses the same list.",
+  },
+  ScheduledTask_status_check: {
+    owner: "list",
+    module: "lib/scheduledTaskCore.ts",
+    list: "SCHEDULED_TASK_STATUSES",
+    reason:
+      "Active tasks are claimed by the runner; paused ones wait for the person; completed is a one-off that has run. Written only by lib/scheduledTaskService.ts and lib/scheduledTaskRunner.ts.",
+  },
+  ScheduledTask_pauseReason_check: {
+    owner: "list",
+    module: "lib/scheduledTaskCore.ts",
+    list: "SCHEDULED_TASK_PAUSE_REASONS",
+    reason:
+      "Why a task stopped: the person (user) or the runner refusing to spend on the account's behalf, each with a reason the settings screen explains. NULL exactly while not paused (ScheduledTask_pause_shape_check).",
+  },
+  ScheduledTaskRun_status_check: {
+    owner: "list",
+    module: "lib/scheduledTaskCore.ts",
+    list: "SCHEDULED_TASK_RUN_STATUSES",
+    reason:
+      "One occurrence's lifecycle. unknown is a run whose Chat attempt lease lapsed without a terminal state: its outcome cannot be confirmed, so it is recorded and never dispatched again.",
+  },
+  CodeCloudJob_status_check: {
+    owner: "list",
+    module: "lib/codeCloudContract.ts",
+    list: "CODE_CLOUD_JOB_STATUSES",
+    reason:
+      "A Desktop cloud Code task from creation to its end: waiting for its bundle, queued, claimed by a runner while its credits are reserved, running, and the three ends. Written only by lib/codeCloudService.ts; the runner reports an outcome from the same contract's finish list, never a stored status.",
+  },
+  DesktopRemotePasskeyChallenge_purpose_check: {
+    owner: "type_only",
+    reason:
+      "ChallengePurpose in lib/desktopRemotePasskeyStore.ts: register, enroll, command or remove. A challenge is single use and taken by its own purpose, so a passkey confirmation made for one action can never authorize another; the sibling binding CHECK ties register to a null binding hash.",
+  },
+  DesktopRemoteCommand_kind_check: {
+    owner: "list",
+    module: "lib/desktopRemoteControlContract.ts",
+    list: "DESKTOP_REMOTE_COMMAND_KINDS",
+    reason:
+      "What a signed-in web session asked a PC to do: answer the approval request on its screen, stop a task, or send a running task a follow-up. The web route parses the same list; the PC decides whether each still applies.",
+  },
+  DesktopRemoteCommand_decision_check: {
+    owner: "list",
+    module: "lib/desktopRemoteControlContract.ts",
+    list: "DESKTOP_REMOTE_DECISIONS",
+    reason:
+      "Allow once or deny. \"Allow for this run\" is deliberately absent: a remote answer never widens what the task may do beyond the one request the person saw. NULL for a stop or follow-up.",
+  },
+  DesktopRemoteCommand_result_check: {
+    owner: "list",
+    module: "lib/desktopRemoteControlContract.ts",
+    list: "DESKTOP_REMOTE_RESULTS",
+    reason:
+      "What the PC reported doing with an answer it received. NULL until the PC reports, and for an answer it never received.",
+  },
+  DesktopRemoteCommand_resultReason_check: {
+    owner: "list",
+    module: "lib/desktopRemoteControlContract.ts",
+    list: "DESKTOP_REMOTE_REFUSALS",
+    reason:
+      "Why the PC refused an answer: the request was no longer open or had changed, it is answered at the PC, a repeat, too old, another device's, or the task could not take it. Written from the PC's sync body, which the route parses with this list.",
   },
   MobileTokenFamily_revokedReason_check: {
     owner: "list",

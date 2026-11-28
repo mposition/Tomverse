@@ -32,6 +32,7 @@ import {
   preflightChatDraftForMessage,
 } from "@/lib/chatDraftMessageConsume";
 import { scopedMessageId } from "@/lib/messageRequestIdentity";
+import { isTemporaryConversationExpired, TEMPORARY_CHAT_EXPIRED } from "@/lib/temporaryChatAccess";
 import {
   PUBLIC_MESSAGE_ATTACHMENT_SELECT,
   toPublicMessageAttachment,
@@ -165,14 +166,24 @@ export async function POST(
       const existingConv = await prisma.conversation.findUnique({
           where: { id: conversationId },
           select: { userId: true, password: true, passwordVersion: true, kind: true, productKey: true,
-            continuationBridge: { select: { reviewHandoff: true } } }
+            continuationBridge: { select: { reviewHandoff: true } }, temporaryExpiresAt: true }
       });
 
       if (!existingConv || existingConv.userId !== userId) {
           return NextResponse.json({ error: "You do not have access to this conversation." }, { status: 403 });
       }
+      // A temporary Chat past its expiry takes no new question, refused here
+      // before the message is saved or the composer draft consumed, so the
+      // person keeps what they typed (lib/temporaryChatAccess.ts).
+      if (isTemporaryConversationExpired(existingConv.temporaryExpiresAt, new Date())) {
+          return NextResponse.json(
+            { error: "This temporary chat has ended.", code: TEMPORARY_CHAT_EXPIRED },
+            { status: 410 }
+          );
+      }
       const desktop = req.headers.get("origin") === DESKTOP_APP_ORIGIN;
-      if (desktop && !desktopConversationWriteProduct(existingConv)) {
+      const desktopProduct = desktop ? desktopConversationWriteProduct(existingConv) : null;
+      if (desktop && !desktopProduct) {
         return NextResponse.json({ error: "This conversation belongs to another workspace." }, { status: 403 });
       }
       if (
@@ -188,7 +199,8 @@ export async function POST(
 
     const body = await readLimitedJson(req, CHAT_MAX_MESSAGE_BODY_BYTES, saveMessagesSchema);
     if (desktop && (body.messages.length !== 1 || body.draftConsume ||
-        body.messages.some((message) => message.modelId || message.attachmentReferences?.length ||
+        // A Review follow-up for one model carries that model; Chat never does.
+        body.messages.some((message) => (message.modelId && desktopProduct !== "review") || message.attachmentReferences?.length ||
           (!desktopAttachmentEnabled() && message.attachmentUploadIds?.length)))) {
       return NextResponse.json({ error: "Desktop Chat saves one question with its prepared attachments at a time." }, { status: 400 });
     }

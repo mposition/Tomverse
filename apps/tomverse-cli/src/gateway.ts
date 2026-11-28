@@ -5,7 +5,8 @@ import type { Endpoint } from "./config.js";
 import { CLI_VERSION } from "./version.js";
 
 /**
- * The only network code in the CLI. Every request goes to the configured
+ * The network code for the Tomverse API (reading public web pages is src/web.ts,
+ * approved per site). Every request goes to the configured
  * endpoint's origin and below its API root; a redirect is never followed, so
  * the key cannot be carried to another address; and the AI SDK is given an
  * explicit provider instance with this base URL, key and fetch, so no
@@ -53,6 +54,72 @@ export type Receipt = {
     createdAt: string;
     completedAt: string | null;
     usage: { inputTokens: number; cachedInputTokens: number; cacheWriteInputTokens: number; outputTokens: number } | null;
+};
+
+/** What the web_search tool asks for: the same narrow input as Chat's search tool. */
+export type WebSearchInput = {
+    query: string | string[];
+    country?: string;
+    searchLang?: string;
+    freshness?: "day" | "week" | "month" | "year";
+};
+
+/** The Tomverse API's answer to one web search (POST /web-search). Text in it is third-party and untrusted. */
+export type WebSearchReply = {
+    requestId: string | null;
+    searches: Array<{
+        query: string | null;
+        status: string;
+        results?: Array<{ title: string; url: string; snippet?: string; publishedAt?: string }>;
+        reason?: string;
+        truncated?: boolean;
+    }>;
+    sources: string[];
+    notice: string | null;
+    /** Credits the request was charged; null when the server could not say yet. */
+    chargedCredits: number | null;
+};
+
+const textOf = (value: unknown, limit: number) => (typeof value === "string" && value ? value.slice(0, limit) : undefined);
+const webUrl = (value: unknown) => {
+    const url = textOf(value, 2_000);
+    return url && /^https?:\/\//i.test(url) ? url : undefined;
+};
+
+/** Reads the reply defensively: anything not of the documented shape is dropped, never passed on as it came. */
+const readWebSearchReply = (body: unknown): WebSearchReply => {
+    const record = (body ?? {}) as Record<string, unknown>;
+    if (record.object !== "tomverse.web_search" || !Array.isArray(record.searches)) {
+        throw new GatewayError("protocol", "The web search answer has an unexpected shape.");
+    }
+    const searches = (record.searches as unknown[]).slice(0, 8).map((value) => {
+        const entry = (value ?? {}) as Record<string, unknown>;
+        const results = Array.isArray(entry.results) ? (entry.results as unknown[]).slice(0, 10).flatMap((item) => {
+            const result = (item ?? {}) as Record<string, unknown>;
+            const url = webUrl(result.url);
+            if (!url) return [];
+            const snippet = textOf(result.snippet, 2_000);
+            const publishedAt = textOf(result.published_at, 40);
+            return [{ title: textOf(result.title, 300) ?? url, url, ...(snippet ? { snippet } : {}), ...(publishedAt ? { publishedAt } : {}) }];
+        }) : undefined;
+        const reason = textOf(entry.reason, 80);
+        return {
+            query: textOf(entry.query, 500) ?? null,
+            status: textOf(entry.status, 40) ?? "failed",
+            ...(results ? { results } : {}),
+            ...(reason ? { reason } : {}),
+            ...(entry.truncated === true ? { truncated: true } : {}),
+        };
+    });
+    const sources = Array.isArray(record.sources) ? (record.sources as unknown[]).flatMap((value) => webUrl(value) ?? []).slice(0, 25) : [];
+    const charged = record.charged_credits;
+    return {
+        requestId: textOf(record.request_id, 80) ?? null,
+        searches,
+        sources,
+        notice: textOf(record.notice, 1_000) ?? null,
+        chargedCredits: typeof charged === "number" && Number.isSafeInteger(charged) && charged >= 0 ? charged : null,
+    };
 };
 
 export type GatewayErrorKind = "http" | "network" | "tls" | "timeout" | "redirect" | "protocol" | "aborted" | "limit";
@@ -121,6 +188,7 @@ export type GenerationIntent = {
  */
 export type GenerationHooks = {
     before(): Promise<GenerationIntent>;
+    transmission?(intent: GenerationIntent, body: unknown): void;
     headers(intent: GenerationIntent, info: { status: number; requestId: string | null; routedModel: string | null; appliedEffort?: Effort }): Promise<void>;
     failed(intent: GenerationIntent, error: GatewayError): Promise<void>;
     ended(intent: GenerationIntent, how: "complete" | "interrupted"): Promise<void>;
@@ -131,12 +199,23 @@ export class Gateway {
         readonly endpoint: Endpoint,
         private readonly key: string,
         private readonly fetchImpl: typeof fetch = globalThis.fetch,
-        private readonly client = `tomverse-cli/${CLI_VERSION}`
-    ) {}
+        private readonly client = `tomverse-cli/${CLI_VERSION}`,
+        private readonly maximumKeyCreditCap?: number
+    ) {
+        if (maximumKeyCreditCap !== undefined && (!Number.isSafeInteger(maximumKeyCreditCap) || maximumKeyCreditCap <= 0)) {
+            throw new GatewayError("protocol", "An approved continuation requires a positive credit cap.");
+        }
+    }
 
     /** The key's public prefix: lookups only find requests of this key. */
     get keyPrefix() {
         return this.key.slice(0, 12);
+    }
+
+    /** Whether text carries this key, whole or its secret part: such text is never sent anywhere but as the key itself. */
+    carriesKey(text: string) {
+        const secret = this.key.slice(13);
+        return text.includes(this.key) || (secret.length >= 16 && text.includes(secret));
     }
 
     /** Builds a URL under the API root, refusing anything that leaves it. */
@@ -177,9 +256,15 @@ export class Gateway {
         return response;
     }
 
-    private async getJson<T>(path: string, init: { headers?: Record<string, string>; signal?: AbortSignal } = {}) {
+    private async getJson<T>(path: string, { requireCappedContinuation, ...init }: {
+        headers?: Record<string, string>; signal?: AbortSignal; requireCappedContinuation?: boolean;
+    } = {}) {
         const response = await this.send(this.url(path), { method: "GET", ...init, timeoutMs: 20_000 });
         if (!response.ok) throw await readError(response);
+        if (requireCappedContinuation && response.headers.get("x-tomverse-code-capped-continuation") !== "key-cap-v1") {
+            await response.body?.cancel().catch(() => undefined);
+            throw new GatewayError("protocol", "The Code API has not enabled capped continuation.");
+        }
         try {
             return (await response.json()) as T;
         } catch {
@@ -206,7 +291,7 @@ export class Gateway {
         }));
     }
 
-    usage(limit = 20) {
+    usage(limit = 20, options?: { signal?: AbortSignal; requireCappedContinuation?: boolean }) {
         return this.getJson<{
             key: null | {
                 prefix: string;
@@ -218,7 +303,49 @@ export class Gateway {
                 expires_at: string | null;
             };
             requests: Receipt[];
-        }>(`/usage?limit=${limit}`);
+        }>(`/usage?limit=${limit}`, options);
+    }
+
+    async verifyCappedContinuation(signal: AbortSignal) {
+        const maximum = this.maximumKeyCreditCap;
+        if (maximum === undefined) throw new GatewayError("protocol", "No continuation credit cap was approved.");
+        const { key } = await this.usage(1, { signal, requireCappedContinuation: true });
+        const cap = key?.credit_cap;
+        const remaining = key?.remaining_cap_credits;
+        if (key?.prefix !== this.keyPrefix || typeof cap !== "number" || !Number.isSafeInteger(cap) || cap <= 0 || cap > maximum ||
+            typeof remaining !== "number" || !Number.isSafeInteger(remaining) || remaining <= 0 || remaining > cap) {
+            throw new GatewayError("limit", "The API key needs available credits and a cap within the approved continuation limit.");
+        }
+        return { cap, remaining };
+    }
+
+    /**
+     * One web search through the Tomverse API (POST /web-search), charged to this key's account like a request and
+     * listed in its receipts. Never sent twice: the Idempotency-Key is the tool call's own, and a request whose answer
+     * was lost is reported, not repeated (its receipt says whether it was charged).
+     */
+    async webSearch(input: WebSearchInput, idempotencyKey: string, signal: AbortSignal): Promise<WebSearchReply> {
+        const body = {
+            query: input.query,
+            ...(input.country ? { country: input.country } : {}),
+            ...(input.searchLang ? { search_lang: input.searchLang } : {}),
+            ...(input.freshness ? { freshness: input.freshness } : {}),
+        };
+        const response = await this.send(this.url("/web-search"), {
+            method: "POST",
+            headers: { "content-type": "application/json", "idempotency-key": idempotencyKey },
+            body: JSON.stringify(body),
+            signal,
+            timeoutMs: 90_000,
+        });
+        if (!response.ok) throw await readError(response);
+        let parsed: unknown;
+        try {
+            parsed = await response.json();
+        } catch {
+            throw new GatewayError("protocol", "The web search answer is not JSON.");
+        }
+        return readWebSearchReply(parsed);
     }
 
     /**
@@ -250,10 +377,16 @@ export class Gateway {
             if (href !== allowed || (init?.method ?? "GET").toUpperCase() !== "POST") {
                 throw new GatewayError("protocol", "Refused a model request outside POST /chat/completions.");
             }
-            const requestBody = isExplicitEffort(effort)
-                ? JSON.stringify({ ...JSON.parse(String(init?.body)), tomverse_effort: effort })
+            const requestBody = isExplicitEffort(effort) || this.maximumKeyCreditCap !== undefined
+                ? JSON.stringify({
+                    ...JSON.parse(String(init?.body)),
+                    ...(isExplicitEffort(effort) ? { tomverse_effort: effort } : {}),
+                    // Older servers reject this unknown body field before dispatch.
+                    ...(this.maximumKeyCreditCap !== undefined ? { tomverse_max_key_credit_cap: this.maximumKeyCreditCap } : {}),
+                })
                 : init?.body;
             const intent = await hooks.before();
+            hooks.transmission?.(intent, requestBody);
             const headers = new Headers(init?.headers);
             // The SDK's own key header is replaced by send(); one source of truth.
             headers.delete("authorization");

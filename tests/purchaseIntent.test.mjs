@@ -397,28 +397,36 @@ test("Max is never told that Pro is an upgrade", () => {
   assert.equal(forMax("Free"), "manage_plan");
 });
 
-test("an unknown billing interval sends the subscriber to support, not to a refusal", () => {
-  // A change only ever happens on the interval already being billed, so
-  // without one there is nothing this flow can offer. The value is null for a
-  // subscription synced before the field existed.
-  const withoutInterval = resolvePlanCtaState({
-    sessionStatus: "authenticated",
-    currentPlan: "Pro",
-    cardPlan: "Max",
-    hasActiveSubscription: true,
-  });
-  assert.equal(withoutInterval, "manage_plan");
-
-  assert.equal(
-    resolvePlanCtaState({
-      sessionStatus: "authenticated",
-      currentPlan: "Pro",
-      cardPlan: "Max",
-      hasActiveSubscription: true,
-      currentBillingInterval: null,
-    }),
-    "manage_plan"
-  );
+test("an unknown billing interval still opens the change screen, in both directions", () => {
+  // The stored interval is null for a subscription synced before the field
+  // existed. The change screen then omits it and the server quotes on the
+  // interval Stripe reports, so support is no longer the answer.
+  for (const [currentPlan, cardPlan] of [
+    ["Pro", "Max"],
+    ["Max", "Pro"],
+  ]) {
+    assert.equal(
+      resolvePlanCtaState({
+        sessionStatus: "authenticated",
+        currentPlan,
+        cardPlan,
+        hasActiveSubscription: true,
+      }),
+      "change_plan",
+      `${currentPlan} -> ${cardPlan} without interval`
+    );
+    assert.equal(
+      resolvePlanCtaState({
+        sessionStatus: "authenticated",
+        currentPlan,
+        cardPlan,
+        hasActiveSubscription: true,
+        currentBillingInterval: null,
+      }),
+      "change_plan",
+      `${currentPlan} -> ${cardPlan} with null interval`
+    );
+  }
 });
 
 test("a lapsed subscriber buys again rather than changing a subscription that is gone", () => {

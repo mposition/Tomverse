@@ -2,7 +2,8 @@
 
 Scope: the settings list (the tabbed panel inside `components/auth/AuthButton.tsx`),
 the entries that own a detail page — external conversation import, account
-memory, assistant profiles, account data and email notifications — the upward
+memory, assistant profiles, account data, email notifications and scheduled
+tasks — the upward
 navigation on those detail pages, and the control that leaves the settings
 hierarchy.
 
@@ -106,9 +107,25 @@ which tab happened to exist first:
 | `account-data` | `data` | `auth.dataTab` | `settingsNav.dataAndPersonalization` |
 | `email-notifications` | `account` | `auth.accountTab` | its account communication row |
 | `api-keys` | `developer` | `externalApi.developerTab` | its key summary card (section 2.3) |
+| `scheduled-tasks` | `ai` | `settingsNav.aiPersonalization` | its own group, "Scheduled tasks" |
+
+Scheduled tasks (2026-11-27) sit on the AI personalization tab because they are
+about what the AI does for the account, and in a group of their own because the
+tab's existing group is named for account memory and would mislabel them. The
+group renders nothing while `feature.scheduledTasksEnabled` is off and the
+account has saved no task, so the switch being off leaves this tab as it was. It
+is a group with one row, not a full-width card, and the row is an ordinary
+`SettingsEntryRow` (`components/scheduledTasks/ScheduledTasksSettingsEntry.tsx`).
 
 The tabs, in order: account, preferences, AI assistants, AI personalization, data,
 **developer**, plan.
+
+Personal instructions (what Tomverse should know about the account owner, how
+to answer, and the answer style) are a card on the AI personalization tab
+(`components/settings/PersonalInstructionsSettings.tsx`), not a row: the whole
+setting fits on the tab, so it has no detail page and no section id. It saves
+through its own `/api/user/personalization`, never through the panel's
+every-dirty-field save.
 
 Email notifications live on the default Account tab because they are choices
 about communication to the signed-in identity, not stored-data operations.

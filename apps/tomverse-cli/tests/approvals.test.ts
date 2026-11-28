@@ -147,3 +147,27 @@ test("an 'always' answer skips only matching questions for the rest of the proce
         await gateway.stop();
     }
 });
+
+test("opening a public site in the browser is remembered apart from web_fetch, never saved as a rule, and a click on a public site is never remembered", async () => {
+    const { ruleForApproval } = await import("../src/permissions.js");
+    const memory = new ApprovalMemory();
+    const root = process.platform === "win32" ? "C:\work\repo" : "/work/repo";
+    const navigate = { approvalId: "a", toolCallId: "t", toolName: "browser_navigate", input: {}, root, web: { url: "https://docs.example.com/x", host: "docs.example.com" } } as ApprovalView;
+    const fetch = { ...navigate, toolName: "web_fetch" } as ApprovalView;
+    assert.equal(memory.match(navigate), null);
+    assert.equal(memory.remember(navigate), "web_host");
+    assert.equal(memory.match(navigate), "web_host");
+    assert.equal(memory.match(fetch), null, "web_fetch is asked again");
+    assert.ok(memory.describe().some((line) => /opening pages of docs\.example\.com in the browser tab/.test(line)));
+    assert.equal(ruleForApproval(navigate), null, "an answer about the browser never becomes a web_fetch allow rule");
+    assert.deepEqual(ruleForApproval(fetch), { effect: "allow", tool: "web_fetch", pattern: "docs.example.com" });
+    const click = (origin: string) => ({ approvalId: "a", toolCallId: "t", toolName: "browser_click", input: {}, root, browser: { action: "click", origin, url: origin + "/", selector: "#a" } }) as ApprovalView;
+    assert.equal(memory.canRemember(click("http://localhost:3000")), true);
+    assert.equal(memory.canRemember(click("http://127.0.0.1:5173")), true);
+    for (const origin of ["https://example.com", "https://docs.example.com", "http://example.com:3000"]) {
+        assert.equal(memory.canRemember(click(origin)), false, origin);
+        assert.equal(memory.remember(click(origin)), null, origin);
+    }
+    memory.clear();
+    assert.equal(memory.match(navigate), null);
+});

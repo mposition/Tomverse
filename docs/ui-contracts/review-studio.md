@@ -67,6 +67,53 @@ against loopback responses (no provider/DB). It covers one execution across
 reopens, background completion, tabs and evidence, saved reload, changed input,
 identity scope, guest reuse, dark mode and mobile exclusion.
 
+## Classic and mobile AI Review while answers finish (2026-11-27)
+
+Classic and mobile keep their entry rule: two completed answers can be
+reviewed while another model is still generating (state 2 of
+`docs/ui-contracts/comparison-action-rail.md`). Their dialog is keyed by
+identity and conversation only. A newly finished answer refreshes the setup
+step, but never remounts or reloads a review that is running or being read:
+that run is billed for the answers it started with, and its saved result is
+looked up by that turn. Returning to the setup step catches up with the latest
+turn; for a guest it re-reads the page's latest local turn, so the preview and
+the run include an answer that finished on the setup step. Coverage:
+`node --import tsx scripts/verify-ai-review-dialog.mjs` (real dialog, loopback
+fixtures) and `tests/comparisonReviewDialogMount.test.mjs`.
+
+One account review runs at a time per input. The signed-in POST claims
+`(account, input hash)` before its cache read, Free quota and reviewers, and
+answers a second request for the same input with `409 DUPLICATE_REQUEST`
+without running, charging or reserving anything -- unless a fresh saved row
+of that input already exists (the other request is a cache hit, or a run that
+has saved), which it then returns as the usual 0-credit cache answer. The
+claim is released on every outcome. A live run renews it every 5 minutes (a
+third of the TTL; the renewal only moves the holder's own row forward), so a
+run of any length keeps it; it expires 15 minutes after its process dies
+(`lib/comparisonReviewInFlight.ts`; it uses the existing `ChatUsageBucket`
+table, no migration). A run whose claim was taken over anyway logs
+`comparison_review_claim_lost` and still finishes. Classic, mobile web and Studio
+answer that 409 with one localized notice (`chat.aiReviewAlreadyRunningRetryLater`:
+the review of these answers is already running; once it finishes, running it
+again returns the saved result at no extra charge, and if answers are added
+meanwhile it runs as a new review) instead of a failure or the server's
+message. They do not poll. In the dialog the notice belongs to the mode and
+synthesis option that were refused: another choice is a different review and
+does not show it. Neither the notice nor a run failure is cleared by a setup
+refresh -- only by the next run or by closing -- and the setup's scope line
+shows how many answers a run would now cover. The run button stays available;
+Studio's entry reads "check for the result" rather than a failure and retry.
+A refused attempt is not counted as `comparison_review_started`: an account
+start is counted when the server answers (or never does), a guest start on the
+click as before. The GET is unchanged: the latest turn and the chosen
+criteria. Coverage: `tests/server-contract/comparison-review-route.test.ts`,
+`tests/server-contract/comparison-review-run-claim.test.ts`,
+`tests/comparisonReviewInFlight.test.mjs` and both browser harnesses.
+
+Known limitation (unchanged by this work): the GET serves the latest turn
+only, so a saved review of an earlier turn shape (two answers, before a third
+finished) has no way back into view once the latest turn has moved on.
+
 ## Continue a saved analysis in Chat (2026-11-14)
 
 Signed-in owners can preview a completed normal Review's current reviewer or
@@ -209,6 +256,12 @@ or substitution of an unselected provider is added. Providers without such a
 model continue through an eligible regular model. Professional retains the
 existing manual expansion. Existing admission, entitlement and execution
 limits apply to any selected research model.
+
+Desktop offers the same `+` menu row only in Professional and only where the server names `desktopReviewDeepResearch`
+(`TOMVERSE_DESKTOP_REVIEW_DEEP_RESEARCH_ENABLED`, default off). A run is one more column of the Review that
+the question is put to alone, at that model's own price; the other columns keep their transcript. The Review holds
+the models the composer shows plus Deep Research, so the row is switched off, with its reason, while every place of the
+plan is taken. Coverage: `apps/desktop/tests/reviewColumns.e2e.ts`.
 
 ## Credit presentation (owner direction, 2026-10-20)
 

@@ -5,6 +5,19 @@ import {
   INTERNAL_AUTH_HEADER_PREFIX,
   MOBILE_IDENTITY_HEADERS,
   applyMobileIdentityHeaders,
+  desktopBillingEnabled,
+  desktopChatTurnField,
+  desktopComposerToolsEnabled,
+  desktopDeepResearchEnabled,
+  desktopDriveEnabled,
+  desktopPluginSourcesEnabled,
+  desktopPluginsEnabled,
+  desktopPromptRefinerEnabled,
+  desktopReadApiRoute,
+  desktopRemoteControlEnabled,
+  desktopReviewDeepResearchEnabled,
+  desktopVoiceEnabled,
+  desktopWriteApiRoute,
   nativeBearerVerdict,
   nativeArtifactRevisionBearerRoute,
   nativeParityBearerRoute,
@@ -24,6 +37,303 @@ import { N1B_BEARER_ROUTES } from "../lib/mobileAuthContract.ts";
  */
 
 const REGISTERED = "/api/conversations";
+
+test("Desktop remote control enrols only the PC's own sync path, and only for the Desktop bearer", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_REMOTE_CONTROL_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  const sync = "/api/desktop/remote/sync";
+  try {
+    for (const key of switches) delete process.env[key];
+    assert.equal(desktopRemoteControlEnabled(), false);
+    assert.equal(desktopWriteApiRoute(sync, "POST"), false);
+    // Enrolled with Desktop authentication, so the bearer is verified and the route itself says "not available".
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    assert.equal(desktopRemoteControlEnabled(), false);
+    assert.equal(desktopWriteApiRoute(sync, "POST"), true);
+    assert.equal(desktopWriteApiRoute(sync, "DELETE"), true);
+    for (const method of ["GET", "PUT", "PATCH"]) assert.equal(desktopWriteApiRoute(sync, method), false, method);
+    assert.equal(desktopWriteApiRoute(sync + "/x", "POST"), false);
+    process.env.TOMVERSE_DESKTOP_REMOTE_CONTROL_ENABLED = "true";
+    assert.equal(desktopRemoteControlEnabled(), true);
+    // The web screen's routes take the signed-in browser session only; a Desktop bearer never reaches them.
+    for (const [path, method] of [["/api/desktop/remote/devices", "GET"], ["/api/desktop/remote/commands", "POST"]]) {
+      assert.equal(desktopWriteApiRoute(path, method), false, path);
+      assert.equal(desktopReadApiRoute(path, method), false, path);
+    }
+    delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    assert.equal(desktopRemoteControlEnabled(), false);
+    assert.equal(desktopWriteApiRoute(sync, "POST"), false);
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
+});
+
+test("Desktop prepares a turn's context with Chat or Review writes on, and with neither it does not", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_REVIEW_ENABLED", "TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  try {
+    for (const key of switches) delete process.env[key];
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    assert.equal(desktopWriteApiRoute("/api/chat/context", "POST"), false);
+    // A Review turn that one model answers alone carries memory and the assistant through its own context.
+    process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED = "true";
+    assert.equal(desktopWriteApiRoute("/api/chat/context", "POST"), true);
+    assert.equal(desktopWriteApiRoute("/api/chat/context", "GET"), false);
+    delete process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED;
+    process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED = "true";
+    assert.equal(desktopWriteApiRoute("/api/chat/context", "POST"), true);
+    delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    assert.equal(desktopWriteApiRoute("/api/chat/context", "POST"), false);
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
+});
+
+test("Desktop reaches the two voice routes only behind its own switch, on top of Desktop sign-in and Chat writes", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED", "TOMVERSE_DESKTOP_REVIEW_ENABLED", "TOMVERSE_DESKTOP_VOICE_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  const routes = ["/api/chat/voice", "/api/chat/voice-transcription"];
+  try {
+    for (const key of switches) delete process.env[key];
+    for (const key of switches.slice(0, 3)) process.env[key] = "true";
+    assert.equal(desktopVoiceEnabled(), false);
+    for (const path of routes) assert.equal(desktopWriteApiRoute(path, "POST"), false, path);
+    process.env.TOMVERSE_DESKTOP_VOICE_ENABLED = "1";
+    assert.equal(desktopVoiceEnabled(), false);
+    process.env.TOMVERSE_DESKTOP_VOICE_ENABLED = "true";
+    assert.equal(desktopVoiceEnabled(), true);
+    for (const path of routes) {
+      assert.equal(desktopWriteApiRoute(path, "POST"), true, path);
+      for (const method of ["GET", "PUT", "PATCH", "DELETE"]) assert.equal(desktopWriteApiRoute(path, method), false, method + " " + path);
+      assert.equal(desktopReadApiRoute(path, "GET"), false, path);
+      assert.equal(desktopWriteApiRoute(path + "/extra", "POST"), false);
+    }
+    // Neither route is opened by Review writes alone, and neither without Desktop sign-in.
+    delete process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED;
+    assert.equal(desktopVoiceEnabled(), false);
+    for (const path of routes) assert.equal(desktopWriteApiRoute(path, "POST"), false, path);
+    process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED = "true";
+    delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    for (const path of routes) assert.equal(desktopWriteApiRoute(path, "POST"), false, path);
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
+});
+
+test("Desktop analysis and composer tools require their own enrollment", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_REVIEW_ENABLED", "TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED",
+    "TOMVERSE_DESKTOP_REVIEW_ANALYSIS_ENABLED", "TOMVERSE_DESKTOP_COMPOSER_TOOLS_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  const analysis = "/api/conversations/review-1/comparison-reviews";
+  try {
+    for (const key of switches) delete process.env[key];
+    for (const key of switches.slice(0, 3)) process.env[key] = "true";
+    assert.equal(desktopWriteApiRoute(analysis, "GET"), false);
+    assert.equal(desktopWriteApiRoute(analysis, "POST"), false);
+    assert.equal(desktopComposerToolsEnabled(), false);
+    for (const key of switches.slice(3)) process.env[key] = "true";
+    assert.equal(desktopWriteApiRoute(analysis, "GET"), true);
+    assert.equal(desktopWriteApiRoute(analysis, "POST"), true);
+    assert.equal(desktopWriteApiRoute(analysis, "PATCH"), false);
+    assert.equal(desktopWriteApiRoute(analysis + "/verify-item", "POST"), false);
+    assert.equal(desktopWriteApiRoute("/api/conversations/%2Freview/comparison-reviews", "POST"), false);
+    assert.equal(desktopComposerToolsEnabled(), true);
+    delete process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED;
+    delete process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED;
+    assert.equal(desktopWriteApiRoute(analysis, "GET"), false);
+    assert.equal(desktopComposerToolsEnabled(), false);
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
+});
+
+test("Desktop billing screens are off unless their own switch and the account settings session are both on", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED", "TOMVERSE_DESKTOP_BILLING_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  try {
+    for (const key of switches) delete process.env[key];
+    assert.equal(desktopBillingEnabled(), false);
+    for (const key of switches.slice(0, 2)) process.env[key] = "true";
+    assert.equal(desktopBillingEnabled(), false);
+    process.env.TOMVERSE_DESKTOP_BILLING_ENABLED = "1";
+    assert.equal(desktopBillingEnabled(), false);
+    process.env.TOMVERSE_DESKTOP_BILLING_ENABLED = "true";
+    assert.equal(desktopBillingEnabled(), true);
+    delete process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED;
+    assert.equal(desktopBillingEnabled(), false);
+    process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED = "true";
+    delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    assert.equal(desktopBillingEnabled(), false);
+    // A display switch: it enrols no bearer route.
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    for (const path of ["/api/billing/checkout", "/api/billing/credit-packs", "/api/billing/plan-change/confirm"]) {
+      assert.equal(desktopWriteApiRoute(path, "POST"), false, path);
+    }
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
+});
+
+test("Desktop plugin sources are off unless their own switch and the Desktop session are both on, and are independent of the connector switch", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_PLUGIN_SOURCES_ENABLED", "TOMVERSE_DESKTOP_PLUGINS_ENABLED", "TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  try {
+    for (const key of switches) delete process.env[key];
+    assert.equal(desktopPluginSourcesEnabled(), false);
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    assert.equal(desktopPluginSourcesEnabled(), false, "the session alone opens nothing");
+    process.env.TOMVERSE_DESKTOP_PLUGIN_SOURCES_ENABLED = "1";
+    assert.equal(desktopPluginSourcesEnabled(), false);
+    process.env.TOMVERSE_DESKTOP_PLUGIN_SOURCES_ENABLED = "true";
+    assert.equal(desktopPluginSourcesEnabled(), true, "the connector switch is not needed");
+    assert.equal(desktopPluginsEnabled(), false, "and does not open the connector screens");
+    delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    assert.equal(desktopPluginSourcesEnabled(), false);
+    // It enrols no bearer route.
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    assert.equal(desktopWriteApiRoute("/api/plugins/install", "POST"), false);
+    assert.equal(desktopReadApiRoute("/api/plugins/install", "GET"), false);
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index];
+    });
+  }
+});
+
+test("Desktop connector screens are off unless their own switch and the account settings session are both on", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED", "TOMVERSE_DESKTOP_PLUGINS_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  try {
+    for (const key of switches) delete process.env[key];
+    assert.equal(desktopPluginsEnabled(), false);
+    for (const key of switches.slice(0, 2)) process.env[key] = "true";
+    assert.equal(desktopPluginsEnabled(), false);
+    process.env.TOMVERSE_DESKTOP_PLUGINS_ENABLED = "1";
+    assert.equal(desktopPluginsEnabled(), false);
+    process.env.TOMVERSE_DESKTOP_PLUGINS_ENABLED = "true";
+    assert.equal(desktopPluginsEnabled(), true);
+    delete process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED;
+    assert.equal(desktopPluginsEnabled(), false);
+    process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED = "true";
+    delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    assert.equal(desktopPluginsEnabled(), false);
+    // A display switch: it enrols no bearer route.
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    for (const path of ["/api/mcp/connections", "/api/mcp/oauth/start", "/api/mcp/invocations/abc"]) {
+      assert.equal(desktopWriteApiRoute(path, "POST"), false, path);
+    }
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
+});
+
+test("a Desktop turn may carry the device position, and a chosen plugin only behind the plugins switch", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED", "TOMVERSE_DESKTOP_PLUGINS_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  try {
+    for (const key of switches) delete process.env[key];
+    for (const key of ["messages", "modelId", "conversationId", "assistantMessageId", "sourceUserMessageId", "reasoningEffort",
+      "webSearchMode", "admissionToken", "contextBundle", "deepResearchDepth", "currentLocation"]) {
+      assert.equal(desktopChatTurnField(key), true, key);
+    }
+    // Fields the web sends that a Desktop turn has no use for stay refused.
+    for (const key of ["mcpConnectionId", "turnstileToken", "promptRefinerDecision", "guestAutoCapability", "researchMode",
+      "routerLocationFusion", "projectReferences", "action", "__proto__", "constructor"]) {
+      assert.equal(desktopChatTurnField(key), false, key);
+    }
+    for (const key of switches) process.env[key] = "true";
+    assert.equal(desktopChatTurnField("mcpConnectionId"), true);
+    assert.equal(desktopChatTurnField("turnstileToken"), false);
+    process.env.TOMVERSE_DESKTOP_PLUGINS_ENABLED = "1";
+    assert.equal(desktopChatTurnField("mcpConnectionId"), false);
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
+});
+
+test("Desktop Drive and Deep Research are opt-in and retain the existing attachment and Chat gates", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED",
+    "TOMVERSE_DESKTOP_ATTACHMENTS_ENABLED", "TOMVERSE_DESKTOP_GOOGLE_DRIVE_ENABLED", "TOMVERSE_DESKTOP_DEEP_RESEARCH_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  const status = "/api/chat/deep-research/status";
+  try {
+    for (const key of switches) delete process.env[key];
+    for (const key of switches.slice(0, 3)) process.env[key] = "true";
+    assert.equal(desktopDriveEnabled(), false);
+    assert.equal(desktopDeepResearchEnabled(), false);
+    assert.equal(desktopWriteApiRoute(status, "POST"), false);
+    for (const key of switches.slice(3)) process.env[key] = "true";
+    assert.equal(desktopDriveEnabled(), true);
+    assert.equal(desktopWriteApiRoute(status, "POST"), true);
+    assert.equal(desktopWriteApiRoute(status, "GET"), false);
+    assert.equal(desktopWriteApiRoute("/api/chat/research/runs", "POST"), false);
+    delete process.env.TOMVERSE_DESKTOP_ATTACHMENTS_ENABLED;
+    assert.equal(desktopDriveEnabled(), false);
+    assert.equal(desktopWriteApiRoute(status, "POST"), true);
+    delete process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED;
+    assert.equal(desktopWriteApiRoute(status, "POST"), false);
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
+});
+
+test("Deep Research from a Desktop Review has its own switch on top of Review writes and opens only the status poll", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED", "TOMVERSE_DESKTOP_REVIEW_ENABLED",
+    "TOMVERSE_DESKTOP_DEEP_RESEARCH_ENABLED", "TOMVERSE_DESKTOP_REVIEW_DEEP_RESEARCH_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  const status = "/api/chat/deep-research/status";
+  try {
+    for (const key of switches) delete process.env[key];
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED = "true";
+    assert.equal(desktopReviewDeepResearchEnabled(), false);
+    assert.equal(desktopWriteApiRoute(status, "POST"), false);
+    // Chat's switch does not open a Review, and the Review switch does not open Chat.
+    process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED = "true";
+    process.env.TOMVERSE_DESKTOP_DEEP_RESEARCH_ENABLED = "true";
+    assert.equal(desktopReviewDeepResearchEnabled(), false);
+    assert.equal(desktopDeepResearchEnabled(), true);
+    delete process.env.TOMVERSE_DESKTOP_DEEP_RESEARCH_ENABLED;
+    process.env.TOMVERSE_DESKTOP_REVIEW_DEEP_RESEARCH_ENABLED = "true";
+    assert.equal(desktopReviewDeepResearchEnabled(), true);
+    assert.equal(desktopDeepResearchEnabled(), false);
+    assert.equal(desktopWriteApiRoute(status, "POST"), true);
+    assert.equal(desktopWriteApiRoute(status, "GET"), false);
+    assert.equal(desktopWriteApiRoute("/api/chat/research/runs", "POST"), false);
+    delete process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED;
+    assert.equal(desktopReviewDeepResearchEnabled(), false);
+    assert.equal(desktopWriteApiRoute(status, "POST"), false);
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
+});
 
 test("generated-file Native enrollment fails closed without a resolved switch and permits only versions and input cleanup", () => {
   for (const [path, method] of [["/api/chat", "DELETE"], ["/api/artifacts/file-1/versions", "GET"]]) {
@@ -260,5 +570,36 @@ test("the folder-era history calls stay open to parity while the project workspa
   for (const [path, method] of [["/api/projects/p1", "GET"], ["/api/projects/p1/materials", "GET"], ["/api/projects/p1/memories", "POST"], ["/api/chat/context", "POST"]]) {
     assert.equal(nativeProjectWorkspaceBearerRoute(path, method), true, `${method} ${path}`);
     assert.equal(nativeHistoryFolderBearerRoute(path, method), false, `${method} ${path}`);
+  }
+});
+
+test("a Desktop turn may carry a Prompt Refiner decision only while the Desktop Refiner switch and what it needs are all on", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED", "TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED",
+    "TOMVERSE_DESKTOP_PROMPT_REFINER_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  try {
+    for (const key of switches) delete process.env[key];
+    assert.equal(desktopPromptRefinerEnabled(), false);
+    assert.equal(desktopChatTurnField("promptRefinerDecision"), false);
+    // Each switch alone, and every set missing one, leaves the field refused: the Refiner rides on Chat writes and the settings session.
+    for (const missing of switches) {
+      for (const key of switches) process.env[key] = key === missing ? "false" : "true";
+      assert.equal(desktopPromptRefinerEnabled(), false, missing);
+      assert.equal(desktopChatTurnField("promptRefinerDecision"), false, missing);
+    }
+    for (const key of switches) process.env[key] = "true";
+    assert.equal(desktopPromptRefinerEnabled(), true);
+    assert.equal(desktopChatTurnField("promptRefinerDecision"), true);
+    // Only that one field opens: the two Refiner inputs a browser could forge stay refused.
+    for (const key of ["promptRefinerPrompt", "promptRefinerSuggestion", "refinedPrompt", "promptRefinerMode"]) {
+      assert.equal(desktopChatTurnField(key), false, key);
+    }
+    process.env.TOMVERSE_DESKTOP_PROMPT_REFINER_ENABLED = "1";
+    assert.equal(desktopChatTurnField("promptRefinerDecision"), false);
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
   }
 });

@@ -1,6 +1,8 @@
 export const dynamic = "force-dynamic";
 
 import { randomUUID } from "node:crypto";
+import { DESKTOP_APP_ORIGIN, desktopDeepResearchEnabled, desktopReviewDeepResearchEnabled } from "@/lib/nativeBearerGate";
+import { desktopConversationWriteProduct } from "@/lib/desktopReadApiContract";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { z } from "zod";
 import { extendChatReservationExpiry } from "@/lib/chatSecurity";
@@ -89,9 +91,13 @@ export async function POST(request: Request) {
 
     const conversation = await prisma.conversation.findUnique({
       where: { id: job.conversationId },
-      select: { userId: true, password: true, passwordVersion: true },
+      select: { userId: true, password: true, passwordVersion: true, productKey: true, kind: true },
     });
-    if (!conversation || conversation.userId !== session.user.id) {
+    const desktop = request.headers.get("origin") === DESKTOP_APP_ORIGIN;
+    // A Desktop poll reads the research of a Chat or of a Review, each only while its own switch is on.
+    const desktopProduct = desktop ? desktopConversationWriteProduct(conversation) : null;
+    if (!conversation || conversation.userId !== session.user.id ||
+        (desktop && !(desktopProduct === "chat" ? desktopDeepResearchEnabled() : desktopProduct === "review" && desktopReviewDeepResearchEnabled()))) {
       return jsonError("Conversation not found.", "NOT_FOUND", 404, traceId);
     }
     if (

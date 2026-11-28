@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { sessionCost } from "../src/runtime.js";
 import { DEFAULT_MODELS, FakeGateway } from "./fakeGateway.js";
 import { makeRepo, makeRunner } from "./helpers.js";
 
@@ -10,7 +11,7 @@ test("Smart Adaptive keeps its unsupported pin and records Default through tools
         script: (_body, index) => index === 0 ? { toolCalls: [{ name: "read_file", args: { path: "sum.js" } }] } : { text: "Done" },
     }).start();
     try {
-        const { runner, journal } = await makeRunner(fake, makeRepo(), { model: "smart-adaptive", readOnly: true });
+        const { runner, journal, client } = await makeRunner(fake, makeRepo(), { model: "smart-adaptive", readOnly: true });
         assert.equal(await runner.runTask("Read the file", "high"), "success");
         assert.equal(fake.completions.length, 2);
         assert.equal(journal.state.model.pinned, "fake-coder");
@@ -26,6 +27,9 @@ test("Smart Adaptive keeps its unsupported pin and records Default through tools
         assert.equal(journal.state.generations.at(-1)!.appliedEffort, "default");
         assert.ok(fake.completions.slice(1).every(request => request.body.model === "fake-coder"));
         assert.equal(journal.state.tasks.at(-1)!.effort, "high");
+        assert.deepEqual(await sessionCost(client, journal), { requests: 4, charged: 12, held: 0, unknown: [] });
+        assert.equal(journal.state.generations.find(record => record.purpose === "compact")?.receipt?.chargedCredits, 3);
+        assert.equal(fake.completions.length, 4, "receipt reads do not repeat generation");
         journal.release();
     } finally {
         await fake.stop();

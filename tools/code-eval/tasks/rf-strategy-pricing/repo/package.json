@@ -1,0 +1,8 @@
+{
+  "name": "rf-strategy-pricing",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

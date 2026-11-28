@@ -20,6 +20,10 @@ import {
     formatExportMessage,
 } from "@/lib/exportConversation";
 import {
+    formatConversationHeaderMarkdown,
+    formatExportMessagePageMarkdown,
+} from "@/lib/exportConversationMarkdown";
+import {
     conversationLockedResponse,
     hasConversationUnlockGrant,
 } from "@/lib/conversationLock";
@@ -173,7 +177,10 @@ export async function GET(
         }
 
         const conversation = await prisma.conversation.findFirst({
-            where: { id: conversationId, userId },
+            // A temporary Chat is not exportable (lib/temporaryChatAccess.ts);
+            // it has no continuation bridge, so the source path above never
+            // finds one either.
+            where: { id: conversationId, userId, temporaryExpiresAt: null },
             select: {
                 id: true,
                 title: true,
@@ -245,6 +252,11 @@ export async function GET(
                 copy: continuationExportCopy(req),
             });
 
+        // `?format=md` is the same conversation, behind the same plan, rate
+        // limit, lock and kind checks above, written as Markdown. The
+        // `?include=source` document above stays text-only.
+        const asMarkdown = new URL(req.url).searchParams.get("format") === "md";
+
         const encoder = new TextEncoder();
         let cursor: string | undefined;
         let headerPending = true;
@@ -252,9 +264,15 @@ export async function GET(
             async pull(controller) {
                 if (headerPending) {
                     headerPending = false;
+                    const headerInput = {
+                        title: displayTitle,
+                        createdAt: conversation.createdAt,
+                        productKey: conversation.productKey,
+                    };
+                    const headerLines = [...continuationProvenance, ...titleHeaderLines];
                     controller.enqueue(
                         encoder.encode(
-                            `${formatConversationHeader({ title: displayTitle, createdAt: conversation.createdAt, productKey: conversation.productKey }, personalizationNotice, [...continuationProvenance, ...titleHeaderLines])}\n`
+                            `${(asMarkdown ? formatConversationHeaderMarkdown : formatConversationHeader)(headerInput, personalizationNotice, headerLines)}\n`
                         )
                     );
                     return;
@@ -281,7 +299,11 @@ export async function GET(
 
                 cursor = messages.at(-1)?.id;
                 controller.enqueue(
-                    encoder.encode(messages.map(formatExportMessage).join("\n"))
+                    encoder.encode(
+                        asMarkdown
+                            ? formatExportMessagePageMarkdown(messages)
+                            : messages.map(formatExportMessage).join("\n")
+                    )
                 );
 
                 if (messages.length < MESSAGE_PAGE_SIZE) {
@@ -292,9 +314,12 @@ export async function GET(
 
         return new Response(stream, {
             headers: {
-                "Content-Type": "text/plain; charset=utf-8",
-                "Content-Disposition":
-                    conversationExportContentDisposition(displayTitle),
+                "Content-Type": asMarkdown
+                    ? "text/markdown; charset=utf-8"
+                    : "text/plain; charset=utf-8",
+                "Content-Disposition": asMarkdown
+                    ? conversationExportContentDisposition(displayTitle, ".md")
+                    : conversationExportContentDisposition(displayTitle),
                 "Cache-Control": "no-store",
                 "X-Content-Type-Options": "nosniff",
             },

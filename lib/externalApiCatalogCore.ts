@@ -1,6 +1,6 @@
 import type { AiModel, ModelTier } from "@/lib/models";
 import { canUseModelWithPlan } from "@/lib/models";
-import { modelReasoningEfforts, type ExplicitReasoningEffort } from "@/lib/reasoningEffort";
+import { modelReasoningEffortSteps, modelReasoningEfforts, type ReasoningEffortStep } from "@/lib/reasoningEffort";
 import { EXTERNAL_API_PROTOCOLS, protocolsForProvider, type ExternalApiProtocol } from "@/lib/externalApiProtocols";
 
 /**
@@ -114,7 +114,7 @@ export type ExternalApiModelCapabilities = {
     tools: true;
     vision: boolean;
     reasoning: boolean;
-    reasoningEfforts?: readonly ExplicitReasoningEffort[];
+    reasoningEfforts?: readonly ReasoningEffortStep[];
     contextWindowTokens: number;
     maxOutputTokens: number;
     creditWeight: number;
@@ -144,7 +144,8 @@ export type ExternalApiModelCapabilities = {
 
 export const externalApiModelCapabilities = (
     model: AiModel,
-    limits: { maxInputTokens: number; maxOutputTokens: number; creditWeight: number }
+    limits: { maxInputTokens: number; maxOutputTokens: number; creditWeight: number },
+    options: { effortSteps?: boolean } = {}
 ): ExternalApiModelCapabilities => ({
     ...(isSmartAdaptiveOnlyModel(model) ? { routerPickOnly: true as const } : {}),
     id: model.id,
@@ -153,7 +154,7 @@ export const externalApiModelCapabilities = (
     tools: true,
     vision: model.inputCapabilities?.image === true,
     reasoning: Boolean(model.reasoning && model.reasoning !== "none"),
-    reasoningEfforts: modelReasoningEfforts(model),
+    reasoningEfforts: options.effortSteps ? modelReasoningEffortSteps(model) : modelReasoningEfforts(model),
     // What this API will accept, which can be less than the provider's own
     // window: the account input ceiling applies here as it does in Chat.
     contextWindowTokens: Math.min(

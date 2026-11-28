@@ -47,7 +47,7 @@ const installed = join(project, "node_modules", "@tomverse", "cli");
 const manifest = JSON.parse(readFileSync(join(installed, "package.json"), "utf8"));
 if (manifest.workspaces || manifest.devDependencies) fail("the published manifest carries workspace or dev fields");
 const deps = Object.keys(manifest.dependencies ?? {}).sort();
-if (deps.join(",") !== "@ai-sdk/openai,ai,zod") fail(`unexpected runtime dependencies: ${deps.join(", ")}`);
+if (deps.join(",") !== "@ai-sdk/openai,@modelcontextprotocol/sdk,ai,zod") fail(`unexpected runtime dependencies: ${deps.join(", ")}`);
 for (const [name, version] of Object.entries(manifest.dependencies)) if (!/^\d+\.\d+\.\d+$/.test(version)) fail(`${name} is not pinned (${version})`);
 
 // 3. Licenses of everything that would be installed for a user.

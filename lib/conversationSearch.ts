@@ -173,10 +173,23 @@ export async function searchConversationMessages(input: {
     projectId?: string;
     /** The current conversation, whose transcript the model already has. */
     excludeConversationId?: string;
+    /**
+     * The model's past-chat search (lib/chatHistoryReference.ts). Only this
+     * account's own Tomverse conversations that are not locked (whatever the
+     * request has unlocked), not in a project, and whose memory is not off are
+     * candidates, and imported transcripts are skipped (imported text reaches
+     * a live prompt only as a validated memory). Applied inside the candidate
+     * query, before the row limit, so excluded conversations can never take
+     * the slots an eligible one needs. `accountMemoryDefaultOff` is the
+     * account default that a conversation in `inherit` mode follows.
+     */
+    modelReference?: { accountMemoryDefaultOff: boolean };
 }): Promise<ConversationSearchAnswer> {
     const { request, userId, query, displayTimeZone } = input;
     const projectScope = input.projectId ?? null;
     const excluded = input.excludeConversationId ?? "";
+    const modelReference = Boolean(input.modelReference);
+    const memoryDefaultOff = input.modelReference?.accountMemoryDefaultOff ?? false;
     const sourceTimeoutMs = input.sourceTimeoutMs ?? SOURCE_SEARCH_TIMEOUT_MS;
     const pattern = escapeLikePattern(query);
 
@@ -304,8 +317,20 @@ export async function searchConversationMessages(input: {
                     LEFT JOIN "ConversationContinuationBridge" b ON b."conversationId" = c.id
                     LEFT JOIN "ExternalConversation" e ON e.id = b."externalConversationId"
                     WHERE c."userId" = ${userId}
+                      -- The only messages in an image conversation are Studio
+                      -- tool requests, which are not conversation history
+                      -- (lib/studioImageReference.ts).
+                      AND c.kind <> 'image'
+                      -- A temporary Chat is never searchable
+                      -- (lib/temporaryChatAccess.ts).
+                      AND c."temporaryExpiresAt" IS NULL
                       AND (${projectScope}::text IS NULL OR c."projectId" = ${projectScope})
                       AND c.id <> ${excluded}
+                      -- The model's search: never a locked conversation, a project's, or one whose
+                      -- memory is off (an unrecognised mode follows the account default).
+                      AND (NOT ${modelReference}::boolean OR (
+                           c.password IS NULL AND c."projectId" IS NULL
+                           AND NOT (c."memoryMode" = 'off' OR (c."memoryMode" <> 'on' AND ${memoryDefaultOff}::boolean))))
                       AND NOT (c.id = ANY(${deniedConversationIds}::text[]))
                       -- A conversation whose bridge or source is not this
                       -- account's is dropped here, before the window and the
@@ -345,7 +370,7 @@ export async function searchConversationMessages(input: {
                 messages: [],
                 ordinals: new Map(),
             };
-            if (authorizedSnapshotIds.length > 0) {
+            if (authorizedSnapshotIds.length > 0 && !modelReference) {
                 const startedAt = Date.now();
                 const remaining = () => {
                     const left = sourceTimeoutMs - (Date.now() - startedAt);

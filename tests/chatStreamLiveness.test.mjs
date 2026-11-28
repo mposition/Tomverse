@@ -114,13 +114,22 @@ test("the keepalive interval and the idle budget both clear the proxy read timeo
 
 /* ------------------------------------------------- the first response ---- */
 
+/** The server's first-token keepalive, every interval, for `ms`. */
+const keepalivesFor = (watchdog, advance, ms) => {
+  for (let elapsed = 0; elapsed < ms; elapsed += CHAT_STREAM_KEEPALIVE_INTERVAL_MS) {
+    advance(CHAT_STREAM_KEEPALIVE_INTERVAL_MS);
+    watchdog.noteKeepalive(CHAT_STREAM_KEEPALIVE_INTERVAL_MS);
+  }
+};
+
 test("a first token later than the old 90s but inside the budget is not touched", () => {
   const { watchdog, advance, expiries } = watch();
 
   advance(1_500);
   watchdog.noteHeaders();
-  // Two minutes of adaptive thinking. The old timer aborted at 90s.
-  advance(120_000);
+  // Two minutes of adaptive thinking, the server writing its keepalive the
+  // whole time. The old timer aborted at 90s.
+  keepalivesFor(watchdog, advance, 120_000);
   assert.deepEqual(expiries, []);
   assert.equal(watchdog.snapshot().phase, "first_response");
 
@@ -132,7 +141,8 @@ test("a first token later than the old 90s but inside the budget is not touched"
 test("a request whose server-side work outlasts 90s before the headers survives", () => {
   // The attachment case. A deck is read and extracted before the provider is
   // called at all, so the whole extraction lands in `pre_headers` -- which
-  // the old single timer counted against the same 90s.
+  // the old single timer counted against the same 90s. Nothing can be on
+  // the wire before the headers, so silence is not measured there.
   const { watchdog, advance, expiries } = watch();
 
   advance(150_000);
@@ -140,8 +150,177 @@ test("a request whose server-side work outlasts 90s before the headers survives"
   assert.equal(watchdog.snapshot().phase, "pre_headers");
 
   watchdog.noteHeaders();
-  advance(200_000);
+  keepalivesFor(watchdog, advance, 200_000);
   watchdog.noteVisibleChunk();
+  assert.deepEqual(expiries, []);
+});
+
+/* ------------------------------------------------------- the silence ----- */
+
+test("headers followed by total silence is a dead connection, before the first token too", () => {
+  // The client used to wait out the absolute ten-minute deadline here: a
+  // connection dropped by a network switch before the first token looked
+  // exactly like a model that was still thinking.
+  const { watchdog, advance, expiries } = watch();
+  watchdog.noteHeaders();
+  advance(89_999);
+  assert.deepEqual(expiries, []);
+  advance(2);
+  assert.equal(expiries.length, 1);
+  assert.equal(expiries[0].cause, "stream_idle_timeout");
+  assert.equal(expiries[0].phase, "first_response");
+  assert.ok(expiries[0].idleMs >= 90_000);
+});
+
+test("post-first-token keepalives keep a long tool input alive, and their absence does not", () => {
+  // The reported shape: a preamble, then minutes of a document specification
+  // being written into a tool call -- parts the user never sees.
+  const { watchdog, advance, expiries } = watch();
+  watchdog.noteHeaders();
+  advance(4_000);
+  watchdog.noteVisibleChunk();
+  keepalivesFor(watchdog, advance, 300_000);
+  assert.deepEqual(expiries, []);
+  assert.equal(watchdog.snapshot().phase, "mid_stream");
+
+  // The provider stops producing parts, so the server stops writing.
+  advance(90_001);
+  assert.equal(expiries.length, 1);
+  assert.equal(expiries[0].cause, "stream_idle_timeout");
+  assert.equal(expiries[0].phase, "mid_stream");
+});
+
+test("a longer server interval stretches the budget to three missed keepalives", () => {
+  const { watchdog, advance, expiries } = watch();
+  watchdog.noteHeaders();
+  watchdog.noteVisibleChunk();
+  // An operator raised the interval to its 60s ceiling. The 90s floor would
+  // be one and a half intervals -- a single late write away from a false
+  // stall.
+  watchdog.noteKeepalive(60_000);
+  advance(179_999);
+  assert.deepEqual(expiries, []);
+  advance(2);
+  assert.equal(expiries[0].cause, "stream_idle_timeout");
+});
+
+test("a short server interval never lowers the budget below its floor", () => {
+  const { watchdog, advance, expiries } = watch();
+  watchdog.noteHeaders();
+  watchdog.noteKeepalive(5_000);
+  advance(89_000);
+  assert.deepEqual(expiries, []);
+});
+
+test("other server chunks reset the silence and do not move the phase", () => {
+  const { watchdog, advance, expiries } = watch();
+  watchdog.noteHeaders();
+  for (let index = 0; index < 5; index += 1) {
+    advance(60_000);
+    watchdog.noteServerSignal();
+  }
+  assert.deepEqual(expiries, []);
+  assert.equal(watchdog.snapshot().phase, "first_response");
+  // And the absolute deadline still stands behind them.
+  for (let index = 0; index < 6; index += 1) {
+    advance(60_000);
+    watchdog.noteServerSignal();
+  }
+  assert.equal(expiries[0].cause, "first_response_timeout");
+});
+
+/* ------------------------------------------------ coming back to the page */
+
+test("coming back after a short absence changes nothing", () => {
+  const { watchdog, advance, expiries } = watch();
+  watchdog.noteHeaders();
+  watchdog.noteVisibleChunk();
+  watchdog.checkNow();
+  assert.deepEqual(expiries, []);
+  advance(30_000);
+  watchdog.checkNow();
+  assert.deepEqual(expiries, [], "thirty seconds of silence is not a dead stream");
+  // The ordinary timer is still armed behind the check.
+  advance(60_001);
+  assert.equal(expiries[0].cause, "stream_idle_timeout");
+});
+
+test("a silence verdict reached on return waits for buffered bytes first", () => {
+  const clock = fakeTimers();
+  const expiries = [];
+  let frozen = false;
+  // A scheduler that drops timers while the page is frozen, as a suspended
+  // tab does, so only checkNow() can notice the silence.
+  const timers = {
+    ...clock.timers,
+    setTimeout: (handler, ms) =>
+      clock.timers.setTimeout(() => {
+        if (!frozen) handler();
+      }, ms),
+  };
+  const watchdog = createChatLivenessWatchdog({
+    budgets: { firstResponseMs: 600_000, idleMs: 90_000 },
+    timers,
+    onExpire: (expiry) => expiries.push(expiry),
+  });
+  watchdog.noteHeaders();
+  watchdog.noteVisibleChunk();
+  frozen = true;
+  clock.advance(200_000);
+  frozen = false;
+
+  // Visible again. The keepalives the server wrote meanwhile are in the
+  // socket and arrive a moment later: the stream was alive all along.
+  watchdog.checkNow();
+  assert.deepEqual(expiries, []);
+  clock.advance(500);
+  watchdog.noteKeepalive(20_000);
+  clock.advance(10_000);
+  assert.deepEqual(expiries, []);
+
+  // A second absence, and this time nothing arrives: the connection died
+  // while the page was away.
+  frozen = true;
+  clock.advance(200_000);
+  frozen = false;
+  watchdog.checkNow();
+  assert.deepEqual(expiries, []);
+  clock.advance(3_001);
+  assert.equal(expiries.length, 1);
+  assert.equal(expiries[0].cause, "stream_idle_timeout");
+});
+
+test("a timer that fires long after it was due also waits for buffered bytes", () => {
+  const clock = fakeTimers();
+  const expiries = [];
+  const handlers = [];
+  // Holds every timer until the test releases it, the way a throttled tab
+  // runs one long after it was due.
+  const timers = {
+    ...clock.timers,
+    setTimeout: (handler, ms) => {
+      const id = clock.timers.setTimeout(() => {}, ms);
+      handlers.push({ id, handler, at: clock.timers.now() + ms });
+      return id;
+    },
+    clearTimeout: (id) => {
+      clock.timers.clearTimeout(id);
+      const index = handlers.findIndex((entry) => entry.id === id);
+      if (index >= 0) handlers.splice(index, 1);
+    },
+  };
+  const watchdog = createChatLivenessWatchdog({
+    budgets: { firstResponseMs: 600_000, idleMs: 90_000 },
+    timers,
+    onExpire: (expiry) => expiries.push(expiry),
+  });
+  watchdog.noteHeaders();
+  watchdog.noteVisibleChunk();
+  clock.advance(150_000);
+  const late = handlers.pop();
+  late.handler();
+  assert.deepEqual(expiries, [], "a late verdict is deferred, not acted on");
+  watchdog.noteKeepalive(20_000);
   assert.deepEqual(expiries, []);
 });
 
@@ -180,11 +359,12 @@ test("keepalives keep the transport legible without extending the deadline", () 
   watchdog.noteHeaders();
 
   // Thirty keepalives at the server's interval: ten minutes of a provider
-  // that never produced a token. A watchdog that let these reset the clock
-  // would hide it forever, which is the one thing a keepalive must not buy.
+  // that never produced a token. A watchdog that let these reset the
+  // absolute clock would hide it forever, which is the one thing a
+  // keepalive must not buy. They reset the silence clock only.
   for (let index = 0; index < 30; index += 1) {
     advance(CHAT_STREAM_KEEPALIVE_INTERVAL_MS);
-    watchdog.noteKeepalive();
+    watchdog.noteKeepalive(CHAT_STREAM_KEEPALIVE_INTERVAL_MS);
   }
 
   assert.equal(expiries.length, 1);

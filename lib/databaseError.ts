@@ -79,6 +79,24 @@ const RETRYABLE_POSTGRES_CODES = new Set([
   "08P01",
 ]);
 
+/**
+ * Prisma's interactive transaction never got a connection inside `maxWait`.
+ *
+ * P2028 ("Transaction API error") names two opposite situations. This is the
+ * one where nothing ran: the callback was not invoked and no statement was sent.
+ * The other P2028 messages ("... on an expired transaction", "Transaction
+ * already closed") are raised in the middle of the work, where the outcome of a
+ * write may be unknown, and are deliberately not matched.
+ */
+export const isTransactionStartFailure = (error: unknown) => {
+  const value = asRecord(error);
+  return (
+    value?.code === "P2028" &&
+    typeof value.message === "string" &&
+    /unable to start a transaction/i.test(value.message)
+  );
+};
+
 export const isRetryableDatabaseError = (error: unknown) => {
   const metadata = databaseErrorMetadata(error);
   return Boolean(
@@ -86,9 +104,93 @@ export const isRetryableDatabaseError = (error: unknown) => {
       (metadata.driverKind &&
         RETRYABLE_DRIVER_KINDS.has(metadata.driverKind)) ||
       (metadata.driverCode &&
-        RETRYABLE_POSTGRES_CODES.has(metadata.driverCode))
+        RETRYABLE_POSTGRES_CODES.has(metadata.driverCode)) ||
+      isTransactionStartFailure(error)
   );
 };
+
+/**
+ * Whether an error was raised by Prisma or its driver adapter, whatever its
+ * code: a fact about this application's database, never about a provider.
+ */
+export const isDatabaseError = (error: unknown) => {
+  const name = databaseErrorMetadata(error).errorName;
+  return name.startsWith("PrismaClient") || name === "DriverAdapterError";
+};
+
+/** Backoff before each re-run of a write that failed retryably: two more tries. */
+export const DATABASE_WRITE_RETRY_DELAYS_MS: readonly number[] = [150, 500];
+/** The pause before asking whether the last failed try committed after all. */
+const FINAL_COMMIT_CHECK_DELAY_MS = 150;
+
+/**
+ * A write failed and nobody could find out whether it committed.
+ *
+ * Distinct from the write's own error on purpose: that error means "it did
+ * not land" (the commit check said so), while this one means "it may have",
+ * and a caller must not do anything destructive -- delete what the write
+ * would have referenced -- on the strength of it. The write's error is on
+ * `cause`.
+ */
+export class DatabaseWriteOutcomeUnknownError extends Error {
+  constructor(cause: unknown) {
+    super("A database write failed and whether it committed is unknown.", {
+      cause,
+    } as ErrorOptions);
+    this.name = "DatabaseWriteOutcomeUnknownError";
+  }
+}
+
+/**
+ * Runs a database write again when it failed with a retryable error -- but
+ * only once the failed try is known not to have committed -- and says, for a
+ * write that finally fails, whether it is known not to have landed.
+ *
+ * No failure proves a rollback on its own: a connection that drops during
+ * COMMIT leaves the outcome unknown, and running the write again blindly
+ * would duplicate it. So every failure is followed by `committed()` (after a
+ * short pause for a retryable one). The three outcomes:
+ *
+ * - committed: `written`, or `already_committed` when the check found it;
+ * - known not committed: the write's own error is thrown, once a retryable
+ *   failure has had its two more tries;
+ * - unknown (the check itself failed): `DatabaseWriteOutcomeUnknownError`,
+ *   never retried.
+ *
+ * `write` must be safe to run again after a rollback: one transaction, with
+ * nothing outside it that the first try already changed.
+ */
+export async function runRetryableDatabaseWrite(input: {
+  write: () => Promise<unknown>;
+  committed: () => Promise<boolean>;
+  delaysMs?: readonly number[];
+  sleep?: (ms: number) => Promise<void>;
+  onRetry?: (retry: { attempt: number; error: unknown }) => void;
+}): Promise<"written" | "already_committed"> {
+  const pending = [...(input.delaysMs ?? DATABASE_WRITE_RETRY_DELAYS_MS)];
+  const sleep =
+    input.sleep ??
+    ((ms: number) => new Promise<void>((settle) => setTimeout(settle, ms)));
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await input.write();
+      return "written";
+    } catch (error) {
+      const retryable = isRetryableDatabaseError(error);
+      const delay = retryable ? pending.shift() : undefined;
+      if (retryable) await sleep(delay ?? FINAL_COMMIT_CHECK_DELAY_MS);
+      let committed: boolean;
+      try {
+        committed = await input.committed();
+      } catch {
+        throw new DatabaseWriteOutcomeUnknownError(error);
+      }
+      if (committed) return "already_committed";
+      if (delay === undefined) throw error;
+      input.onRetry?.({ attempt, error });
+    }
+  }
+}
 
 export const isUniqueConstraintDatabaseError = (error: unknown) => {
   const metadata = databaseErrorMetadata(error);
@@ -153,3 +255,69 @@ export const isMissingDatabaseSchemaError = (error: unknown) => {
         MISSING_SCHEMA_POSTGRES_CODES.has(metadata.driverCode))
   );
 };
+
+/* -------------------------------------------------------------------------- */
+/* A transient refusal, as the server says it and the browser reads it         */
+/* -------------------------------------------------------------------------- */
+/*
+ * The one code, header and delay a transient database refusal travels with.
+ * Raised by the chat route and by the shared rate limiter, read by the browser,
+ * so everything here is pure: this file is imported into a client bundle.
+ *
+ * What the code promises: nothing a provider could have seen happened, and the
+ * same request may be sent once more. It never describes a failure after a
+ * provider call began -- that is `AI_PROVIDER_ERROR`'s story, and re-sending
+ * there could pay twice.
+ */
+
+export const DATABASE_TEMPORARILY_UNAVAILABLE_CODE =
+  "DATABASE_TEMPORARILY_UNAVAILABLE";
+
+/** `Retry-After` the server sends, in seconds. */
+export const DATABASE_RETRY_AFTER_SECONDS = 2;
+
+/** The browser never waits longer than this before its single resend. */
+export const DATABASE_RETRY_MAX_DELAY_MS = 10_000;
+
+export const isTransientDatabaseCode = (code: unknown): boolean =>
+  code === DATABASE_TEMPORARILY_UNAVAILABLE_CODE;
+
+/**
+ * How long to wait before the one automatic resend.
+ *
+ * `Retry-After` carries delta-seconds here; an HTTP-date, a negative number or
+ * garbage falls back to the server's own default instead of being trusted, and
+ * the result is clamped so a misbehaving proxy cannot park a send for minutes.
+ */
+export const transientDatabaseRetryDelayMs = (
+  retryAfterHeader: string | null | undefined
+): number => {
+  const seconds = Number(retryAfterHeader);
+  const chosen =
+    retryAfterHeader && Number.isFinite(seconds) && seconds >= 0
+      ? seconds
+      : DATABASE_RETRY_AFTER_SECONDS;
+  return Math.min(Math.round(chosen * 1_000), DATABASE_RETRY_MAX_DELAY_MS);
+};
+
+/**
+ * Resolves after `ms`, or at once when `signal` aborts so a Stop pressed during
+ * the wait is honoured immediately. The caller re-checks the signal afterwards.
+ */
+export const waitForTransientRetry = (
+  ms: number,
+  signal: AbortSignal
+): Promise<void> =>
+  new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const finish = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    signal.addEventListener("abort", finish, { once: true });
+  });

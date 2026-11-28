@@ -168,6 +168,16 @@ domains:
     implementationStatus: implemented
     inUnifiedExport: included
 
+  - domain: userPersonalization
+    prismaModel: UserPersonalization
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included
+
   - domain: analyticsUserId
     prismaModel: Ga4UserId
     userLinkageRole: subject
@@ -399,6 +409,36 @@ domains:
       cascades all remove the row; the assistant id is deliberately not a
       foreign key because the attempt must be claimed before an assistant
       Message exists.
+
+  - domain: scheduledTask
+    prismaModel: ScheduledTask
+    userLinkageRole: subject
+    owner: backend-ai
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included
+    note: >-
+      A question the account asked the server to send on a schedule, with its
+      model, schedule, state and the per-run credits it approved. Deleting the
+      account deletes it; deleting its conversation only clears the link and
+      the next run starts a new conversation.
+
+  - domain: scheduledTaskRun
+    prismaModel: ScheduledTaskRun
+    userLinkageRole: subject
+    owner: backend-ai
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      One occurrence of a scheduled task: when it ran, how it ended and the
+      credits it reserved and was charged. The answer itself is an ordinary
+      Message in the task's conversation and is exported there. Cascades from
+      the user and from its task.
 
   - domain: comparisonReview
     prismaModel: ComparisonReview
@@ -981,6 +1021,16 @@ domains:
 
   - domain: comparisonReviewItemFeedback
     prismaModel: ComparisonReviewItemFeedback
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included
+
+  - domain: chatAnswerRating
+    prismaModel: ChatAnswerRating
     userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
@@ -4275,6 +4325,111 @@ domains:
       takeover path is email and the collateral is correspondingly larger.
       The `id` is a server-issued random value, so it identifies the device to
       Tomverse and to nothing else.
+
+  - domain: desktopRemoteDevice
+    prismaModel: DesktopRemoteDevice
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: excluded
+    note: >-
+      The latest redacted report one signed-in PC sent about its Code tasks
+      (docs/ops/desktop-remote-control.md): task titles, states, a few progress
+      lines and the summary of the request on its screen. Never file contents,
+      diffs, command output or environment values. One row per device, replaced
+      on every report and removed when it expires, when the person turns the
+      feature off on that PC, or when the device's sign-in is revoked; an
+      account deletion removes it through MobileDevice. After the feature is
+      turned off an empty row stays for two minutes, holding no title or line,
+      only the number of that request, so a report sent earlier and arriving
+      later is refused. One expired row is
+      kept, hidden, until the device's sign-in ends: the report of a request
+      that already has an answer, so the request cannot be answered twice.
+      Not part of the account export (owner decision 2026-11-26): the lasting
+      record of these tasks is on the person's own PC.
+
+  - domain: desktopRemotePasskey
+    prismaModel: DesktopRemotePasskey
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: excluded
+    note: >-
+      A passkey the person registered to confirm remote approvals
+      (docs/ops/desktop-remote-control.md): the public key, the credential id,
+      the host name it was made for, a counter, the name the person gave it and
+      when it was made and last used. The private key never leaves the
+      person's own authenticator. The person lists and removes their passkeys
+      on the same screen; an account deletion removes the rows through the
+      user cascade. Not part of the account export: a public key and a
+      credential id are security material that identifies nothing the person
+      can use elsewhere. The registration, each confirmation and each removal
+      are written to the admin audit chain, which has its own row in this
+      registry.
+
+  - domain: desktopRemotePasskeyChallenge
+    prismaModel: DesktopRemotePasskeyChallenge
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: excluded
+    note: >-
+      One single-use random challenge for registering a passkey, confirming one
+      remote command or removing a passkey. Valid for two minutes, used once,
+      and swept by maintenance once expired. It holds a random value and the
+      digest of the one command it is bound to, never the command itself. An
+      account deletion removes the rows through the user cascade. Not part of
+      the account export: it is a short-lived security token.
+
+  - domain: desktopRemoteCommand
+    prismaModel: DesktopRemoteCommand
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: excluded
+    note: >-
+      One answer, stop or follow-up the person sent from a signed-in web
+      session to their own PC, kept until the PC has picked it up and reported
+      what it did with it, then swept on expiry. Removed with its
+      DesktopRemoteDevice row, so an account deletion removes it through the
+      same cascade. The person's action is also written to the admin audit
+      chain, which has its own row in this registry. Not part of the account
+      export (owner decision 2026-11-26): a follow-up's text lives on in the
+      task on the person's own PC.
+
+  - domain: codeCloudJob
+    prismaModel: CodeCloudJob
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      One Desktop cloud Code task (docs/ops/desktop-cloud-execution.md): the
+      person's instruction, the models and credit cap they chose, the progress
+      lines the runner reported, a short summary and where the uploaded
+      repository bundle and the resulting patch sit in object storage
+      (code-cloud/<id>/...). The bundle is removed when the task ends; the
+      row, its lines and its patch are removed by the maintenance sweep seven
+      days later. Account deletion removes the rows in its own transaction and
+      gives both object keys of every task a tombstone on the shared object
+      cleanup queue (lib/codeCloudDeletion.ts), so the objects go with them;
+      the User cascade is the backstop for the rows. Credits are not here: the
+      task's managed reservation is CodeTaskReservation, which has its own row.
 
   - domain: externalApiKey
     prismaModel: ExternalApiKey

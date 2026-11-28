@@ -54,9 +54,16 @@ const ModelCatalogContext = createContext<ModelCatalogContextValue>(fallbackValu
 export function ModelCatalogProvider({
   children,
   initialModels = STATIC_PUBLIC_MODELS,
+  live = true,
 }: {
   children: ReactNode;
   initialModels?: readonly AiModel[];
+  /**
+   * Whether to read `/api/models/catalog` after mount. A host that already
+   * holds the live catalogue and has no such route (the Desktop app) passes
+   * `false` and its models stand.
+   */
+  live?: boolean;
 }) {
   const [models, setModels] = useState<readonly AiModel[]>(initialModels);
   const [catalogLoaded, setCatalogLoaded] = useState(false);
@@ -78,6 +85,10 @@ export function ModelCatalogProvider({
   }, []);
 
   useEffect(() => {
+    if (!live) {
+      queueMicrotask(() => setCatalogLoaded(true));
+      return;
+    }
     queueMicrotask(() => void reload());
     const handleRegistryUpdate = () => void reload();
     window.addEventListener("tomverse:model-registry-updated", handleRegistryUpdate);
@@ -86,7 +97,7 @@ export function ModelCatalogProvider({
         "tomverse:model-registry-updated",
         handleRegistryUpdate
       );
-  }, [reload]);
+  }, [live, reload]);
 
   const value = useMemo<ModelCatalogContextValue>(() => {
     const modelMap = new Map(models.map((model) => [model.id, model]));

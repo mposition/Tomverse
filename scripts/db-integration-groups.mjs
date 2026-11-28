@@ -69,7 +69,7 @@ const LANE_RULES = [
   // generated artifacts. This lane was `import` until then.
   [
     "conversations",
-    /^(external-import|external-conversation-|context-manifest-retention|public-share-route|default-model-reconciliation|conversation-(lock-migration|password-version|pin|search|title)|continuation-source-export|chat-durable-recovery|message-attachment|generated-artifacts)/,
+    /^(external-import|external-conversation-|context-manifest-retention|public-share-route|default-model-reconciliation|conversation-(lock-migration|password-version|pin|search|superseded-turns|title)|continuation-source-export|chat-durable-recovery|message-attachment|generated-artifacts)/,
   ],
   // Routing: the run, its attempts, the manifest boundary, and the product and
   // selection-mode attribution the ROUTE gates are written against.
@@ -81,7 +81,7 @@ const LANE_RULES = [
   // decide whether a paid turn starts at all.
   [
     "finance",
-    /^(credit-finance|code-managed-|chat-concurrency|chat-rate-limit|chat-token-quota|fallback-pricing|chat-attempt-usage|model-registry|prompt-refiner-reservation|prompt-refiner-vnext-one-shot|subscription-sync-ordering|plan-change-|image-generation|refund-decision-route|stripe-webhook-route|webhook-reprocess-route|perplexity-deep-research-route|readiness-route|voice-conversation-ledger)/,
+    /^(credit-finance|code-managed-|code-cloud-|chat-concurrency|chat-rate-limit|chat-token-quota|fallback-pricing|chat-attempt-usage|model-registry|prompt-refiner-reservation|prompt-refiner-vnext-one-shot|subscription-sync-ordering|plan-change-|image-generation|refund-decision-route|stripe-webhook-route|webhook-reprocess-route|perplexity-deep-research-route|readiness-route|voice-conversation-ledger)/,
   ],
   // The agents and the review machinery around them: AMUX intake, promotion
   // and reconciliation, the engineering and marketing agents, Prompt Refiner

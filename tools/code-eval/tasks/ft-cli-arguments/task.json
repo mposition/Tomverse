@@ -1,0 +1,12 @@
+{
+  "id": "ft-cli-arguments",
+  "title": "Extend the argument parser",
+  "category": "feature",
+  "prompt": "The command-line argument parser in this project (`parseArgs(argv, schema)`) only understands `--name value` and boolean flags. Extend it as described in README.md: `--name=value`, `--no-flag`, short options and combined short flags, `--` as the end of options, repeatable options, number options, and errors for unknown or invalid options. Existing behaviour must stay. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 1500
+}
