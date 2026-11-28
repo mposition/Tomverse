@@ -14,7 +14,6 @@ import {
   HTML_PREVIEW_SANDBOX,
   buildHtmlPreviewSrcdoc,
   isHtmlPreviewSmallEnough,
-  stripPreviewResourceHints,
   withEmbedderNonce,
 } from "@/lib/htmlArtifactPreview";
 
@@ -40,9 +39,7 @@ export function HtmlArtifactPreviewFrame({ html, title }: { html: string; title:
     // need a browsing context to fetch at all (measured in Chromium: zero requests for each of them).
     // Scripts in it never run. Only the rewritten text leaves this function, into the sandboxed frame.
     const nonce = typeof document === "undefined" ? null : document.querySelector<HTMLScriptElement>("script[nonce]")?.nonce;
-    // Resource-hint <link>s (preconnect, dns-prefetch, ...) are dropped first: a policy does not stop them.
-    const parse = (text: string) => new DOMParser().parseFromString(text, "text/html");
-    const page = typeof DOMParser === "undefined" ? html : withEmbedderNonce(stripPreviewResourceHints(html, parse), nonce, parse);
+    const page = typeof DOMParser === "undefined" ? html : withEmbedderNonce(html, nonce, (text) => new DOMParser().parseFromString(text, "text/html"));
     return buildHtmlPreviewSrcdoc(page, typeof window === "undefined" ? null : window.location.origin);
   }, [html]);
   return (

@@ -177,6 +177,7 @@ test("pdfReadingOutcome: everything answered is cacheable; a gap, a cut, a stop 
     unreadPages: [],
     partialPages: [],
     budgetUnreadPages: [],
+    pageCountUnknown: false,
     cacheable: true,
   });
   // A page the provider skipped.
@@ -184,24 +185,26 @@ test("pdfReadingOutcome: everything answered is cacheable; a gap, a cut, a stop 
     unreadPages: [2, 3],
     partialPages: [],
     budgetUnreadPages: [],
+    pageCountUnknown: false,
     cacheable: false,
   });
   // The OCR budget cut page 2: it is partly read, page 3 is not read.
   assert.deepEqual(
     pdfReadingOutcome({ expectedPages: [1, 2, 3], ocr: { pageNumbers: [1], truncated: true, truncatedPage: 2 } }),
-    { unreadPages: [3], partialPages: [2], budgetUnreadPages: [], cacheable: false }
+    { unreadPages: [3], partialPages: [2], budgetUnreadPages: [], pageCountUnknown: false, cacheable: false }
   );
   // OCR not run: every page asked for is unread.
   assert.deepEqual(pdfReadingOutcome({ expectedPages: [2, 4], ocr: null }), {
     unreadPages: [2, 4],
     partialPages: [],
     budgetUnreadPages: [],
+    pageCountUnknown: false,
     cacheable: false,
   });
   // The page count is not known and the text was cut: only the cut is reported.
   assert.deepEqual(
     pdfReadingOutcome({ expectedPages: [], ocr: { pageNumbers: [1], truncated: true, truncatedPage: 2 } }),
-    { unreadPages: [], partialPages: [2], budgetUnreadPages: [], cacheable: false }
+    { unreadPages: [], partialPages: [2], budgetUnreadPages: [], pageCountUnknown: false, cacheable: false }
   );
   // The text pass stopped at the limit: its pages are named, kept apart from the scans, and the text is not the file.
   assert.deepEqual(
@@ -211,7 +214,7 @@ test("pdfReadingOutcome: everything answered is cacheable; a gap, a cut, a stop 
       budgetUnreadPages: [8, 9, 10],
       budgetPartialPage: 7,
     }),
-    { unreadPages: [], partialPages: [7], budgetUnreadPages: [8, 9, 10], cacheable: false }
+    { unreadPages: [], partialPages: [7], budgetUnreadPages: [8, 9, 10], pageCountUnknown: false, cacheable: false }
   );
   // Scans read whole after a text pass that stopped short: still not cacheable.
   assert.equal(
@@ -223,6 +226,7 @@ test("pdfReadingOutcome: everything answered is cacheable; a gap, a cut, a stop 
     unreadPages: [],
     partialPages: [],
     budgetUnreadPages: [],
+    pageCountUnknown: false,
     cacheable: false,
   });
 });
@@ -235,5 +239,29 @@ test("the turn after the original was sent, the earlier message reads only the t
     expectedPages: [2, 4],
     ocr: { pageNumbers: [2, 4], truncated: false, truncatedPage: null },
   });
-  assert.deepEqual(outcome, { unreadPages: [], partialPages: [], budgetUnreadPages: [], cacheable: true });
+  assert.deepEqual(outcome, { unreadPages: [], partialPages: [], budgetUnreadPages: [], pageCountUnknown: false, cacheable: true });
+});
+
+// Review r-20261128-054317-1a725b.
+test("validatePdfSafely answers the page count, so a file whose text pass failed still has one", async () => {
+  assert.deepEqual(await validatePdfSafely(buildLinePdf([["a"], [], ["c"]])), { pageCount: 3 });
+  assert.deepEqual(await validatePdfSafely(createQaPdfBuffer()), { pageCount: 1 });
+});
+
+test("a scanned file read by OCR with no known page count names that, and is never stored", () => {
+  const ocr = { pageNumbers: [1], truncated: false, truncatedPage: null };
+  const outcome = pdfReadingOutcome({ expectedPages: [], ocr, pageCountUnknown: true });
+  assert.deepEqual(outcome, {
+    unreadPages: [],
+    partialPages: [],
+    budgetUnreadPages: [],
+    pageCountUnknown: true,
+    cacheable: false,
+  });
+  assert.match(describeUnreadPdfPages(outcome), /page count unknown/);
+  // With the count known, the same answer is judged page by page.
+  assert.equal(pdfReadingOutcome({ expectedPages: [1], ocr, pageCountUnknown: false }).cacheable, true);
+  // The flag means nothing without OCR text to judge.
+  assert.equal(pdfReadingOutcome({ expectedPages: [], ocr: null, pageCountUnknown: true }).pageCountUnknown, false);
+  assert.ok(describeUnreadPdfPages({ ...outcome, unreadPages: [2], partialPages: [3], budgetUnreadPages: [4] }).length <= PDF_PAGE_NOTICE_MAX_CHARACTERS);
 });

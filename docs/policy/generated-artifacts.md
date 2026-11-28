@@ -504,11 +504,12 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
     정책에는 hash source를 넣지 않습니다 — 넣으면 브라우저가 `'unsafe-inline'`을 무시해 page의 inline script가 막힙니다).
     한계: 모델이 쓴 HTML page(React가 아닌 것)는 차트·지도 라이브러리를 쓰려고 세 CDN의 script·style·글꼴을 계속 받을 수
     있으므로, 그 page가 CDN 주소에 글을 실어 요청하면 CDN 운영자 로그에는 남을 수 있습니다(다른 host로는 못 보냄).
-  - **resource hint는 CSP가 막지 못하므로 따로 처리합니다**(2026-11-28). `<link rel="dns-prefetch|preconnect|prefetch|prerender|preload|modulepreload">`는
-    `href`의 host로 DNS 조회·연결을 시작하므로 host 이름에 글을 실어 보내는 통로가 됩니다. 패널은 page를 frame에 넣기 전에 브라우저의
-    `DOMParser`로 그런 `<link>`를 지우고(`stripPreviewResourceHints`, 텍스트 패턴 아님), 안쪽 문서에는 CSP meta 다음에
-    `x-dns-prefetch-control: off` meta를 둡니다. 한계: script가 실행 중에 만든 `<link>`는 이식 가능한 방법으로 막을 수 없습니다. 남는 방어는 page 정책의
-    `connect-src 'none'`(브라우저가 이 hint에 적용하는 만큼)과 위 meta이고, Browser 창에서는 관찰하지 못했습니다.
+  - **resource hint는 알려진 잔여 위험입니다**(2026-11-28). `<link rel="dns-prefetch|preconnect|prefetch|prerender">`는 CSP가 막지 못하고
+    `href`의 host로 DNS 조회·연결을 시작하므로 host 이름에 글을 실어 보내는 통로가 됩니다. 이것을 지우려고 **부모 문서에서 모델의 HTML을
+    파싱하거나 고쳐 쓰지 않습니다**(`DOMParser`로 지우는 시도는 신뢰할 수 없는 HTML을 부모 문서가 다루게 해 철회했고, 정규식은 우회됩니다).
+    남는 방어는 안쪽 문서의 CSP(`connect-src 'none'`을 브라우저가 이 hint에 적용하는 만큼)와 그 다음에 둔
+    `x-dns-prefetch-control: off` meta뿐이며 Browser 창에서는 관찰하지 못했습니다. 부모 문서가 page를 파싱하는 곳은 앱 문서에 nonce가 있을 때
+    nonce를 붙이는 `withEmbedderNonce` 하나뿐이고, 이는 이번 변경 전부터 있던 것입니다(위 설명).
   - 미리보기는 **frame 안의 frame**입니다. 안쪽이 모델의 page(위 sandbox·CSP)이고 바깥쪽은 우리 문서로
     `frame-src 'none'`**만** 갖습니다(`srcdoc` 자식은 부모의 모든 정책을 상속하므로 다른 지시문을 더하면 page에
     닿습니다). script가 `location`을 바꿔 자기 frame을 임의 주소로 보내는 것은 page 정책으로 막을 수 없는

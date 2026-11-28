@@ -203,3 +203,28 @@ test("every way a scanned PDF is read settles through one decision: the notice a
     // And the cache write is still refused when a file part was sent.
     assert.ok(route.includes("fileParts.length === filePartsBefore"));
 });
+
+// Review r-20261128-054317-1a725b: the page notice, the text and the cache decision agree under every budget.
+test("the page notice is not turned down by an earlier file's share, and is counted against it", () => {
+    const route = source("app/api/chat/route.ts");
+    const pdf = route.slice(route.indexOf('if (format.category === "pdf") {'), route.indexOf('if (format.category === "iwork") {'));
+    const settle = pdf.slice(pdf.indexOf("const settlePdfReading"), pdf.indexOf("// Pages the text pass never reached"));
+    // Pushed directly: not through addExtractedText, which would swap it for the general "not included" line.
+    assert.ok(!settle.includes("addExtractedText("));
+    assert.match(settle, /totalExtractedCharacters \+= notice\.length;/);
+    assert.match(settle, /if \(!isLatestMessage\) pastAttachmentTokens \+= estimatePromptTokens\(notice\);/);
+    assert.match(settle, /textAttachments\.push\(\{ name, kind: "PDF page notice", text: notice \}\);/);
+});
+
+test("a cached file is included whole or named once, never half and never twice", () => {
+    const route = source("app/api/chat/route.ts");
+    const hit = route.slice(route.indexOf("if (textCacheEligible && !isLatestMessage) {"), route.indexOf("// An earlier file the share cannot take"));
+    assert.match(hit, /const cachedTokens = cached\.reduce\(/);
+    assert.equal(hit.split("PAST_ATTACHMENT_OMITTED_KIND").length - 1, 1);
+});
+
+test("the page count comes from the validation when the text pass failed; unknown is named and not stored", () => {
+    const route = source("app/api/chat/route.ts");
+    assert.equal(route.split("pdfPageCount = (await validatePdfSafely(buffer)).pageCount;").length - 1, 2);
+    assert.ok(route.includes("pageCountUnknown: pdfPageCount === 0,"));
+});

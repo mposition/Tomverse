@@ -141,7 +141,6 @@ test("the route caches an account's bound file -- the turn's own once read, an e
     // bytes and lineage for this turn's tools (file creation, conversion,
     // spreadsheet revision), so a retry or another panel would find nothing.
     assert.match(route, /if \(textCacheEligible && !isLatestMessage\) \{\s*const cached = await readAttachmentTextCache\(/);
-    assert.ok(!route.includes("cachedCharacters"));
     const read = route.slice(route.indexOf("if (textCacheEligible && !isLatestMessage) {"), route.indexOf("let attachmentBuffer: Buffer;"));
     assert.ok(!read.includes("turnAttachmentBytes"), "the read path registers nothing for the tools");
     const register = route.indexOf("turnAttachmentBytes.set(");
@@ -153,8 +152,11 @@ test("the route caches an account's bound file -- the turn's own once read, an e
     // file is ingested, so before the audio switch is ever consulted.
     assert.ok(eligibility.includes(': attachmentTextCacheEnabled() || format.category === "audio"'));
     // A cache hit answers to the same past-file share and parse budget.
-    const hit = route.slice(route.indexOf("if (textCacheEligible && !isLatestMessage) {"), route.indexOf("let attachmentBuffer: Buffer;"));
-    assert.match(hit, /pastAttachmentTokens \+ tokens > pastAttachmentTokenBudget/);
+    const hit = route.slice(route.indexOf("if (textCacheEligible && !isLatestMessage) {"), route.indexOf("// An earlier file the share cannot take"));
+    assert.match(hit, /pastAttachmentTokens \+ cachedTokens > pastAttachmentTokenBudget/);
+    // All of a cached file or none of it, named once -- never half of it.
+    assert.ok(!hit.includes("continue;\n                        }\n                        pastAttachmentTokens += tokens"));
+    assert.equal(hit.split("PAST_ATTACHMENT_OMITTED_KIND").length - 1, 1);
     assert.match(hit, /CHAT_ATTACHMENT_PARSE_CHARACTERS/);
     // A cut or mixed extraction is never stored.
     assert.match(route, /fileParts\.length === filePartsBefore/);

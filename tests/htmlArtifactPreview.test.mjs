@@ -11,7 +11,6 @@ import {
   buildHtmlPreviewSrcdoc,
   isHtmlPreviewSmallEnough,
   isHtmlPreviewable,
-  stripPreviewResourceHints,
   withEmbedderNonce,
 } from "../lib/htmlArtifactPreview.ts";
 
@@ -151,25 +150,6 @@ test("the embedder's nonce goes on the page's script, style and stylesheet eleme
   }
 });
 
-// A policy does not stop resource hints, and a hostname is a place to put text.
-test("resource-hint links are removed by the browser's parser, and a page without them is returned as written", () => {
-  const removed = [];
-  let asked = null;
-  const parse = (text) => ({
-    querySelectorAll: (selector) => {
-      asked = selector;
-      return text.includes("preconnect") ? [1, 2].map((n) => ({ remove: () => removed.push(n) })) : [];
-    },
-    documentElement: { outerHTML: "<html>without hints</html>" },
-  });
-  assert.equal(stripPreviewResourceHints('<link rel="preconnect" href="https://x.example">', parse), "<html>without hints</html>");
-  assert.deepEqual(removed, [1, 2]);
-  assert.equal(stripPreviewResourceHints("<p>no hints</p>", parse), "<p>no hints</p>");
-  for (const rel of ["dns-prefetch", "preconnect", "prefetch", "prerender"]) {
-    assert.ok(asked.includes(`link[rel~="${rel}" i]`), rel);
-  }
-});
-
 test("the frame switches off DNS prefetching ahead of the page, after our policy", () => {
   const { inner } = split(buildHtmlPreviewSrcdoc("<p>x</p>"));
   const policy = inner.indexOf("Content-Security-Policy");
@@ -178,7 +158,22 @@ test("the frame switches off DNS prefetching ahead of the page, after our policy
   assert.ok(prefetch < inner.indexOf("<p>x</p>"));
 });
 
-test("the panel strips resource hints before it hands the page the embedder's nonce", () => {
+// Review r-20261128-054317-1a725b: the parent document does not parse or rewrite the
+// model's HTML to deal with resource hints. A CSP cannot stop them and a pattern over
+// HTML is bypassed; they are a known residual risk, covered by the frame's own policy
+// and x-dns-prefetch-control only.
+test("the parent document never parses or rewrites the model's HTML for resource hints", () => {
   const panel = readFileSync(new URL("../components/chat/HtmlArtifactPreviewPanel.tsx", import.meta.url), "utf8");
-  assert.match(panel, /withEmbedderNonce\(stripPreviewResourceHints\(html, parse\), nonce, parse\)/);
+  const lib = readFileSync(new URL("../lib/htmlArtifactPreview.ts", import.meta.url), "utf8");
+  assert.ok(!panel.includes("stripPreviewResourceHints") && !lib.includes("stripPreviewResourceHints"));
+  assert.ok(!lib.includes("RESOURCE_HINT_SELECTOR"));
+  // The one parse that remains is the embedder-nonce rewrite, which existed before and runs only when
+  // the embedding document has a nonce; nothing else touches the page as markup.
+  assert.equal(panel.split("new DOMParser()").length - 1, 1);
+  assert.ok(panel.includes("withEmbedderNonce(html, nonce, (text) => new DOMParser()"));
+  for (const source of [panel, lib]) {
+    assert.doesNotMatch(source, /innerHTML|insertAdjacentHTML|document\.write|createContextualFragment/);
+  }
+  // No pattern over the page's markup in the build step either: the page is carried as written.
+  assert.doesNotMatch(lib, /\.replace\([^)]*<link/i);
 });

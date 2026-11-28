@@ -133,7 +133,10 @@ const attributeEscape = (value: string) => value.replace(/&/g, "&amp;").replace(
 export function buildHtmlPreviewSrcdoc(html: string, assetOrigin?: string | null): string {
     const page = html.replace(LEADING_DOCTYPE, "");
     // The second meta switches off the browser's own DNS prefetching for the
-    // frame; a CSP does not cover resource hints (see stripPreviewResourceHints).
+    // frame. A CSP does not cover resource hints (`<link rel="preconnect">`
+    // and the like); they are a known residual risk. The page is NOT parsed
+    // here to strip them: this parent document never parses or rewrites the
+    // model's HTML (see withEmbedderNonce for the one existing exception).
     const inner =
         `<!doctype html><meta http-equiv="Content-Security-Policy" content="${htmlPreviewCsp(assetOrigin)}">` +
         `<meta http-equiv="x-dns-prefetch-control" content="off">${page}`;
@@ -142,43 +145,6 @@ export function buildHtmlPreviewSrcdoc(html: string, assetOrigin?: string | null
         `<body style="margin:0;height:100vh;overflow:hidden">` +
         `<iframe sandbox="${HTML_PREVIEW_SANDBOX}" referrerpolicy="no-referrer" style="border:0;width:100%;height:100%" srcdoc="${attributeEscape(inner)}"></iframe>`
     );
-}
-
-/**
- * The resource hints a page may carry. None of them is a request for content,
- * and a Content-Security-Policy does not stop them: `dns-prefetch` and
- * `preconnect` resolve and connect to whatever host `href` names, which is a
- * way to put text in a hostname and send it out; `prefetch` and `prerender`
- * ask for a page the policy never sees at navigation time. A preview has no use
- * for any of them, and `preload` and `modulepreload` are the same kind of
- * element, so they go with them.
- */
-export const HTML_PREVIEW_RESOURCE_HINT_SELECTOR = ["dns-prefetch", "preconnect", "prefetch", "prerender", "preload", "modulepreload"]
-    .map((rel) => `link[rel~="${rel}" i]`)
-    .join(", ");
-
-/**
- * The page without its resource-hint `<link>` elements, found by the browser's
- * own HTML parser (never a pattern over the text, which a comment or an
- * attribute value can fool) and returned unchanged when there are none.
- *
- * Covers what the page says in its markup. A script can still create such an
- * element at run time: nothing portable stops that, so what is left against it
- * is the page's own policy (`connect-src 'none'`) as far as a browser applies
- * it to these hints, and the frame's `x-dns-prefetch-control: off`.
- */
-export function stripPreviewResourceHints(
-    html: string,
-    parse: (html: string) => {
-        querySelectorAll: (selector: string) => ArrayLike<{ remove: () => void }>;
-        documentElement: { outerHTML: string };
-    }
-): string {
-    const document = parse(html);
-    const hints = Array.from(document.querySelectorAll(HTML_PREVIEW_RESOURCE_HINT_SELECTOR));
-    if (hints.length === 0) return html;
-    for (const hint of hints) hint.remove();
-    return document.documentElement.outerHTML;
 }
 
 /**

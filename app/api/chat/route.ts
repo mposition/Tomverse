@@ -4625,11 +4625,20 @@ async function handleChatPost(
                         if (
                             outcome.unreadPages.length > 0 ||
                             outcome.partialPages.length > 0 ||
-                            outcome.budgetUnreadPages.length > 0
+                            outcome.budgetUnreadPages.length > 0 ||
+                            outcome.pageCountUnknown
                         ) {
-                            // The room for it was set aside before the text was read
-                            // (pdfTextCharacterBudget), so it cannot pass the limit.
-                            addExtractedText("PDF page notice", describeUnreadPdfPages(outcome));
+                            // Not put through addExtractedText: the notice is what tells
+                            // the model what the text beside it lacks, so it is never
+                            // turned down for an earlier file's share (which would also
+                            // leave a general "not included" line beside text that was
+                            // included). Its room was set aside from the character limit
+                            // before the text was read (pdfTextCharacterBudget), and it
+                            // is counted against the share here, so it is bounded.
+                            const notice = describeUnreadPdfPages(outcome);
+                            totalExtractedCharacters += notice.length;
+                            if (!isLatestMessage) pastAttachmentTokens += estimatePromptTokens(notice);
+                            textAttachments.push({ name, kind: "PDF page notice", text: notice });
                         }
                     };
                     // Pages the text pass never reached, because it ran into the limit.
@@ -4654,7 +4663,7 @@ async function handleChatPost(
                             requestedModelId
                         );
                         try {
-                            await validatePdfSafely(buffer);
+                            pdfPageCount = (await validatePdfSafely(buffer)).pageCount;
                             pdfValidated = true;
                         } catch {
                             if (fromArchive) return "unreadable";
@@ -4753,7 +4762,7 @@ async function handleChatPost(
                     if (!extractedPdfText) {
                         if (!pdfValidated) {
                             try {
-                                await validatePdfSafely(buffer);
+                                pdfPageCount = (await validatePdfSafely(buffer)).pageCount;
                                 pdfValidated = true;
                             } catch {
                                 if (fromArchive) return "unreadable";
@@ -4782,9 +4791,13 @@ async function handleChatPost(
                                 // of the file is checked against the ones answered, and
                                 // a cut at the budget is named, by the one rule the
                                 // partly scanned file below uses too.
+                                // A page count that neither the text pass nor the
+                                // validation gave means a skipped page cannot be told:
+                                // that is named, and the text is never stored.
                                 ocrOutcome = pdfReadingOutcome({
                                     expectedPages: Array.from({ length: pdfPageCount }, (_, index) => index + 1),
                                     ocr: ocrResult,
+                                    pageCountUnknown: pdfPageCount === 0,
                                 });
                             }
                         } catch (error) {
@@ -5300,22 +5313,32 @@ async function handleChatPost(
                         cached !== null &&
                         (await probeR2Object(attachment.objectKey)).state === "missing";
                     if (cached && !originalGone) {
+                        // All of the file or none of it: a file whose text came in
+                        // two parts (its own and its scanned pages) is not half
+                        // included, and is named once, not once per part.
+                        const cachedTokens = cached.reduce(
+                            (sum, entry) => sum + estimatePromptTokens(entry.text),
+                            0
+                        );
+                        const cachedCharacters = cached.reduce(
+                            (sum, entry) => sum + entry.text.length,
+                            0
+                        );
+                        if (
+                            pastAttachmentTokens + cachedTokens > pastAttachmentTokenBudget ||
+                            totalExtractedCharacters + cachedCharacters >
+                                CHAT_ATTACHMENT_PARSE_CHARACTERS
+                        ) {
+                            textAttachments.push({
+                                name: attachment.name,
+                                kind: PAST_ATTACHMENT_OMITTED_KIND,
+                                text: PAST_ATTACHMENT_OMITTED_TEXT,
+                            });
+                            continue;
+                        }
+                        pastAttachmentTokens += cachedTokens;
+                        totalExtractedCharacters += cachedCharacters;
                         for (const entry of cached) {
-                            const tokens = estimatePromptTokens(entry.text);
-                            if (
-                                pastAttachmentTokens + tokens > pastAttachmentTokenBudget ||
-                                totalExtractedCharacters + entry.text.length >
-                                    CHAT_ATTACHMENT_PARSE_CHARACTERS
-                            ) {
-                                textAttachments.push({
-                                    name: attachment.name,
-                                    kind: PAST_ATTACHMENT_OMITTED_KIND,
-                                    text: PAST_ATTACHMENT_OMITTED_TEXT,
-                                });
-                                continue;
-                            }
-                            pastAttachmentTokens += tokens;
-                            totalExtractedCharacters += entry.text.length;
                             textAttachments.push({
                                 name: attachment.name,
                                 kind: entry.kind,
