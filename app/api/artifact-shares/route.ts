@@ -39,7 +39,13 @@ const createSchema = z
         // The block's position among its answer's previewable blocks (previewableBlockIndex).
         blockIndex: BLOCK_INDEX,
         language: z.string().trim().min(1).max(16),
-        code: z.string().min(1).max(HTML_PREVIEW_MAX_BYTES),
+        // The preview's limit is in UTF-8 bytes, and one character can be up to four. The length cap is the cheap
+        // bound checked first: no string has more UTF-16 units than UTF-8 bytes.
+        code: z
+          .string()
+          .min(1)
+          .max(HTML_PREVIEW_MAX_BYTES)
+          .refine((code) => Buffer.byteLength(code, "utf8") <= HTML_PREVIEW_MAX_BYTES),
       }).strict(),
     ]),
   })

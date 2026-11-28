@@ -147,6 +147,13 @@ test("a malformed or oversized body is refused before the decision", async () =>
     (await collection.POST(post({ source: { kind: "code_block", messageId: "m1", language: "html", code: "x".repeat(1_000_001) } }))).status >= 400,
     true
   );
+  // Under the limit in characters, over it in bytes: three bytes each, so the body is refused before the decision.
+  const multibyte = "매".repeat(400_000);
+  assert.equal(Buffer.byteLength(multibyte, "utf8") > 1_000_000 && multibyte.length < 1_000_000, true);
+  assert.equal(
+    (await collection.POST(post({ source: { kind: "code_block", messageId: "m1", blockIndex: 0, language: "html", code: multibyte } }))).status,
+    400
+  );
   assert.deepEqual(world.gates, []);
 });
 

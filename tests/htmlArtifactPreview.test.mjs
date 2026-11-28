@@ -12,6 +12,7 @@ import {
   buildHtmlPreviewSrcdoc,
   isHtmlPreviewSmallEnough,
   isHtmlPreviewable,
+  neutralizeDeclarativeShadowRoots,
   withEmbedderNonce,
 } from "../lib/htmlArtifactPreview.ts";
 
@@ -154,6 +155,63 @@ test("the guard locks every WebRTC name, media capture and nested frames, with f
   assert.ok(!/<\/script/i.test(HTML_PREVIEW_GUARD_SCRIPT));
   // It parses as a script.
   assert.doesNotThrow(() => new Function(HTML_PREVIEW_GUARD_SCRIPT));
+});
+
+test("the guard sees into every shadow root: attachShadow is wrapped for good, and markup parsers that make roots are gone", () => {
+  // The wrapper has the observer watch the new root and sweeps it, and cannot itself be replaced.
+  assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes('define(Element.prototype, "attachShadow", {'));
+  assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes("apply(observe, observer, [root, watch]);"));
+  assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes("each(apply(selectInRoot, root, [frames]), removeNode);"));
+  const wrapper = HTML_PREVIEW_GUARD_SCRIPT.slice(HTML_PREVIEW_GUARD_SCRIPT.indexOf('"attachShadow", {'));
+  assert.match(wrapper, /writable: false, enumerable: false, configurable: false/);
+  // Every way to parse markup into a declarative shadow root without attachShadow, document.write included.
+  for (const [holder, name] of [
+    ["Element.prototype", "setHTMLUnsafe"], ["Element.prototype", "setHTML"],
+    ["window.Document", "parseHTMLUnsafe"], ["window.Document", "parseHTML"],
+    ["Document.prototype", "write"], ["Document.prototype", "writeln"],
+    ["ShadowRoot.prototype", "setHTMLUnsafe"], ["ShadowRoot.prototype", "setHTML"],
+  ]) {
+    assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes(`[${holder}, "${name}"]`), `${holder}.${name}`);
+  }
+  // Capture is taken from the prototype too, not only from navigator.mediaDevices.
+  for (const name of ["getUserMedia", "getDisplayMedia", "enumerateDevices"]) {
+    assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes(`"${name}"`), name);
+  }
+  assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes("lock(window.MediaDevices && window.MediaDevices.prototype, capture[c]);"));
+});
+
+test("a page's declarative shadow roots parse as inert templates: the attribute is renamed wherever the tokenizer reads a name", () => {
+  const renamed = [
+    ['<template shadowrootmode="open">', '<template data-tomverse-shadowrootmode="open">'],
+    ["<template\n\tshadowrootmode=closed>", "<template\n\tdata-tomverse-shadowrootmode=closed>"],
+    // Straight after a quoted value, with no space: still an attribute name to the tokenizer.
+    ['<template title="a>b"shadowrootmode="closed">', '<template title="a>b"data-tomverse-shadowrootmode="closed">'],
+    ["<template title='x'shadowrootmode='open'>", "<template title='x'data-tomverse-shadowrootmode='open'>"],
+    // After a slash and in any case.
+    ["<TEMPLATE/SHADOWROOTMODE=closed>", "<TEMPLATE/data-tomverse-SHADOWROOTMODE=closed>"],
+    ["<template ShadowRootMode>", "<template data-tomverse-ShadowRootMode>"],
+    ['<template shadowroot="open">', '<template data-tomverse-shadowroot="open">'],
+    ["<template shadowrootmode/>", "<template data-tomverse-shadowrootmode/>"],
+  ];
+  for (const [page, expected] of renamed) assert.equal(neutralizeDeclarativeShadowRoots(page), expected, page);
+  // Not an attribute name: a property in a script, a longer name, the companion attributes alone.
+  for (const page of [
+    "<script>host.shadowRoot.innerHTML = 1; this.shadowRoot;</script>",
+    '<div data-shadowrootmode="open" xshadowrootmode="open"></div>',
+    "<template shadowrootmodes shadowrootclonable shadowrootdelegatesfocus shadowrootserializable>",
+    "<p>attachShadow({ mode: 'open' })</p>",
+  ]) {
+    assert.equal(neutralizeDeclarativeShadowRoots(page), page, page);
+  }
+});
+
+test("the rename is made when the frame is built, and nothing else of the page changes", () => {
+  const page = '<div id="host"><template shadowrootmode="closed"><iframe srcdoc="x"></iframe></template></div><p>after</p>';
+  const { inner } = split(buildHtmlPreviewSrcdoc(page));
+  assert.ok(inner.endsWith('<div id="host"><template data-tomverse-shadowrootmode="closed"><iframe srcdoc="x"></iframe></template></div><p>after</p>'));
+  assert.ok(!/[\s/"']shadowrootmode/i.test(inner));
+  // The caller's text is a value: building the frame leaves it as it was.
+  assert.ok(page.includes(' shadowrootmode="closed"'));
 });
 
 test("a policy the page adds cannot widen ours: ours stays first and unmodified", () => {

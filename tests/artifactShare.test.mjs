@@ -73,7 +73,7 @@ test("each refusal has its own code, in the order a person can act on", () => {
         [{ conversation: { ...OPEN.conversation, locked: true } }, "CONVERSATION_LOCKED", 409],
         [{ conversation: { ...OPEN.conversation, continuesImport: true } }, "CONTINUATION_SHARE_NOT_SUPPORTED", 409],
         [{ researchPrivate: true }, "RESEARCH_SHARE_PRIVATE", 409],
-        [{ contentBytes: 0 }, "ARTIFACT_SHARE_TOO_LARGE", 413],
+        [{ contentBytes: 0 }, "ARTIFACT_SHARE_EMPTY", 400],
         [{ contentBytes: HTML_PREVIEW_MAX_BYTES + 1 }, "ARTIFACT_SHARE_TOO_LARGE", 413],
         [{ contentBytes: Number.NaN }, "ARTIFACT_SHARE_TOO_LARGE", 413],
     ];
@@ -228,6 +228,15 @@ test("the shared page's code is never part of our document: it is only inside th
         )
     );
     assert.ok(inner.endsWith(hostile));
+});
+
+test("a shared page's declarative shadow root is made inert where the page is drawn, not in the stored snapshot", () => {
+    const content = '<div><template shadowrootmode="closed"><iframe srcdoc="x"></iframe></template></div>';
+    const share = { previewKind: "html", language: "html", title: null, content };
+    const html = buildArtifactSharePage({ share, copy: COPY, labels: LABELS, assetOrigin: ORIGIN, reportUrl: `${ORIGIN}/support` });
+    const inner = srcdocOf(srcdocOf(html));
+    assert.ok(inner.endsWith('<div><template data-tomverse-shadowrootmode="closed"><iframe srcdoc="x"></iframe></template></div>'));
+    assert.equal(share.content, content);
 });
 
 test("a React share runs in the React preview document with its narrower policy and this origin's files", () => {

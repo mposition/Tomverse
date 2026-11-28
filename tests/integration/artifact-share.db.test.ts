@@ -576,3 +576,38 @@ test("only a source-key race answers with the existing link; any other failure i
   }
   assert.equal(await prisma.artifactShare.count(), 1);
 });
+
+test("two shares of different text at one block, made at the same moment, leave one link", async () => {
+  // Real concurrent transactions, several rounds: without serialisation each one's "close the others at this place"
+  // cannot see the other's uncommitted row, and both links survive.
+  for (let round = 0; round < 8; round += 1) {
+    const { user, answer } = await seed();
+    const first = `<p>first text ${round}</p>`;
+    const second = `<p>second text ${round}</p>`;
+    await prisma.message.update({ where: { id: answer.id }, data: { content: `${first}\n\n${second}` } });
+    const a = await prepareArtifactShare(user.id, codeSource(answer.id, first, { blockIndex: 0 }), OPEN);
+    const b = await prepareArtifactShare(user.id, codeSource(answer.id, second, { blockIndex: 0 }), OPEN);
+    assert.ok(a.ok && b.ok);
+    if (!a.ok || !b.ok) return;
+    const results = await Promise.all([publishArtifactShare(user.id, a.prepared), publishArtifactShare(user.id, b.prepared)]);
+    assert.ok(results.every((published) => published?.created), `round ${round}: both publishes succeeded`);
+    const left = await prisma.artifactShare.findMany({ where: { messageId: answer.id }, select: { sourceKey: true } });
+    assert.equal(left.length, 1, `round ${round}: one link at the block, found ${left.length}`);
+    // The one left is a link its owner's panel can find and stop.
+    assert.ok([a.prepared.sourceKey, b.prepared.sourceKey].includes(left[0].sourceKey));
+  }
+});
+
+test("a page with a declarative shadow root is stored and served exactly as the answer has it", async () => {
+  // The rename that makes the root inert belongs to drawing the frame (lib/htmlArtifactPreview.ts), never to the snapshot.
+  const { user, answer } = await seed();
+  const page = '<div><template shadowrootmode="open"><p>inside</p></template></div>';
+  await prisma.message.update({ where: { id: answer.id }, data: { content: page } });
+  const prepared = await prepareArtifactShare(user.id, codeSource(answer.id, page, { blockIndex: 0 }), OPEN);
+  assert.ok(prepared.ok);
+  if (!prepared.ok) return;
+  const published = await publishArtifactShare(user.id, prepared.prepared);
+  assert.ok(published);
+  assert.equal((await prisma.artifactShare.findUniqueOrThrow({ where: { id: published.share.id } })).content, page);
+  assert.equal((await readPublicArtifactShare(published.share.token, LIVE))?.content, page);
+});

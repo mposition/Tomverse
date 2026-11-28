@@ -135,14 +135,27 @@ export const HTML_PREVIEW_WEBRTC_GLOBALS = [
  *
  *   * each name above, and every other RTC global, becomes a non-writable,
  *     non-configurable `undefined` on the window, and so do
- *     `navigator.mediaDevices` and the legacy `getUserMedia` names, on the
- *     prototype and the instance -- the page cannot delete or redefine them;
+ *     `navigator.mediaDevices`, the legacy `getUserMedia` names and the
+ *     capture methods of `MediaDevices.prototype` -- the page cannot delete or
+ *     redefine them;
  *   * a nested frame would be a fresh window with its own constructors, so
  *     every frame-like element is removed as soon as it is inserted (a
  *     mutation observer, which runs before a nested document can load), and
- *     `contentWindow`/`contentDocument` are locked to `undefined`. The other
- *     ways to a fresh realm are closed elsewhere: popups by the sandbox, workers
- *     by `worker-src 'none'`, navigating to another document by the outer
+ *     `contentWindow`/`contentDocument` are locked to `undefined`;
+ *   * the observer has to see every tree a frame can be inserted into, and a
+ *     shadow root is not part of the document's tree. So `attachShadow` is
+ *     replaced, non-configurably, by a wrapper that has the observer watch
+ *     each new root (open or closed, nested, or made by a custom element's
+ *     constructor) and sweeps it; and the ways to make a shadow root without
+ *     `attachShadow` are taken away: the declarative-shadow-DOM parsers
+ *     (`setHTMLUnsafe`, `setHTML`, `Document.parseHTMLUnsafe`,
+ *     `Document.parseHTML`) and `document.write`/`writeln`, whose parser makes
+ *     declarative shadow roots too (measured) and can be fed a split
+ *     attribute name across calls. The page's own markup is parsed before any
+ *     script, so its `shadowrootmode` attributes are renamed in the text
+ *     instead (neutralizeDeclarativeShadowRoots). The other ways to a fresh
+ *     realm are closed elsewhere: popups by the sandbox, workers by
+ *     `worker-src 'none'`, navigating to another document by the outer
  *     document's `frame-src 'none'`.
  *
  * The observer uses only functions captured here, before the page runs, so a
@@ -153,8 +166,11 @@ export const HTML_PREVIEW_WEBRTC_GLOBALS = [
 export const HTML_PREVIEW_GUARD_SCRIPT = `(function () {
   var apply = Reflect.apply, define = Object.defineProperty, describe = Object.getOwnPropertyDescriptor;
   var lock = function (target, name) {
+    if (!target) return;
     try { define(target, name, { value: undefined, writable: false, enumerable: false, configurable: false }); } catch (error) {}
   };
+  var capture = ["getUserMedia", "getDisplayMedia", "enumerateDevices", "getSupportedConstraints", "selectAudioOutput", "setCaptureHandleConfig"];
+  for (var c = 0; c < capture.length; c++) lock(window.MediaDevices && window.MediaDevices.prototype, capture[c]);
   var names = ${JSON.stringify(HTML_PREVIEW_WEBRTC_GLOBALS)};
   var own = Object.getOwnPropertyNames(window);
   for (var i = 0; i < own.length; i++) { if (/^(webkit|moz)?RTC/.test(own[i])) names.push(own[i]); }
@@ -166,12 +182,18 @@ export const HTML_PREVIEW_GUARD_SCRIPT = `(function () {
     var holder = window[holders[h]];
     if (holder) { lock(holder.prototype, "contentWindow"); lock(holder.prototype, "contentDocument"); }
   }
+  var parsers = [[Element.prototype, "setHTMLUnsafe"], [Element.prototype, "setHTML"], [window.Document, "parseHTMLUnsafe"],
+    [window.Document, "parseHTML"], [Document.prototype, "write"], [Document.prototype, "writeln"]];
+  if (window.ShadowRoot) parsers.push([ShadowRoot.prototype, "setHTMLUnsafe"], [ShadowRoot.prototype, "setHTML"]);
+  for (var q = 0; q < parsers.length; q++) lock(parsers[q][0], parsers[q][1]);
   var frames = "iframe,frame,frameset,object,embed,portal,fencedframe";
   var addedNodes = describe(MutationRecord.prototype, "addedNodes").get;
   var listLength = describe(NodeList.prototype, "length").get;
   var listItem = NodeList.prototype.item;
   var nodeType = describe(Node.prototype, "nodeType").get;
   var matches = Element.prototype.matches, remove = Element.prototype.remove, select = Element.prototype.querySelectorAll;
+  var selectInRoot = DocumentFragment.prototype.querySelectorAll, observe = MutationObserver.prototype.observe;
+  var attach = Element.prototype.attachShadow;
   var each = function (list, visit) {
     var count = apply(listLength, list, []);
     for (var n = 0; n < count; n++) visit(apply(listItem, list, [n]));
@@ -182,10 +204,41 @@ export const HTML_PREVIEW_GUARD_SCRIPT = `(function () {
     if (apply(matches, node, [frames])) { removeNode(node); return; }
     each(apply(select, node, [frames]), removeNode);
   };
-  new MutationObserver(function (records) {
+  var observer = new MutationObserver(function (records) {
     for (var r = 0; r < records.length; r++) each(apply(addedNodes, records[r], []), drop);
-  }).observe(document, { childList: true, subtree: true });
+  });
+  var watch = { childList: true, subtree: true };
+  apply(observe, observer, [document, watch]);
+  if (attach) {
+    define(Element.prototype, "attachShadow", {
+      value: function attachShadow(init) {
+        var root = apply(attach, this, [init]);
+        apply(observe, observer, [root, watch]);
+        each(apply(selectInRoot, root, [frames]), removeNode);
+        return root;
+      },
+      writable: false, enumerable: false, configurable: false
+    });
+  }
 })();`;
+
+/**
+ * Renames `shadowrootmode` (and its old name `shadowroot`) wherever the HTML
+ * tokenizer could read it as an attribute name, so a page's own markup parses
+ * as a plain, inert `<template>` instead of a declarative shadow root the
+ * guard could not see into (a closed one is unreachable from script). An
+ * attribute name starts after whitespace, `/`, or straight after a quoted
+ * value, and ends at whitespace, `/`, `>` or `=`; the match follows exactly
+ * that, ignoring case, so `host.shadowRoot` in a script and longer names such
+ * as `data-shadowrootmode` are left as written. The text is not parsed, so the
+ * same word standing alone in prose is renamed too -- the cost of not parsing
+ * the page. No other route exists: the parser attaches a declarative root
+ * without calling `attachShadow`, a closed root is unreachable from script,
+ * and no policy header turns declarative shadow DOM off. Applied only when a
+ * preview frame is built -- a shared snapshot keeps the page as it was.
+ */
+export const neutralizeDeclarativeShadowRoots = (html: string) =>
+    html.replace(/(^|[\s/"'])(shadowroot(?:mode)?)(?=[\s/>=]|$)/gi, "$1data-tomverse-$2");
 
 /** A CSP nonce as an embedding document can carry it (base64 characters). */
 export const isEmbedderNonce = (nonce: string | null | undefined): nonce is string =>
@@ -215,7 +268,7 @@ export function buildHtmlPreviewSrcdoc(
     assetOrigin?: string | null,
     options: { nonce?: string | null } = {}
 ): string {
-    const page = html.replace(LEADING_DOCTYPE, "");
+    const page = neutralizeDeclarativeShadowRoots(html.replace(LEADING_DOCTYPE, ""));
     const nonce = isEmbedderNonce(options.nonce) ? ` nonce="${options.nonce}"` : "";
     const inner =
         `<!doctype html><meta http-equiv="Content-Security-Policy" content="${htmlPreviewCsp(assetOrigin)}">` +

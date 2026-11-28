@@ -104,3 +104,18 @@ test("bytes that are not whole UTF-8 are refused, not decoded with replacement c
   const outcome = await prepareArtifactShare("user_1", { kind: "artifact", artifactId: "art_1" }, OPEN);
   assert.deepEqual(outcome, { ok: false, code: "ARTIFACT_SHARE_SOURCE_NOT_FOUND", status: 404 });
 });
+
+test("an empty file is refused as empty, judged from its bytes rather than from the size its row recorded", async () => {
+  const { prepareArtifactShare } = await load();
+  reset(Buffer.alloc(0));
+  const empty = await prepareArtifactShare("user_1", { kind: "artifact", artifactId: "art_1" }, OPEN);
+  assert.deepEqual(empty, { ok: false, code: "ARTIFACT_SHARE_EMPTY", status: 400 });
+  assert.equal(world.reads.length, 1);
+
+  // A row that recorded nothing for a file that holds a page is read, not refused as empty.
+  const page = Buffer.from("<p>ok</p>", "utf8");
+  reset(page, 0);
+  const shared = await prepareArtifactShare("user_1", { kind: "artifact", artifactId: "art_1" }, OPEN);
+  assert.equal(shared.ok, true, JSON.stringify(shared));
+  if (shared.ok) assert.equal(shared.prepared.content, page.toString("utf8"));
+});

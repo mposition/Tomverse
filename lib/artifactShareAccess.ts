@@ -91,7 +91,8 @@ export type ArtifactShareRefusalCode =
     | "CONVERSATION_LOCKED"
     | "CONTINUATION_SHARE_NOT_SUPPORTED"
     | "RESEARCH_SHARE_PRIVATE"
-    | "ARTIFACT_SHARE_TOO_LARGE";
+    | "ARTIFACT_SHARE_TOO_LARGE"
+    | "ARTIFACT_SHARE_EMPTY";
 
 export type ArtifactShareFacts = {
     sharingAvailable: boolean;
@@ -120,6 +121,7 @@ const STATUS: Record<ArtifactShareRefusalCode, number> = {
     CONTINUATION_SHARE_NOT_SUPPORTED: 409,
     RESEARCH_SHARE_PRIVATE: 409,
     ARTIFACT_SHARE_TOO_LARGE: 413,
+    ARTIFACT_SHARE_EMPTY: 400,
 };
 
 /**
@@ -142,9 +144,11 @@ export const artifactShareRefusal = (
     if (facts.conversation.locked) return refuse("CONVERSATION_LOCKED");
     if (facts.conversation.continuesImport) return refuse("CONTINUATION_SHARE_NOT_SUPPORTED");
     if (facts.researchPrivate) return refuse("RESEARCH_SHARE_PRIVATE");
-    if (!Number.isFinite(facts.contentBytes) || facts.contentBytes < 1 || facts.contentBytes > HTML_PREVIEW_MAX_BYTES) {
+    if (!Number.isFinite(facts.contentBytes) || facts.contentBytes > HTML_PREVIEW_MAX_BYTES) {
         return refuse("ARTIFACT_SHARE_TOO_LARGE");
     }
+    // Nothing to show is not a size problem: an empty file is refused as empty, not as too large.
+    if (facts.contentBytes < 1) return refuse("ARTIFACT_SHARE_EMPTY");
     return null;
 };
 

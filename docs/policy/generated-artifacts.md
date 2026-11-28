@@ -1277,7 +1277,10 @@ React(`jsx`·`tsx`) 코드 블록이고, 문서 파일은 대상이 아니다(§
 - 출처 하나에 링크 하나(`sourceKey` unique: `artifact:<id>` 또는 `code:<messageId>:<블록 위치>:<language>:<sha256>`, 블록 위치는
   답변 안 미리보기 가능한 블록 사이의 순서 `previewableBlockIndex`). 같은 글을 HTML과 JSX로 쓴 두 블록은 다른 링크다. 블록의
   글이 바뀐 뒤 새 링크를 만들면 같은 위치의 이전 링크를 같은 트랜잭션에서 닫는다(`artifact.share.revoke`, 이유 `REPLACED`).
-  그래서 패널이 보거나 멈출 수 없는 링크가 그 블록에 남지 않는다. 동시에 두 번 누른 경합(`ArtifactShare_sourceKey_key` unique
+  그래서 패널이 보거나 멈출 수 없는 링크가 그 블록에 남지 않는다. 같은 위치에 다른 글을 동시에 공유하면 두 트랜잭션이 서로의
+  아직 커밋되지 않은 행을 볼 수 없어 링크가 둘 남으므로, 만들기 트랜잭션은 맨 앞에서 위치별 advisory lock
+  (`pg_advisory_xact_lock(hashtext('artifact-share:' || 블록 위치 접두어))`, 파일은 `artifact:<id>`)을 잡아 한 번에 하나씩
+  만든다(검토 반영 2026-11-28, 실제 동시 트랜잭션 DB 테스트). 동시에 두 번 누른 경합(`ArtifactShare_sourceKey_key` unique
   위반)일 때만 먼저 만든 링크를 돌려주고, 다른 실패는 그대로 오류다(`isSourceKeyConflict`). 다시 누르면 같은 링크를,
   만료된 링크는 지우고 새 토큰으로 만든다. 토큰은 `lib/shareTokens.ts`(24바이트 난수), 수명은 대화 공유와 같은
   `SHARE_LINK_TTL_DAYS`(1~365, 기본 30일).
@@ -1292,7 +1295,7 @@ React(`jsx`·`tsx`) 코드 블록이고, 문서 파일은 대상이 아니다(§
 `artifactShareRefusal`이 한 곳에서 정한다: 스위치 꺼짐(503), 요금제 `allowSharing` false(403), 원본 없음·남의 것·답변에 없는
 코드·공유 대상이 아닌 형식(404), 채팅이 아닌 대화, 임시 대화, 잠긴 대화(비밀번호가 있으면 지금 풀려 있어도 거절),
 가져온 대화를 이어 간 대화, 비공개 자료를 쓴 Research 답변(manifest에 URL이 아닌 항목이 있거나 현재 revision이
-`containsPrivate`), 크기(413). 게스트는 로그인이 없어 401이다. 판정이 대화 행에서 읽은 사실(잠금, 임시, 종류,
+`containsPrivate`), 크기(413), 빈 내용(400, `ARTIFACT_SHARE_EMPTY`; 파일은 행의 기록 크기가 아니라 읽은 바이트로 판정). 게스트는 로그인이 없어 401이다. 판정이 대화 행에서 읽은 사실(잠금, 임시, 종류,
 continuation bridge)은 쓰는 SQL 문 안에서 한 번 더 본다(`INSERT … SELECT … WHERE "password" IS NULL AND
 "temporaryExpiresAt" IS NULL AND kind가 chat AND NOT EXISTS bridge`). 요금제와 Research는 대화 행의 사실이 아니므로 공개 읽기가
 매번 다시 본다.
@@ -1364,8 +1367,8 @@ localStorage·부모와 최상위 DOM 접근(SecurityError). 공지 막대는 fr
 `tests/artifactShare.test.mjs`(스위치 조합, 거절 순서와 코드, 공유 가능 언어, 답변 포함 검사, 공개 페이지 CSP가 미리보기
 정책과 지시문별로 같고 `sandbox`·`frame-ancestors`만 더함, frame sandbox, 공유 코드가 우리 문서에 없음, React 문서, 크기,
 헤더, 확인 화면과 `<template>`, 가드가 frame 문서 맨 앞), `tests/htmlArtifactPreview.test.mjs`(`webrtc 'block'`, 가드 위치와
-nonce, 가드가 잠그는 이름), `tests/robotsRoute.test.mjs`(광고 크롤러), `tests/integration/artifact-share.db.test.ts`(migration
-스키마: 생성·재사용·만료·중지·남의 것 거절·잠금 경합·cascade·계정 삭제와 내보내기·CHECK),
+nonce, 가드가 잠그는 이름, `attachShadow` wrapper와 파서 잠금, `shadowrootmode` 이름 바꾸기의 경계와 그리는 순간에만 적용), `tests/robotsRoute.test.mjs`(광고 크롤러), `tests/integration/artifact-share.db.test.ts`(migration
+스키마: 생성·재사용·만료·중지·남의 것 거절·잠금 경합·cascade·계정 삭제와 내보내기·CHECK·같은 블록 동시 공유가 링크 하나를 남김·선언형 shadow root가 든 스냅샷이 원문 그대로),
 `tests/server-contract/artifact-share-page-route.test.ts`(세션 미사용, 헤더, 같은 404, proxy 예외, 확인 화면이 먼저).
 
 ### 19.7 스크립트를 허용하고 보강한다 (운영자 결정 2026-11-28)
@@ -1425,8 +1428,44 @@ nonce, 가드가 잠그는 이름), `tests/robotsRoute.test.mjs`(광고 크롤�
 - 채팅 미리보기(Next dev 서버, `CSP_MODE=enforce`): 가드가 nonce를 달고 실행됐고(`typeof RTCPeerConnection === "undefined"`),
   정상 HTML이 그려졌으며 STUN 시도의 UDP 패킷은 0개였다.
 
+**그림자 DOM 보강**(검토 반영 2026-11-28). observer는 document의 tree만 보는데 shadow root는 그 tree에 속하지 않아, shadow root
+안에 넣은 frame은 지워지지 않고 새 realm에서 STUN을 보냈다(보강 전 측정: 16개 경로에서 패킷). 다음을 더했다.
+- `Element.prototype.attachShadow`를 바꿀 수 없는(non-configurable) wrapper로 바꾼다. 새 root(open·closed, 중첩, custom element
+  생성자 안)마다 observer가 그 root를 보게 하고, 이미 들어 있는 frame을 지운다.
+- `attachShadow`를 거치지 않고 shadow root를 만드는 파서를 `undefined`로 고정한다: `Element`·`ShadowRoot`의 `setHTMLUnsafe`·
+  `setHTML`, `Document.parseHTMLUnsafe`·`parseHTML`, `document.write`·`writeln`(write의 파서도 선언형 shadow root를 만든다 —
+  측정. 속성 이름을 두 번의 write로 나눠 넣는 것도 막힌다).
+- `MediaDevices.prototype`의 `getUserMedia`·`getDisplayMedia`·`enumerateDevices` 등도 같은 방식으로 고정한다.
+- page 자신의 markup은 어떤 script보다 먼저 파싱되므로, frame을 만들 때 `shadowrootmode`(옛 이름 `shadowroot`) 속성 이름을
+  `data-tomverse-…`로 바꾼다(`neutralizeDeclarativeShadowRoots`). HTML tokenizer가 속성 이름으로 읽는 자리(공백·`/`·따옴표
+  바로 뒤에서 시작해 공백·`/`·`>`·`=`에서 끝남, 대소문자 무시)만 바꾸고, `host.shadowRoot`나 `data-shadowrootmode` 같은 더 긴
+  이름은 그대로 둔다. 저장된 스냅샷과 공개 읽기 응답은 원문 그대로이고(DB 테스트), 그리는 순간에만 바뀐다.
+
+**부모가 model HTML을 고치지 않는다는 원칙의 두 번째 예외.** 부모는 model HTML을 해석하거나 다시 쓰지 않는다. 예외는 둘이다:
+채팅에서 앱 nonce를 다는 `withEmbedderNonce`(브라우저 파서 사용)와 이 속성 이름 바꾸기다. 해석하지 않는 다른 방법을 먼저
+찾았으나 없었다: 파서는 `attachShadow`를 부르지 않고 선언형 root를 붙이고, closed root는 script로 닿을 수 없으며, 선언형 shadow
+DOM을 끄는 CSP·Document-Policy 지시문이 없다(Chromium 159). 문자열 치환이라 본문 산문에 따로 선 `shadowrootmode` 낱말도
+바뀐다. **동작 변화:** 선언형 shadow DOM을 쓰는 page는 그 template 내용이 그려지지 않는다(inert template). `attachShadow`로 만드는
+web component는 그대로 그려진다.
+
+| 시도 (Chromium 159.0.8154.6, 시도마다 다른 UDP 포트) | 대조군(가드·이름 바꾸기 없음) | 가드 |
+|---|---|---|
+| `attachShadow` open·closed 후 `innerHTML`, closed root에 `appendChild`, 문서에 넣기 전 root에 넣기 | 각 4 | 0 |
+| 중첩 shadow root, custom element 생성자 안의 closed root | 각 4 | 0 |
+| `Element.setHTMLUnsafe`·`ShadowRoot.setHTMLUnsafe`·`Document.parseHTMLUnsafe`로 선언형 root | 각 4 | 0 |
+| page markup의 `<template shadowrootmode>` open·closed, 따옴표 바로 뒤, `/`와 대문자 | 각 4 | 0 |
+| page markup의 옛 이름 `shadowroot` | 0(Chromium 159는 옛 이름을 지원하지 않음) | 0 |
+| `document.write`로 선언형 root, 속성 이름을 두 번의 write로 나눔 | 각 4 | 0 |
+| `DOMParser`·`createContextualFragment`·`innerHTML`로 선언형 root | 0(이 파서들은 root를 만들지 않음, 측정) | 0 |
+| `insertAdjacentHTML`·`outerHTML`·`createContextualFragment`·`DOMParser` 후 `adoptNode`·template `importNode`·template을 closed root에 복제 | 각 4 | 0 |
+| 새 frame의 window를 같은 task 안에서 `window[0]`·`frames[0]`로(`iceCandidatePoolSize` 포함, observer 재삽입 반복) | 0(SecurityError, 자식 frame은 다른 opaque origin) | 0 |
+| `MediaDevices.prototype.getUserMedia` | 0 | 0(`undefined`) |
+
+정상 내용: `attachShadow`를 쓰는 web component는 그대로 그려졌다(`component-ok`). 선언형 shadow DOM page는 template 내용이
+보이지 않았다(위 동작 변화).
+
 **남는 위험.**
 - 브라우저가 `webrtc 'block'`을 집행하지 않는 동안은 2번 가드가 WebRTC를 막는 유일한 수단이다.
 - 가드는 같은 realm 안의 JavaScript 방어라서, 측정하지 않은 새 realm 경로(브라우저에 새로 생기는 frame 종류, 아직 없는 API)가
-  생기면 뚫릴 수 있다. 그래서 전역 이름은 RTC 접두어로 넓게 잠그고, frame은 종류를 나열해 지운다.
+  생기면 뚫릴 수 있다. 그래서 전역 이름은 RTC 접두어로 넓게 잠그고, frame은 종류를 나열해 지우며, shadow root를 만드는 길은 `attachShadow` 하나만 남긴다.
 - DNS prefetch(`<link rel=dns-prefetch>`)와 CDN 로그 경로는 §19.5 그대로다.

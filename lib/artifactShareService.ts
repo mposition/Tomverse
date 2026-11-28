@@ -210,7 +210,8 @@ export async function prepareArtifactShare(
       found: usable,
       conversation: artifact?.conversation ?? null,
       researchRunId: artifact?.message.researchRunId ?? null,
-      contentBytes: artifact?.byteSize ?? 0,
+      // The row bounds the size from above only; whether the file is empty is judged from the bytes read below.
+      contentBytes: Math.max(1, artifact?.byteSize ?? 0),
     });
     if (before) return { ok: false, ...before };
     if (!artifact?.objectKey) return { ok: false, code: "ARTIFACT_SHARE_SOURCE_NOT_FOUND", status: 404 };
@@ -406,6 +407,9 @@ async function publishOnce(userId: string, prepared: Prepared, now: Date) {
   const expiresAt = new Date(now.getTime() + artifactShareTtlDays(process.env) * 24 * 60 * 60 * 1000);
   await removeExpiredForSource(userId, prepared.sourceKey, now);
   const outcome = await prisma.$transaction(async (tx) => {
+    // One publish at a time per place: two texts shared at once at one block would each insert before either
+    // could see the other's row to close it, leaving two links. A file has one place, its own source key.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"artifact-share:" + (prepared.blockPrefix ?? prepared.sourceKey)}))`;
     const existing = await tx.artifactShare.findUnique({
       where: { sourceKey: prepared.sourceKey },
       select: { id: true, token: true, userId: true, createdAt: true, expiresAt: true },
