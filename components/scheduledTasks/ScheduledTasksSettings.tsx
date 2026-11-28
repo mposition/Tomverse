@@ -31,6 +31,7 @@ type Task = {
   prompt: string;
   modelId: string;
   webSearch: boolean;
+  emailOnFinish: boolean;
   frequency: ScheduledTaskFrequency;
   timeOfDay: string;
   dayOfWeek: number | null;
@@ -56,6 +57,8 @@ type Task = {
 type Listing = {
   enabled: boolean;
   planAllowed: boolean;
+  /** Whether this deployment sends result emails; absent from older servers. */
+  emailNotices?: boolean;
   limits: { maxActiveTasks: number; maxTasks: number; titleCharacters: number; promptCharacters: number };
   tasks: Task[];
 };
@@ -65,6 +68,7 @@ type Form = {
   prompt: string;
   modelId: string;
   webSearch: boolean;
+  emailOnFinish: boolean;
   frequency: ScheduledTaskFrequency;
   timeOfDay: string;
   dayOfWeek: number;
@@ -81,6 +85,7 @@ const blankForm = (modelId: string): Form => ({
   prompt: "",
   modelId,
   webSearch: true,
+  emailOnFinish: true,
   frequency: "daily",
   timeOfDay: "08:00",
   dayOfWeek: 1,
@@ -93,6 +98,7 @@ const formFromTask = (task: Task): Form => ({
   prompt: task.prompt,
   modelId: task.modelId,
   webSearch: task.webSearch,
+  emailOnFinish: task.emailOnFinish,
   frequency: task.frequency,
   timeOfDay: task.timeOfDay,
   dayOfWeek: task.dayOfWeek ?? 1,
@@ -105,6 +111,7 @@ const requestBody = (form: Form) => ({
   prompt: form.prompt,
   modelId: form.modelId,
   webSearch: form.webSearch,
+  emailOnFinish: form.emailOnFinish,
   frequency: form.frequency,
   timeOfDay: form.timeOfDay,
   dayOfWeek: form.frequency === "weekly" ? form.dayOfWeek : null,
@@ -368,6 +375,18 @@ export function ScheduledTasksSettings() {
               />
               {copy.form.webSearch}
             </label>
+            {listing?.emailNotices && (
+              <label className="flex min-h-11 items-center gap-2 self-end text-sm font-semibold">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  data-testid="scheduled-task-email-on-finish"
+                  checked={form.emailOnFinish}
+                  onChange={(event) => { setConfirmation(null); setForm({ ...form, emailOnFinish: event.target.checked }); }}
+                />
+                {copy.form.emailOnFinish}
+              </label>
+            )}
           </div>
           <div className="grid gap-4 sm:grid-cols-3">
             <label className="block text-sm font-semibold">

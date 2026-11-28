@@ -2359,6 +2359,10 @@ export const zhHant = {
                 title: "服務狀態",
                 description: "故障與計畫性維護。",
             },
+            scheduled_tasks: {
+                title: "定時任務",
+                description: "定時任務完成回答或暫停時。",
+            },
             product_updates: {
                 title: "產品更新",
                 description: "新功能與改進。",

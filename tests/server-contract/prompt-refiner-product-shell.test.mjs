@@ -61,6 +61,12 @@ mock.module(mod("components/images/ImageModelCatalogProvider.tsx"), { namedExpor
 mock.module(mod("components/chat/ChatAudioAttachmentContext.tsx"), { namedExports: {
   ChatAudioAttachmentProvider: () => null,
 } });
+mock.module(mod("lib/chatReadoutServer.ts"), { namedExports: {
+  chatServerReadoutOffered: () => false,
+} });
+mock.module(mod("components/chat/ChatServerReadoutContext.tsx"), { namedExports: {
+  ChatServerReadoutProvider: () => null,
+} });
 mock.module(mod("components/chat/PromptRefinerFixtureRefreshLoader.tsx"), { namedExports: {
   PromptRefinerFixtureRefreshLoader: () => null,
 } });

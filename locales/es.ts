@@ -2382,6 +2382,10 @@ export const es = {
                 title: "Estado del servicio",
                 description: "Incidencias y mantenimiento planificado.",
             },
+            scheduled_tasks: {
+                title: "Tareas programadas",
+                description: "Cuando una tarea programada responde o se pausa.",
+            },
             product_updates: {
                 title: "Novedades del producto",
                 description: "Funciones nuevas y mejoras.",

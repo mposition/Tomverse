@@ -5,6 +5,7 @@ import {
   buildAccountDeletionScheduledEmail,
   buildAccountRestoredEmail,
   buildAccountWelcomeEmail,
+  renderEmailButton,
   renderEmailParagraph,
   renderTransactionalEmailLayout,
 } from "@/lib/accountEmails";
@@ -215,6 +216,30 @@ export const POLICY_CHANGE_NOTICE_TEMPLATE = "policy_change_notice";
 /** The 14-day processing-result notices (docs/policy/email-consent-copy-draft.md §4.1, §4.2). */
 export const CONSENT_RESULT_NOTICE_TEMPLATE = "consent_result_notice";
 export const UNSUBSCRIBE_RESULT_NOTICE_TEMPLATE = "unsubscribe_result_notice";
+/**
+ * A scheduled task's result notices (lib/scheduledTaskNotice.ts): a run
+ * answered, or the task paused itself. Two keys for the same reason as the pass
+ * notices -- one hash per message.
+ */
+export const SCHEDULED_TASK_RUN_ANSWERED_TEMPLATE = "scheduled_task_run_answered";
+export const SCHEDULED_TASK_PAUSED_TEMPLATE = "scheduled_task_paused";
+/**
+ * The task's own name, when it ran (already written in the account's language
+ * and the task's zone) and two links. Never any of the answer: the answer stays
+ * in the conversation the link opens.
+ */
+export type ScheduledTaskNoticePayload = {
+  taskTitle: string;
+  runAt: string;
+  actionUrl: string;
+  settingsUrl: string;
+};
+const SCHEDULED_TASK_NOTICE_PLACEHOLDER: ScheduledTaskNoticePayload = {
+  taskTitle: "{{taskTitle}}",
+  runAt: "{{runAt}}",
+  actionUrl: "{{actionUrl}}",
+  settingsUrl: "{{settingsUrl}}",
+};
 
 const definitions: AnyDefinition[] = [
   {
@@ -505,6 +530,29 @@ const definitions: AnyDefinition[] = [
       periodEnd: null,
       reason: null,
     },
+  },
+  {
+    key: SCHEDULED_TASK_RUN_ANSWERED_TEMPLATE,
+    // Service mail about a task the account set up itself, with no promotion
+    // in it: gated by the `scheduled_tasks` purpose (on by default, no consent)
+    // and by the task's own switch (docs/policy/email-notifications.md §3.2).
+    senderRole: "general",
+    classification: "service",
+    purpose: "scheduled_tasks",
+    requiresUnsubscribe: false,
+    render: (payload: ScheduledTaskNoticePayload, language) =>
+      buildScheduledTaskNoticeEmail("answered", payload, language),
+    placeholderPayload: SCHEDULED_TASK_NOTICE_PLACEHOLDER,
+  },
+  {
+    key: SCHEDULED_TASK_PAUSED_TEMPLATE,
+    senderRole: "general",
+    classification: "service",
+    purpose: "scheduled_tasks",
+    requiresUnsubscribe: false,
+    render: (payload: ScheduledTaskNoticePayload, language) =>
+      buildScheduledTaskNoticeEmail("paused", payload, language),
+    placeholderPayload: SCHEDULED_TASK_NOTICE_PLACEHOLDER,
   },
 ];
 
@@ -887,6 +935,183 @@ export function buildProcessingResultNotice(
       bodyHtml:
         renderEmailParagraph(lines.map(escapeResultHtml).join("<br>")) +
         renderEmailParagraph(escapeResultHtml(copy.closing)),
+    }),
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * The scheduled-task result notices (`scheduled_task_run_answered`,
+ * `scheduled_task_paused`).
+ *
+ * Status and links only: the task's own name, when it ran, a link to the
+ * answer (or to the task when it paused) and where to switch these off. No
+ * part of the answer is in the mail. Here rather than in a module of its own
+ * because this file is in the Prompt Refiner's sealed runtime closure, like the
+ * notices above. The seven email languages; zh-Hant reads English, as every
+ * other account mail does.
+ * ------------------------------------------------------------------ */
+
+type ScheduledTaskNoticeLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt";
+
+type ScheduledTaskNoticeCopy = {
+  answeredSubject: (title: string) => string;
+  answeredBody: (title: string, runAt: string) => string;
+  answeredAction: string;
+  pausedSubject: (title: string) => string;
+  pausedBody: (title: string, runAt: string) => string;
+  pausedAction: string;
+  manage: string;
+  manageLink: string;
+};
+
+const SCHEDULED_TASK_NOTICE_COPY: Record<ScheduledTaskNoticeLanguage, ScheduledTaskNoticeCopy> = {
+  en: {
+    answeredSubject: (title) => `Scheduled task answered: ${title}`,
+    answeredBody: (title, runAt) =>
+      `Your scheduled task "${title}" ran (${runAt}). The new answer is in its conversation.`,
+    answeredAction: "View the answer",
+    pausedSubject: (title) => `Scheduled task paused: ${title}`,
+    pausedBody: (title, runAt) =>
+      `Your scheduled task "${title}" was paused after its run (${runAt}). Open scheduled tasks to see why and resume it.`,
+    pausedAction: "Open scheduled tasks",
+    manage:
+      "You can turn these emails off for each task in scheduled tasks, or for every task in your email notification settings.",
+    manageLink: "Email notification settings",
+  },
+  ko: {
+    answeredSubject: (title) => `예약 작업 답변 도착: ${title}`,
+    answeredBody: (title, runAt) =>
+      `예약 작업을 실행했고(${runAt}) 새 답변을 대화에 저장했습니다. 작업: ${title}`,
+    answeredAction: "답변 보기",
+    pausedSubject: (title) => `예약 작업 일시정지: ${title}`,
+    pausedBody: (title, runAt) =>
+      `실행(${runAt}) 뒤 예약 작업이 일시정지됐습니다. 예약 작업 설정에서 이유를 확인하고 다시 시작할 수 있습니다. 작업: ${title}`,
+    pausedAction: "예약 작업 열기",
+    manage: "이 메일은 예약 작업 설정에서 작업마다, 또는 이메일 알림 설정에서 한 번에 끌 수 있습니다.",
+    manageLink: "이메일 알림 설정",
+  },
+  zh: {
+    answeredSubject: (title) => `定时任务已回答：${title}`,
+    answeredBody: (title, runAt) => `定时任务已运行（${runAt}），新回答已保存到对话中。任务：${title}`,
+    answeredAction: "查看回答",
+    pausedSubject: (title) => `定时任务已暂停：${title}`,
+    pausedBody: (title, runAt) =>
+      `定时任务在运行（${runAt}）后已暂停。请在定时任务设置中查看原因并重新开始。任务：${title}`,
+    pausedAction: "打开定时任务",
+    manage: "你可以在定时任务中为每个任务关闭这类邮件，也可以在邮件通知设置中一次性关闭。",
+    manageLink: "邮件通知设置",
+  },
+  fr: {
+    answeredSubject: (title) => `Tâche planifiée répondue : ${title}`,
+    answeredBody: (title, runAt) =>
+      `Votre tâche planifiée « ${title} » a été exécutée (${runAt}). La nouvelle réponse se trouve dans sa conversation.`,
+    answeredAction: "Voir la réponse",
+    pausedSubject: (title) => `Tâche planifiée en pause : ${title}`,
+    pausedBody: (title, runAt) =>
+      `Votre tâche planifiée « ${title} » a été mise en pause après son exécution (${runAt}). Ouvrez les tâches planifiées pour en voir la raison et la relancer.`,
+    pausedAction: "Ouvrir les tâches planifiées",
+    manage:
+      "Vous pouvez désactiver ces e-mails pour chaque tâche dans les tâches planifiées, ou pour toutes dans vos paramètres de notification par e-mail.",
+    manageLink: "Paramètres de notification par e-mail",
+  },
+  de: {
+    answeredSubject: (title) => `Geplante Aufgabe beantwortet: ${title}`,
+    answeredBody: (title, runAt) =>
+      `Ihre geplante Aufgabe „${title}“ wurde ausgeführt (${runAt}). Die neue Antwort finden Sie in ihrer Unterhaltung.`,
+    answeredAction: "Antwort ansehen",
+    pausedSubject: (title) => `Geplante Aufgabe pausiert: ${title}`,
+    pausedBody: (title, runAt) =>
+      `Ihre geplante Aufgabe „${title}“ wurde nach der Ausführung (${runAt}) pausiert. Unter „Geplante Aufgaben“ sehen Sie den Grund und können sie fortsetzen.`,
+    pausedAction: "Geplante Aufgaben öffnen",
+    manage:
+      "Sie können diese E-Mails für jede Aufgabe unter „Geplante Aufgaben“ oder für alle in den E-Mail-Benachrichtigungseinstellungen abschalten.",
+    manageLink: "E-Mail-Benachrichtigungseinstellungen",
+  },
+  es: {
+    answeredSubject: (title) => `Tarea programada respondida: ${title}`,
+    answeredBody: (title, runAt) =>
+      `Tu tarea programada «${title}» se ejecutó (${runAt}). La nueva respuesta está en su conversación.`,
+    answeredAction: "Ver la respuesta",
+    pausedSubject: (title) => `Tarea programada en pausa: ${title}`,
+    pausedBody: (title, runAt) =>
+      `Tu tarea programada «${title}» se pausó después de ejecutarse (${runAt}). Abre las tareas programadas para ver el motivo y reanudarla.`,
+    pausedAction: "Abrir tareas programadas",
+    manage:
+      "Puedes desactivar estos correos para cada tarea en las tareas programadas, o para todas en la configuración de notificaciones por correo.",
+    manageLink: "Configuración de notificaciones por correo",
+  },
+  pt: {
+    answeredSubject: (title) => `Tarefa agendada respondida: ${title}`,
+    answeredBody: (title, runAt) =>
+      `Sua tarefa agendada "${title}" foi executada (${runAt}). A nova resposta está na conversa dela.`,
+    answeredAction: "Ver a resposta",
+    pausedSubject: (title) => `Tarefa agendada pausada: ${title}`,
+    pausedBody: (title, runAt) =>
+      `Sua tarefa agendada "${title}" foi pausada após a execução (${runAt}). Abra as tarefas agendadas para ver o motivo e retomá-la.`,
+    pausedAction: "Abrir tarefas agendadas",
+    manage:
+      "Você pode desativar esses e-mails para cada tarefa nas tarefas agendadas, ou para todas nas configurações de notificações por e-mail.",
+    manageLink: "Configurações de notificações por e-mail",
+  },
+};
+
+// A switch rather than an index into the table: a computed access in this file
+// would join the closure's reviewed inventory (see noticeCopyFor above).
+const scheduledTaskNoticeCopy = (language: string | null | undefined): ScheduledTaskNoticeCopy => {
+  switch (language) {
+    case "ko":
+      return SCHEDULED_TASK_NOTICE_COPY.ko;
+    case "zh":
+      return SCHEDULED_TASK_NOTICE_COPY.zh;
+    case "fr":
+      return SCHEDULED_TASK_NOTICE_COPY.fr;
+    case "de":
+      return SCHEDULED_TASK_NOTICE_COPY.de;
+    case "es":
+      return SCHEDULED_TASK_NOTICE_COPY.es;
+    case "pt":
+      return SCHEDULED_TASK_NOTICE_COPY.pt;
+    default:
+      return SCHEDULED_TASK_NOTICE_COPY.en;
+  }
+};
+
+const escapeScheduledTaskHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+export function buildScheduledTaskNoticeEmail(
+  kind: "answered" | "paused",
+  payload: ScheduledTaskNoticePayload,
+  language: string | null | undefined
+) {
+  const copy = scheduledTaskNoticeCopy(language);
+  const subject = kind === "answered" ? copy.answeredSubject(payload.taskTitle) : copy.pausedSubject(payload.taskTitle);
+  const body =
+    kind === "answered"
+      ? copy.answeredBody(payload.taskTitle, payload.runAt)
+      : copy.pausedBody(payload.taskTitle, payload.runAt);
+  const action = kind === "answered" ? copy.answeredAction : copy.pausedAction;
+  return {
+    subject,
+    text: [body, `${action}: ${payload.actionUrl}`, `${copy.manage}\n${copy.manageLink}: ${payload.settingsUrl}`].join(
+      "\n\n"
+    ),
+    html: renderTransactionalEmailLayout({
+      preview: body,
+      title: subject,
+      bodyHtml: [
+        renderEmailParagraph(escapeScheduledTaskHtml(body)),
+        renderEmailButton(escapeScheduledTaskHtml(payload.actionUrl), escapeScheduledTaskHtml(action)),
+        renderEmailParagraph(
+          `${escapeScheduledTaskHtml(copy.manage)} <a href="${escapeScheduledTaskHtml(payload.settingsUrl)}" style="color:#2563eb;">${escapeScheduledTaskHtml(copy.manageLink)}</a>`,
+          "muted"
+        ),
+      ].join(""),
     }),
   };
 }

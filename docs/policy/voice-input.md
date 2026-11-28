@@ -33,8 +33,9 @@
 이미 차감됩니다. 사용자가 읽고 고칠 기회는 이 기능의 편의 사항이 아니라
 안전장치입니다.
 
-**이번 범위가 아닌 것**: native 앱, 답변 음성 재생(TTS), 실시간 양방향 voice
-mode, 자동 전송.
+**이번 범위가 아닌 것**: native 앱, 실시간 양방향 voice mode, 자동 전송.
+답변을 서버 음성(TTS)으로 읽어 주는 기능은 §6.4에 따로 정의합니다(기본 꺼짐,
+2026-11-28 추가).
 
 별도 음성 대화 기능은 [Voice conversation](voice-conversation.md)에 정의합니다.
 위 무료 받아쓰기의 자동 전송 금지는 그대로이며, 사용자가 명시적으로 시작한
@@ -848,6 +849,103 @@ readiness가 판정하는 모델과 port가 실제로 호출하는 모델이 갈
 3. 이 문서를 **먼저** 고치고 그 다음에 코드를 고칠 것(§16).
 4. 기존 사용자에게 **예고**. 무료로 쓰던 기능이 말 없이 크레딧을 먹기
    시작하는 것은 되돌릴 수 없는 신뢰 문제입니다.
+
+### 6.4 서버 음성으로 답변 읽어 주기 (2026-11-28, 기본 꺼짐)
+
+Chat 답변의 "읽어 주기"를 브라우저 내장 음성 대신 공급자 TTS로 읽습니다.
+쓸 수 없으면(스위치 꺼짐, 등록부 거절, 상한 미설정·소진, 공급자 오류) 지금의
+브라우저 음성으로 돌아갑니다. 운영자 지시(2026-11-28)로 만들었고, 켜는 것은
+유료 호출을 여는 일이라 별도 승인입니다.
+
+**누가**: 로그인 사용자의 자기 Chat 답변만(임시 대화 포함). 게스트·공유 페이지는
+브라우저 음성입니다. 소유·잠금·답변 판정은 답변 평가와 같은
+`chatAnswerRatingRefusal`을 씁니다.
+
+**무엇을 보내는가**: 브라우저가 보낸 글이 아니라 **저장된 답변**을 서버가 다시
+정리한 글입니다(`lib/chatReadoutText.ts`). 코드 블록(Mermaid·차트 포함), 표,
+수식, 링크 주소는 읽지 않습니다. 이 정리는 브라우저 음성과 같은 함수
+(`lib/chatSpeechText.ts`)이며, 표를 셀 단위로 읽던 이전 동작도 이번에
+"읽지 않음"으로 바뀌었습니다. 한 조각 1,500자, 한 답변 최대 8조각(12,000자)이고
+나머지는 읽지 않습니다. 요청 하나가 조각 하나입니다.
+
+**가격 결정은 §6.1을 그대로 따릅니다** — 사용자 크레딧 없음, operational
+guardrail만. 이 결정을 바꾸는 것은 §6.3의 조건을 밟습니다.
+
+**가격 등록부**: `lib/chatReadoutPricing.ts`의 `READOUT_MODEL_PRICE_REGISTER`.
+transcription 등록부와 단위가 달라(text input token + audio **output** token)
+따로 둡니다. 2026-11-28에 공급자 문서에서 읽은 것:
+
+| 항목 | 값 | 출처 |
+|---|---|---|
+| 모델 | `gpt-4o-mini-tts`, voice `marin`, `mp3` | [API reference](https://developers.openai.com/api/reference/resources/audio/subresources/speech/methods/create) |
+| 가격 | text input $0.60 / 1M tokens, audio output $12.00 / 1M tokens | [pricing](https://developers.openai.com/api/docs/pricing) |
+| 최대 입력 | 4,096자 | API reference |
+| 수명 | `/v1/audio/speech`의 모든 모델이 2026-10-01 공지로 deprecated, **2027-01-06 종료**. 후속으로 지목된 것은 Realtime 모델 `gpt-realtime-2.1-mini` | [deprecations](https://developers.openai.com/api/docs/deprecations) |
+
+**fail-closed는 `voiceModelPriceRefusal`과 같은 세 단계입니다.** 등록부에 없는
+모델은 거절, `costObservation`이 `null`이면 거절. 지금 항목은 정가만 읽었고
+청구서와 대조한 적이 없으므로 **스위치를 켜도 서버 음성은 열리지 않습니다.**
+열려면 승인된 유료 확인 1회로 `costObservation`을 채우거나, 정가로 운영하는 것을
+사람이 승인해야 합니다(§6.1-3). 우회로는 미리 만들지 않았습니다.
+`reverifyBy`는 종료 전날(2027-01-05)이고, 그 전에 후속 모델을 정해야 합니다.
+종료 뒤 공급자가 거절하면 `refused`로 분류되어 예약이 돌아가고 브라우저 음성이
+읽습니다. `npm run check:voice-price-register`가 이 등록부도 검사합니다.
+
+**스위치와 상한** (`lib/chatReadoutAccess.ts`). 상한에는 어느 환경에도 기본값이
+없습니다 — 기본값은 아무도 고르지 않은 지출 상한이고, 미설정은 꺼진 쪽입니다.
+
+| 환경변수 | 뜻 |
+|---|---|
+| `CHAT_SERVER_READOUT_ENABLED` | 정확히 `true`일 때만 켜짐 |
+| `CHAT_SERVER_READOUT_KILL_SWITCH` | 비어 있지 않은 아무 값이나 즉시 꺼짐(§2와 같은 비대칭) |
+| `CHAT_SERVER_READOUT_API_KEY` | 전용 키, 없으면 공용 OpenAI 키(`resolveProviderApiKey`) |
+| `CHAT_READOUT_CHARACTERS_PER_ACCOUNT_DAY` | 계정당 하루 글자 수 |
+| `CHAT_READOUT_PROVIDER_CHARACTERS_PER_DAY` | 배포 전체 하루 글자 수 |
+| `CHAT_READOUT_PROVIDER_CHARACTERS_PER_MONTH` | 배포 전체 한 달 글자 수(하루보다 작으면 미설정으로 봄) |
+
+**예약 → 호출 → 정산**(`lib/chatReadoutBudgetCore.ts`, DB는
+`lib/chatReadoutBudget.ts`). §6.1-4의 장치를 그대로 씁니다 — `ChatUsageBucket`의
+조건부 upsert, 계정 하루 → 공급자 하루 → 공급자 한 달 순서, 뒤가 거절하면 앞을
+되돌린 뒤 거절, `periodStart`를 들고 다니는 1회용 handle. 단위는 **글자**입니다.
+호출 전에 정확히 아는 유일한 양이고, 토큰으로 환산하는 승인된 비율이 없으므로 초
+예산과 같은 usage(exposure) 예산입니다. period는 `readout-*`이고 음성 입력
+예산과 섞이지 않습니다.
+
+| 공급자 결과 | disposition | 예약 |
+|---|---|---|
+| 오디오 응답 | `billed` | 유지 |
+| 키 없음(보내지 않음) | `not_sent` | 반환 |
+| 4xx(429 포함) | `refused` | 반환 |
+| 타임아웃·연결 끊김·5xx·읽지 못한 2xx | `indeterminate` | **유지**, 재시도 없음 |
+
+**한 조각에 한 요청** (2026-11-28 검토 반영). 서버와 브라우저가 각각 막습니다.
+
+- 서버: 계정·답변·조각마다 lease(`ChatUsageBucket`, period `readout-piece-lease`)를
+  예약보다 먼저 잡습니다. 잡혀 있으면 `409 READOUT_IN_PROGRESS`로 예산과 공급자에
+  닿기 전에 거절합니다. 결과를 알면(billed·refused·not_sent, 예산 거절 포함) 풀고,
+  **결과 불명이면 5분 동안 유지**해 그동안 같은 조각을 다시 사지 않습니다. 5분은
+  공급자 타임아웃(60초)보다 길고, 죽은 프로세스가 남긴 lease를 치우는 시간입니다.
+- 서버는 공급자 실패를 `READOUT_PROVIDER_REFUSED`(비용 없음)와
+  `READOUT_OUTCOME_UNKNOWN`(청구됐을 수 있음)으로 나눠 답합니다.
+- 브라우저: 조각마다 요청 promise 하나를 공유합니다. 미리 받기 중인 조각을 재생이
+  원하면 그 요청을 기다립니다. 결과 불명(위 코드, 서버 500, 연결 오류, 받았지만 읽지
+  못한 응답)으로 끝난 조각은 그 페이지에서 다시 요청하지 않습니다. 비용 없는 거절은
+  기억하지 않습니다.
+- 서버 음성이 어떤 조각을 못 읽으면 **그 조각부터 브라우저 음성이 이어 읽습니다**
+  (아무것도 재생되기 전이면 답변 전체). 받은 오디오를 재생하지 못한 경우(디코딩 오류
+  등)도 같고, 그 조각은 이미 샀으므로 다시 요청하지 않습니다. 조각 경계는 서버와 같은
+  `readoutPieces`입니다.
+
+**같은 답변을 다시 누르면** 브라우저 메모리에 둔 오디오(답변 4개까지)를 다시
+재생하고 다시 사지 않습니다(`lib/chatServerReadout.ts`). 서버에는 오디오를
+저장하지 않습니다. 새로고침 뒤에는 다시 삽니다 — 상한이 그 비용을 묶습니다.
+
+**재생 중에는 "AI가 만든 음성"을 표시합니다.** 공급자 이용 정책이 생성 음성임을
+알리라고 요구합니다.
+
+**켜기 전에 남은 것**: (1) `costObservation` 또는 정가 운영 승인, (2) 상한 세 값,
+(3) 답변 글이 TTS 공급자로 가는 것에 대한 개인정보 고지 검토(§11.4와 같은 종류의
+문구 변경), (4) 2027-01-06 이후의 후속 모델.
 
 ## 7. Operational guardrail — entitlement가 아닙니다
 

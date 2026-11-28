@@ -1355,6 +1355,7 @@ marketing을 포함하지 않는다는 범위 결정.
 | 2 | 비밀번호/인증수단 변경 | transactional | 가능 | 가능 | **금지** | P0 | 공격적 | transactional |
 | 3 | 영수증, 결제 실패, 환불, 구독 변경 | transactional | 가능 | 가능 | **금지** | P0 | 공격적 | transactional |
 | 4 | 서비스 장애, 예정 점검 | service | 가능 | 가능 | 선택(별도 preference) | P1 | 표준 | transactional |
+| 4a | 예약 작업 결과(답변 완료, 일시정지) | service | 가능 | 가능 | 선택(별도 preference) — 설정 링크 | P2 | 표준 | transactional |
 | 5 | 약관/개인정보처리방침/가격 변경 | service/legal | 가능 | **가능(필수)** | **금지** | P1 | 표준 + 미도달 추적 | transactional |
 | 6 | 기능 업데이트 / 릴리스 노트 | **marketing** | **조건부**(아래) | 불가 | **필수** | P2 | 표준 | marketing |
 | 7 | 신규 기능 소개, 뉴스레터 | marketing | **조건부**(아래) | 불가 | **필수** | P3 | 관대(1회 재시도) | marketing |
@@ -1418,6 +1419,88 @@ authority는 그와 별개로 **여전히 필요합니다.** 호주의 `inferred
   끌 수 없습니다**(10번으로 분류).
 - **반드시 포함:** 영향 범위, 시각(사용자 시간대), 현재 상태, 다음 갱신 시점.
 - **국가별 차이:** GDPR 제33/34조의 개인정보 유출 통지는 4번이 아니라 10번입니다.
+
+#### 4a. 예약 작업 결과 (2026-11-28 추가, 기본 꺼짐)
+- **무엇**: 예약 작업 실행이 끝났을 때 한 통 — 답변이 대화에 저장됐거나
+  (`scheduled_task_run_answered`), 그 실행 때문에 작업이 일시정지됐을 때
+  (`scheduled_task_paused`). 다시 시도될 실패, 일시정지하지 않은 건너뜀, 결과 불명은
+  보내지 않습니다. 결과 불명으로 끝난 실행은 그것 때문에 작업이 일시정지돼도 보내지
+  않습니다. 실행 종료 때와 복구 때 같은 함수(`scheduledRunNoticeKind`,
+  `lib/scheduledTaskCore.ts`)로 판정하므로, 어느 쪽이 결정했는지에 따라 결과가 달라지지
+  않습니다.
+- **분류: service, purpose `scheduled_tasks`.** 사용자가 직접 만든 작업에 대한
+  사실이고 판촉이 없으므로 marketing이 아닙니다. 동의가 필요 없고 기본 ON이며,
+  4번처럼 **별도 preference**로 끌 수 있습니다(`/settings/notifications`). "모든
+  마케팅 수신 거부"는 이것을 끄지 않습니다. DB CHECK가 transactional에 purpose를
+  금지하므로, 끌 수 있는 비마케팅 메일은 service입니다.
+- **작업마다 끄기**: `ScheduledTask.emailOnFinish`(만들 때 생략하면 true), 예약 작업
+  설정의 "끝나면 이메일로 알림". 발송 스위치가 켜진 배포에서만 보입니다. 수정 요청에
+  이 필드가 없으면 기존 값을 그대로 둡니다 — 필드를 모르는 옛 화면이나 API 클라이언트가
+  사용자가 끈 알림을 다시 켜지 못하게 하기 위해서입니다.
+- **스위치를 켜면 기존 작업도 받습니다.** migration이 기존 작업 행을 `emailOnFinish =
+  true`로 채우고, `scheduled_tasks` purpose도 행이 없으면 켜짐이므로, 스위치를 켠 **뒤에
+  끝나는 실행부터** 기존 작업을 포함한 모든 작업이 메일을 보냅니다. 이것은 동의가 필요
+  없는 service 메일의 기본값(위 분류)을 따른 의도된 동작입니다. 켜기 전에 끝난 실행은
+  보내지 않습니다(아래 "실행 종료 때의 표시"와 "배포 순간"). 기존 작업의 사용자는 스위치가
+  꺼져 있는 동안 체크박스를 본 적이 없으므로, 첫 메일 하단의 끄는 곳 링크가 그 선택지를
+  처음 알려 줍니다. 기존 작업만 꺼진 채 시작하려면 별도 제품 결정이 필요합니다.
+- **내용은 상태와 링크뿐입니다.** 작업 이름, 실행 시각(계정 언어·작업 시간대), 답변이
+  있는 대화 링크(일시정지면 예약 작업 설정 링크), 끄는 곳 링크. **답변도 질문도 넣지
+  않습니다.** 이 절에 요약을 넣는 규칙이 없으므로 넣지 않습니다.
+- **수신 거부**: service는 unsubscribe가 선택입니다(`EmailTemplate_unsubscribe_check`).
+  one-click 링크 대신 본문에 알림 설정 링크를 둡니다(`requiresUnsubscribe: false`).
+- **발송 경계** (`lib/scheduledTaskNotice.ts`): `SCHEDULED_TASK_EMAIL_ENABLED`가
+  정확히 `true`일 때만 큐에 넣습니다. 꺼져 있으면 발송 큐와 메일 테이블에 아무것도
+  쓰지 않습니다.
+  **실행 한 번에 한 통**: `ScheduledTaskRun.noticeQueuedAt`은 "이 실행의 알림이
+  결정된 시각"입니다(큐에 넣음 또는 보내지 않기로 함). NULL일 때만, outbox 행과 같은
+  transaction에서 표시합니다. 재시도·재조정·중복 종료는 표시를 보고 아무것도 넣지
+  않습니다. **같은 transaction 안에서** 작업 행을 잠근 채 작업 토글을 읽고
+  (`lib/scheduledTaskNoticeGate.ts`, 설정 저장과 직렬화), purpose를
+  `consentGateVerdict`로 판정합니다. 거절은 결정이므로 표시를 남기고, DB 오류만
+  표시를 되돌립니다. 실행 종료는 알림 실패와 무관하게 먼저 commit됩니다.
+- **실행 종료 때의 표시**: 알림 대상이 아니거나(다시 시도될 실패, 일시정지하지 않은
+  건너뜀, 결과 불명) 그때 발송 스위치가 꺼져 있으면, 실행 종료 transaction이 바로
+  "알림 없음"으로 표시합니다. 그래서 스위치가 꺼져 있던 동안 끝난 실행은 나중에
+  스위치를 켜도 보내지 않습니다. NULL로 남는 것은 알림을 보내야 하는데 아직 큐에 못
+  넣은 실행뿐입니다.
+- **배포 순간과 옛 데이터** (`20261128170000_chat_readout_task_notice`):
+  - 열의 DB 기본값은 "결정됨"(`CURRENT_TIMESTAMP`)입니다. NULL은 새 실행기의 claim만
+    씁니다. 그래서 배포 중 아직 옛 코드를 돌리는 프로세스가 만든 실행, 손으로 넣은 행,
+    복원된 행은 처음부터 결정됨이라 메일도 복구도 되지 않습니다. 배포 시각을 몰라도
+    성립하는 코드 쪽 장치입니다.
+  - migration은 이미 끝난 실행을 그 종료 시각으로 "결정됨"으로 채웁니다(backfill).
+    기능이 없던 때 끝난 실행이 스위치를 켤 때 메일로 나가지 않게 하기 위해서입니다.
+  - migration 때 진행 중이던 실행은 NULL로 둡니다. 새 코드가 그 실행을 닫으면 정상
+    경로로 결정됩니다. 배포가 겹치는 몇 분 사이에 옛 코드 프로세스가 그 실행을 닫으면
+    NULL로 남고, 그 뒤 6시간 안에 스위치가 켜지면 그 실행의 메일이 한 통 갈 수 있습니다.
+    그 실행은 이 기능이 생긴 뒤에 끝났으므로 내용은 맞습니다. 이것까지 막으려면
+    스위치를 켜는 배포를 이 배포 6시간 뒤에 하면 됩니다(Railway 변수는 다음 배포부터
+    적용되므로 스위치를 켜는 일은 별도 배포입니다).
+- **복구(재조정)**: 큐 등록 전에 프로세스가 죽었거나 등록이 DB 오류로 실패하면 표시가
+  NULL로 남습니다. 예약 작업 tick(15분마다, 기존 lease 재조정 바로 뒤)의
+  `reconcileScheduledRunNotices`가 이를 찾아 같은 판정 경로(스위치, 표시 claim, 작업
+  토글 행 잠금, purpose)로 큐에 넣습니다.
+  - **시간 창: 실행이 끝난 뒤 6시간**(`SCHEDULED_TASK_NOTICE_RECOVERY_WINDOW_MS`).
+    그보다 오래된 실행은 복구하지 않습니다. 몇 시간 늦은 결과 알림은 더 이상 소식이
+    아니기 때문입니다.
+  - 스위치가 켜져 있을 때만 돌고, tick마다 최대 50건(`SCHEDULED_TASK_NOTICE_RECOVERY_BATCH`)을
+    오래된 것부터 처리합니다.
+  - 어떤 알림이었는지는 실행 행의 기존 값으로 다시 판별합니다(`recoveredNoticeKind`).
+    `succeeded`면 답변 알림입니다. `failed`·`skipped`면 작업이 runner 때문에(사용자가
+    아니라) 일시정지돼 있고, 같은 revision이며, 그 작업의 가장 최근 실행일 때만
+    일시정지 알림입니다. 어느 쪽도 아니면 메일 없이 표시만 남깁니다.
+  - 예약 작업 기능 스위치(`feature.scheduledTasksEnabled`)가 꺼지면 tick이 돌지 않으므로
+    복구도 멈춥니다.
+- **발송 직전 재확인**: drain이 purpose 판정 바로 뒤에서 작업 토글을 다시 읽습니다.
+  큐에 든 뒤 토글이 꺼졌거나 작업이 삭제됐으면 보내지 않고 `skipped`로 닫습니다.
+  `skipReason`은 닫힌 목록이라 새 값을 만들지 않고 `no_consent`를 쓰며, 구분된 이유
+  (`task_email_off`, `task_deleted`)는 로그 `scheduled_task_notice_not_sent`에 남깁니다.
+- **발송 경로**: 표준 lane 그대로(Resend, 기존 transactional 도메인, idempotency key,
+  재시도 곡선). 새 공급자·도메인이 없습니다. 발송 결과가 불명확한 메일을 다시 보내지
+  않는 것은 lane의 기존 규칙입니다.
+- **남은 것**: 스위치를 끄기 전에 이미 큐에 들어간 행은 drain이 보냅니다(최대 한 drain
+  주기). 발송 시점에 스위치를 다시 읽지는 않습니다.
 
 #### 5. 약관/개인정보처리방침/가격의 중요 변경
 - **service/legal. marketing 거부자에게도 반드시 보냅니다.**
@@ -4036,6 +4119,10 @@ AT·CH 밖 국가의 국가별 의무 확인). 뒤의 것은 근거와 무관하
     `product_updates`/`newsletter`/`promotions` = **OFF**.
   - `ConsentRecord`: 생성하지 않습니다. **동의한 적이 없으므로 동의 기록을 만들면
     거짓입니다.** 이것을 지키는 것이 중요합니다.
+  - 나중에 생긴 `scheduled_tasks`(2026-11-28)는 backfill하지 않습니다. 동의가 필요
+    없는 purpose라 행이 없으면 기본값(ON)으로 판정되고, 설정을 읽을 때
+    `ensureDefaultPreferences`가 행을 만듭니다. 동의가 필요한 purpose를 나중에
+    더한다면 이 방식은 쓸 수 없습니다(`tests/emailConsentGate.test.mjs`).
 - `UserSettings.country`: NULL로 시작. Stripe 청구 국가가 있는 계정은 배치로
   `countrySource = "billing"`으로 채웁니다. **IP로 채우지 않습니다.**
 - 기존 `NotificationDelivery`: **그대로 둡니다.** 신규 발송만 새 큐를 씁니다.

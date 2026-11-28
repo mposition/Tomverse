@@ -88,6 +88,37 @@ if (blocking.length > 0) {
   process.exit(1);
 }
 
+// The server read-aloud's speech register (docs/policy/voice-input.md §6.4),
+// held to the same deadline. Its model is a compiled-in constant, so every
+// entry plus that constant is reachable.
+const { auditReadoutPriceRegister, READOUT_MODEL_PRICE_REGISTER } = await import(
+  "../lib/chatReadoutPricing.ts"
+);
+const { READOUT_MODEL_ID } = await import("../lib/chatReadoutAccess.ts");
+const readoutReachable = new Set([
+  READOUT_MODEL_ID,
+  ...READOUT_MODEL_PRICE_REGISTER.map((entry) => entry.modelId),
+]);
+const readoutProblems = auditReadoutPriceRegister({
+  modelIds: [...readoutReachable],
+  now: new Date(),
+});
+if (readoutProblems.length > 0) {
+  console.error(
+    `\n${readoutProblems.length} read-aloud price register problem(s):\n` +
+      readoutProblems
+        .map((problem) => `  - ${problem.modelId}: ${problem.detail}`)
+        .join("\n") +
+      "\n\nThe register is in lib/chatReadoutPricing.ts. Re-read the provider's\n" +
+      "pricing and deprecation pages and update the entry; moving the deadline\n" +
+      "without re-reading them repairs nothing.\n"
+  );
+  process.exit(1);
+}
+const readoutUnobserved = READOUT_MODEL_PRICE_REGISTER.filter(
+  (entry) => entry.costObservation === null
+).map((entry) => entry.modelId);
+
 // A deadline inside its warning window is printed and does NOT fail.
 //
 // The alternative was what this repository had: nothing at all until the
@@ -121,6 +152,10 @@ console.log(
       : "") +
     (unobserved.length > 0
       ? `\nList price only, no invoice observed yet (docs/policy/voice-input.md §6.1.2): ${unobserved.join(", ")}.`
+      : "") +
+    `\nRead-aloud speech register: ${readoutReachable.size} model(s), within deadline.` +
+    (readoutUnobserved.length > 0
+      ? ` No invoice observed yet, so the server voice stays off (docs/policy/voice-input.md §6.4): ${readoutUnobserved.join(", ")}.`
       : "") +
     (notices.length > 0
       ? `\n\nRe-reading due soon -- a warning, not a failure. This check fails on ` +

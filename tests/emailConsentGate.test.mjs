@@ -175,11 +175,33 @@ test("the backfill migration writes exactly what the code would have", () => {
     ([, purpose, enabled]) => [purpose, enabled === "true"]
   );
 
-  assert.deepEqual(
-    values.map(([purpose]) => purpose).sort(),
-    [...EMAIL_PURPOSES].sort(),
-    "the backfill covers every purpose, and only real ones"
+  const backfilled = values.map(([purpose]) => purpose);
+  assert.ok(
+    backfilled.every((purpose) => EMAIL_PURPOSES.includes(purpose)),
+    "the backfill names only real purposes"
   );
+  // A purpose added after the backfill (scheduled_tasks, 2026-11-28) has no row
+  // on any account that existed then, and for it an absent row is what the
+  // send-time gate reads. That is only the default when the purpose needs no
+  // consent -- so a later purpose must be one, or it needs its own backfill.
+  for (const purpose of EMAIL_PURPOSES.filter((candidate) => !backfilled.includes(candidate))) {
+    assert.equal(
+      defaultPreferenceEnabled(purpose),
+      true,
+      `${purpose} is not in the 2026-08-22 backfill, so its absent row must mean its default`
+    );
+    assert.deepEqual(
+      consentGateVerdict({
+        classification: "service",
+        purpose,
+        hasAccount: true,
+        storedEnabled: null,
+        storedConfirmedAt: null,
+      }),
+      { allowed: true },
+      `${purpose}: an account with no row must get the default`
+    );
+  }
   for (const [purpose, enabled] of values) {
     assert.equal(
       enabled,
