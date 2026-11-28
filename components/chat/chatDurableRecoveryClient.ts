@@ -1,4 +1,5 @@
 import type { ChatAttachment, Message } from "@/components/chat/types";
+import { readStoredChatReasoning } from "@/lib/chatReasoningDisplay";
 import { parseChatStreamArtifacts } from "@/lib/generatedArtifactCore";
 import { sanitizeWebSearchCitations } from "@/lib/webSearchCitations";
 import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
@@ -486,6 +487,7 @@ export function parseCompletedChatResponseMessage(
   }
   const searchMetadata = parseStoredWebSearchExecution(value.searchMetadata);
   if (!searchMetadata.ok) return null;
+  const storedReasoning = readStoredChatReasoning(value.searchMetadata);
   const positiveCount = (candidate: unknown) =>
     candidate === undefined ||
     (Number.isSafeInteger(candidate) && (candidate as number) > 0);
@@ -510,6 +512,9 @@ export function parseCompletedChatResponseMessage(
     modelId: expectedModelId,
     createdAt: value.createdAt,
     searchMetadata: searchMetadata.value,
+    // A completed answer read back from the server keeps its saved summary,
+    // so a reconnect after "Thought for N seconds" still shows it.
+    ...(storedReasoning ? { reasoning: storedReasoning } : {}),
     ...(typeof value.memoryUsedCount === "number"
       ? { memoryUsedCount: value.memoryUsedCount }
       : {}),
