@@ -237,6 +237,11 @@ ChatMessageList height may never be bought with any of these:
   independent status row with their detail or recovery path.
 - Several warning/status chips wrap onto another chip row; they never scroll
   sideways and never enter the input row.
+- The study mode chip (`study-mode-chip`, `components/chat/StudyModeControls.tsx`)
+  is one of those status chips: it shows while study mode is on in a Chat
+  conversation, keeps the 32px/36px height and the 44px remove target, and is
+  absent in Review, for an image answer and while a research preview is selected.
+  Its switch lives in the tools menu (`tools-study-mode-row`).
 
 ## Attachment capabilities
 
