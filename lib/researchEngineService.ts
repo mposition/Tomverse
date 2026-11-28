@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { assertConversationCapacity, assertMessageCapacity } from "@/lib/apiSecurity";
+import { isTemporaryConversationExpired } from "@/lib/temporaryChatAccess";
 import { hasConversationUnlockGrant } from "@/lib/conversationLock";
 import { createConversation } from "@/lib/conversationCreation";
 import { ResearchPreviewRunError } from "@/lib/deepResearchSettlementHandoff";
@@ -203,17 +205,24 @@ export async function createResearchRun(input: { request: Request; userId: strin
     let conversationId = payload.conversationId;
     if (conversationId) {
       const conversation = await tx.conversation.findFirst({ where: { id: conversationId, userId: input.userId },
-        select: { id: true, kind: true, productKey: true, password: true, passwordVersion: true } });
+        select: { id: true, kind: true, productKey: true, password: true, passwordVersion: true, temporaryExpiresAt: true } });
       if (!conversation || conversation.kind !== "chat" || conversation.productKey !== "chat") throw refuse(409, "RESEARCH_CONVERSATION_UNAVAILABLE", "This conversation cannot hold research.");
+      // An expired temporary Chat is about to be deleted with every research row under it
+      // (the sweep, lib/temporaryConversationSweep.ts): a new paid run would be started only to be lost.
+      if (isTemporaryConversationExpired(conversation.temporaryExpiresAt, new Date())) {
+        throw refuse(410, "TEMPORARY_CHAT_EXPIRED", "This temporary chat has ended.");
+      }
       if (conversation.password != null && !hasConversationUnlockGrant(input.request, input.userId, conversation.id, conversation.passwordVersion)) {
         throw refuse(423, "RESEARCH_CONVERSATION_LOCKED", "Unlock this conversation first.");
       }
     } else {
+      await assertConversationCapacity(tx, input.userId);
       const created = await createConversation(tx, { userId: input.userId, title: payload.brief.question.slice(0, 80), productKey: "chat",
         selectedModels: JSON.stringify([pinned.writer.id]) }, { id: true });
       conversationId = created.id;
     }
     if (await tx.message.findUnique({ where: { id: payload.userMessageId }, select: { id: true } })) throw refuse(409, "RESEARCH_RUN_ID_REUSED", "The message identity is already in use.");
+    await assertMessageCapacity(tx, input.userId, conversationId, 1, Buffer.byteLength(payload.brief.question, "utf8"));
     await tx.message.create({ data: { id: payload.userMessageId, role: "user", content: payload.brief.question, status: "normal", conversationId } });
     const created = await tx.researchPreviewRun.create({ data: {
       userId: input.userId, conversationId, sourceUserMessageId: payload.userMessageId, assistantMessageId: payload.assistantMessageId,

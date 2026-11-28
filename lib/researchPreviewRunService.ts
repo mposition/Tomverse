@@ -19,6 +19,7 @@ import { getOperationalFeatureFlags } from "@/lib/appSettings";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { resolveModelPricing } from "@/lib/modelPricing";
 import { prisma } from "@/lib/prisma";
+import { isTemporaryConversationExpired } from "@/lib/temporaryChatAccess";
 import {
   decideResearchPreviewAdmission,
   researchPreviewGate,
@@ -45,6 +46,7 @@ import {
 import {
   RESEARCH_PREVIEW_RUN_ACTIVE_LIMIT_MS,
   RESEARCH_PREVIEW_RUN_CHECKPOINT_TTL_MS,
+  ResearchPreviewRunError,
   activateResearchPreviewRun,
   beginResearchPreviewGeneration,
   checkpointResearchPreviewRun,
@@ -169,6 +171,7 @@ export async function createDurableResearchPreviewRun(input: {
           selectionMode: true,
           selectedModels: true,
           assistantProfileVersionId: true,
+          temporaryExpiresAt: true,
         },
       }),
       readEligibleResearchPreviewSource({
@@ -185,6 +188,11 @@ export async function createDurableResearchPreviewRun(input: {
   const question = sourceMessage?.question ?? "";
   if (!conversation || !sourceMessage) {
     throw new Error("RESEARCH_SOURCE_UNAVAILABLE");
+  }
+  // An expired temporary Chat is about to be deleted with every run under it
+  // (lib/temporaryConversationSweep.ts): a new paid run would be started only to be lost.
+  if (isTemporaryConversationExpired(conversation.temporaryExpiresAt, new Date())) {
+    throw new ResearchPreviewRunError(410, "TEMPORARY_CHAT_EXPIRED", "This temporary chat has ended.");
   }
   const profileTools = await profileToolPolicy(
     input.userId,

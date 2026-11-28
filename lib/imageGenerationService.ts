@@ -101,6 +101,7 @@ import { prisma } from "@/lib/prisma";
 import { writeR2Object } from "@/lib/r2";
 import { getUserDayWindow } from "@/lib/userDailyUsage";
 import { createConversation } from "@/lib/conversationCreation";
+import { isTemporaryConversationExpired, TEMPORARY_CHAT_EXPIRED } from "@/lib/temporaryChatAccess";
 import { STUDIO_PRODUCT_KEY } from "@/lib/conversationProduct";
 
 // The image generation billing path. Same wallet, same bucket table, same
@@ -673,7 +674,7 @@ export const requestImageGeneration = async (
       if (conversationId) {
         const conversation = await tx.conversation.findUnique({
           where: { id: conversationId },
-          select: { userId: true, kind: true },
+          select: { userId: true, kind: true, temporaryExpiresAt: true },
         });
         if (!conversation || conversation.userId !== input.userId) {
           throw new ChatAccessError(
@@ -681,6 +682,11 @@ export const requestImageGeneration = async (
             "CONVERSATION_NOT_FOUND",
             "Conversation not found."
           );
+        }
+        // An expired temporary Chat is deleted by the sweep, generations and
+        // images with it: a new paid generation would be started only to be lost.
+        if (isTemporaryConversationExpired(conversation.temporaryExpiresAt, now)) {
+          throw new ChatAccessError(410, TEMPORARY_CHAT_EXPIRED, "This temporary chat has ended.");
         }
         if (
           !isImageConversationKind(conversation.kind) &&

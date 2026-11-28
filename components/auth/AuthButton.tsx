@@ -1090,9 +1090,20 @@ export function AuthButton({
         try {
             const response = await fetch("/api/conversations", { method: "DELETE" });
             const data = (await response.json().catch(() => null)) as
-                | { code?: string; error?: string; scheduledFor?: string }
+                | { code?: string; error?: string; scheduledFor?: string; deleted?: number; remaining?: number }
                 | null;
             if (!response.ok) {
+                // The delete runs in batches: some may have committed before one failed.
+                if (data?.code === "CONVERSATION_DELETE_PARTIAL") {
+                    dispatchAppToast(
+                        formatCopy("auth.deleteAllChatsPartial", {
+                            deleted: String(data.deleted ?? 0),
+                            remaining: String(data.remaining ?? 0),
+                        }),
+                        "error"
+                    );
+                    return;
+                }
                 if (response.status === 428 && data?.code === "ACCOUNT_REAUTHENTICATION_REQUIRED") {
                     dispatchAppToast(t("auth.deleteAccountReauthRequired"), "error");
                     await signOut({

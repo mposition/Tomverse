@@ -20,7 +20,9 @@
  *
  * `Conversation.temporaryExpiresAt`, set by the create handler and never
  * written again. The sweep selects on it alone; a conversation where it is
- * NULL -- every ordinary conversation -- cannot be chosen.
+ * NULL -- every ordinary conversation -- cannot be chosen. It waits, for a
+ * bounded time, for work still running in the conversation (a durable answer,
+ * a Research run, an image generation): see TEMPORARY_CHAT_SWEEP_MAX_DEFER_MS.
  */
 
 export const TEMPORARY_CHAT_FLAG_KEY = "feature.temporaryChatEnabled";
@@ -42,6 +44,42 @@ export const TEMPORARY_CHAT_TTL_MS = 24 * 60 * 60 * 1_000;
  * its attempt yet.
  */
 export const TEMPORARY_CHAT_SWEEP_GRACE_MS = 10 * 60 * 1_000;
+
+/**
+ * How long past its expiry the sweep may keep waiting for work that is still
+ * running in the conversation.
+ *
+ * The sweep skips a conversation while a Research run is executing or an
+ * image is still being generated in it: both rows cascade with the
+ * conversation, so deleting underneath them throws away paid work in flight
+ * and leaves the provider call to settle against nothing. The wait is a
+ * deferral, never a reprieve -- the deletion promise (24 hours, plus the grace
+ * above) still holds, stretched by at most this much, and a run that is
+ * still "executing" past it is treated as stuck and deleted with the
+ * conversation. Seven hours is the longest Research profile's own deadline
+ * (six hours) plus a margin.
+ */
+export const TEMPORARY_CHAT_SWEEP_MAX_DEFER_MS = 7 * 60 * 60 * 1_000;
+
+/** Whether the sweep may still wait for running work in a conversation that expired at `temporaryExpiresAt`. */
+export const temporarySweepMayDefer = (temporaryExpiresAt: Date, now: Date): boolean =>
+    now.getTime() - temporaryExpiresAt.getTime() < TEMPORARY_CHAT_SWEEP_MAX_DEFER_MS;
+
+/**
+ * Research run statuses in which work is executing (lib/researchPreviewRunTypes.ts). Not `draft`,
+ * `awaiting_input` or `paused`: those wait for the person, who has left a temporary Chat that ended.
+ */
+export const TEMPORARY_SWEEP_LIVE_RESEARCH_STATUSES = [
+    "preparing",
+    "queued",
+    "running",
+    "checkpointed",
+    "planning",
+    "finalizing",
+] as const;
+
+/** Image generation statuses with a provider call or its settlement in flight (lib/imageGenerationStateCore.ts). */
+export const TEMPORARY_SWEEP_LIVE_IMAGE_STATUSES = ["pending", "processing", "settling"] as const;
 
 export const temporaryConversationExpiresAt = (now: Date): Date =>
     new Date(now.getTime() + TEMPORARY_CHAT_TTL_MS);

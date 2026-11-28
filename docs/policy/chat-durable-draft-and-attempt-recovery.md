@@ -330,7 +330,15 @@ installed Next.js 16 contract and are awaited promises.
   claim takes, and skips one whose attempt still holds a live lease; the send
   path refuses a new answer from the moment of expiry, so only an answer
   admitted before it can be running, and the conversation goes once that
-  attempt ends or its lease lapses.
+  attempt ends or its lease lapses. The sweep waits the same way for an
+  executing Research run (`queued`, `running`, `checkpointed`, `planning`,
+  `finalizing`, `preparing`) and for an image generation in flight (`pending`,
+  `processing`, `settling` within the stale window), because both cascade with
+  the conversation. The wait is a deferral, not a reprieve: it stops
+  `TEMPORARY_CHAT_SWEEP_MAX_DEFER_MS` (7 hours, past the longest Research
+  profile) after the expiry, and a run still "executing" then is deleted with
+  the conversation. Starting new Research or image generation in an expired
+  temporary Chat is refused (`TEMPORARY_CHAT_EXPIRED`).
 - A draft is the user's unsent content, so unified account export includes its
   text, scope, revision, and timestamps. Opaque attachment reference ids and
   internal row ids are withheld and the export manifest says so.

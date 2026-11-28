@@ -6,6 +6,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getTrustedClientIp } from "@/lib/clientIp";
 import { ipBucketLimit } from "@/lib/apiRateLimitIpPolicy";
+import { LISTED_CONVERSATION_WHERE } from "@/lib/conversationProduct";
 import {
   DATABASE_RETRY_AFTER_SECONDS,
   DATABASE_TEMPORARILY_UNAVAILABLE_CODE,
@@ -339,7 +340,12 @@ export async function assertConversationCapacity(
   userId: string
 ) {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"conversation:" + userId}))`;
-  const count = await tx.conversation.count({ where: { userId } });
+  // The conversations the person can see in their list, not every row they own:
+  // Studio tool runs and temporary Chats are hidden and swept or one-off, and
+  // counting them made a full-looking quota that the person could not clear.
+  const count = await tx.conversation.count({
+    where: { userId, ...LISTED_CONVERSATION_WHERE },
+  });
   if (count >= STORAGE_LIMITS.conversationsPerUser()) {
     throw new ApiSecurityError(
       409,

@@ -5,7 +5,10 @@ import {
     TEMPORARY_CHAT_FLAG_KEY,
     TEMPORARY_CHAT_NOT_ALLOWED,
     TEMPORARY_CHAT_SWEEP_GRACE_MS,
+    TEMPORARY_CHAT_SWEEP_MAX_DEFER_MS,
     TEMPORARY_CHAT_TTL_MS,
+    TEMPORARY_SWEEP_LIVE_IMAGE_STATUSES,
+    TEMPORARY_SWEEP_LIVE_RESEARCH_STATUSES,
     conversationDeletionScope,
     isTemporaryConversation,
     isTemporaryConversationExpired,
@@ -14,6 +17,7 @@ import {
     temporaryConversationSweepWhere,
     temporaryConversationUpdateRefusal,
     temporarySweepCutoff,
+    temporarySweepMayDefer,
 } from "../lib/temporaryChatAccess.ts";
 
 /**
@@ -78,4 +82,39 @@ test("a temporary Chat refuses a project move and memory, and nothing else", () 
     assert.equal(temporaryConversationUpdateRefusal(expiresAt, {}), null);
     // An ordinary conversation is never refused here.
     assert.equal(temporaryConversationUpdateRefusal(null, { projectId: "p-1", memoryMode: "on" }), null);
+});
+
+test("the sweep waits for running Research and image work, but only for a bounded time past the expiry", () => {
+    const expiresAt = temporaryConversationExpiresAt(NOW);
+    // Longest Research profile is six hours: the wait must cover it, and must not be open-ended.
+    assert.ok(TEMPORARY_CHAT_SWEEP_MAX_DEFER_MS >= 6 * 60 * 60 * 1000);
+    assert.ok(TEMPORARY_CHAT_SWEEP_MAX_DEFER_MS <= 12 * 60 * 60 * 1000);
+    assert.equal(temporarySweepMayDefer(expiresAt, expiresAt), true);
+    assert.equal(
+        temporarySweepMayDefer(expiresAt, new Date(expiresAt.getTime() + TEMPORARY_CHAT_SWEEP_MAX_DEFER_MS - 1)),
+        true
+    );
+    // Past the cap a run that still looks "executing" is stuck: the deletion promise wins.
+    assert.equal(
+        temporarySweepMayDefer(expiresAt, new Date(expiresAt.getTime() + TEMPORARY_CHAT_SWEEP_MAX_DEFER_MS)),
+        false
+    );
+});
+
+test("only executing Research and in-flight image statuses hold a conversation back", () => {
+    // Waiting on the person (draft, awaiting_input, paused) and every terminal status never defers.
+    for (const status of ["draft", "awaiting_input", "paused", "completed", "failed", "cancelled", "attention"]) {
+        assert.ok(!TEMPORARY_SWEEP_LIVE_RESEARCH_STATUSES.includes(status), status);
+    }
+    for (const status of ["queued", "running", "checkpointed", "planning", "finalizing", "preparing"]) {
+        assert.ok(TEMPORARY_SWEEP_LIVE_RESEARCH_STATUSES.includes(status), status);
+    }
+    assert.deepEqual([...TEMPORARY_SWEEP_LIVE_IMAGE_STATUSES], ["pending", "processing", "settling"]);
+});
+
+test("the sweep's live statuses are real statuses, so a rename cannot silently stop the wait", async () => {
+    const { RESEARCH_PREVIEW_RUN_STATUSES } = await import("../lib/researchPreviewRunTypes.ts");
+    const { IMAGE_GENERATION_STATUSES } = await import("../lib/imageGenerationStateCore.ts");
+    for (const status of TEMPORARY_SWEEP_LIVE_RESEARCH_STATUSES) assert.ok(RESEARCH_PREVIEW_RUN_STATUSES.includes(status), status);
+    for (const status of TEMPORARY_SWEEP_LIVE_IMAGE_STATUSES) assert.ok(IMAGE_GENERATION_STATUSES.includes(status), status);
 });
