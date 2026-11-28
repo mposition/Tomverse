@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,8 +32,8 @@ test("Accept Edits survives startup and keeps commands behind approval", { timeo
     const open = async () => {
       app = await launchNativeFixture(descriptor);
       const page = await app.firstWindow();
-      await page.getByRole("button", { name: "Open local folder" }).click();
-      await page.getByLabel("Code mode").selectOption("agent");
+      await openCodeProject(page);
+      await selectCodeMode(page, "agent");
       return page;
     };
     const initial = await open();

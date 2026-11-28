@@ -265,7 +265,7 @@ test("the coding API over the real shared credit ledger", { skip: !databaseUrl }
         ]);
         // A row written before the column existed: NULL, never guessed.
         await db.$executeRaw`UPDATE "ExternalApiRequest" SET "surface" = NULL WHERE "id" = ${receipts[1].id}`;
-        const usage = await keys.externalApiKeyUsage(summary.id, 10);
+        const usage = await keys.externalApiKeyUsage({ keyId: summary.id }, 10);
         const byId = new Map(usage.map((row) => [row.requestId, row.surface]));
         assert.equal(byId.get(receipts[0].id), "coding");
         assert.equal(byId.get(receipts[1].id), null);

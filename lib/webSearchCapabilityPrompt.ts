@@ -157,6 +157,36 @@ export const WEB_SEARCH_UNAVAILABLE_PROMPT = [
   "checked it.",
 ].join("\n");
 
+/**
+ * The one exception to "the web is out of reach", on a turn that carries
+ * `read_url` (lib/chatUrlReadTool.ts).
+ *
+ * That tool reads a page the user pasted; it is not a search, so the turn is
+ * still "unavailable" and the paragraph above still applies to everything else.
+ * Without this the same request said both "nothing in your answer can come from
+ * the live web" and offered a tool that fetches a page, and the model either
+ * declined to read a link it was handed or read it and apologised first.
+ *
+ * It also settles the one sentence the paragraph above forbids ("do not ask
+ * them to ... re-send"): when `read_url` refuses an address, asking the user to
+ * paste that link is the way forward and is allowed.
+ */
+export const WEB_SEARCH_UNAVAILABLE_URL_READ_PROMPT = [
+  "Exception -- links the user pasted: the read_url tool is available on this",
+  "turn. Read a link the user wrote with read_url when the question depends on",
+  "it; that is reading the page they gave you, not searching the web. Do not",
+  "use it to look anything else up, and do not say web search is off when the",
+  "question is about the pasted page. If read_url refuses an address or a page",
+  "cannot be read, say so and, only then, ask the user to paste the link or its",
+  "text.",
+].join("\n");
+
 export const buildWebSearchCapabilitySystemPrompt = (
-  state: WebSearchTurnState
-): string => (state === "searching" ? "" : WEB_SEARCH_UNAVAILABLE_PROMPT);
+  state: WebSearchTurnState,
+  options: { urlReadAvailable?: boolean } = {}
+): string =>
+  state === "searching"
+    ? ""
+    : options.urlReadAvailable
+      ? `${WEB_SEARCH_UNAVAILABLE_PROMPT}\n\n${WEB_SEARCH_UNAVAILABLE_URL_READ_PROMPT}`
+      : WEB_SEARCH_UNAVAILABLE_PROMPT;

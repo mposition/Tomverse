@@ -109,6 +109,24 @@ export type ChatTurnSystemBlocksInput = {
    */
   appManagedSearchEnabled: boolean;
   turnAttachments: readonly TurnAttachmentDescriptor[];
+  /**
+   * Whether this turn carries `read_url` (`chatUrlReadOffered`). A turn that
+   * cannot search but can read a pasted link says so instead of declaring the
+   * web unreachable. Defaults to false, so a caller that does not know quotes
+   * the shorter block.
+   */
+  urlReadAvailable?: boolean;
+  /**
+   * Messages at the start of this conversation the client did not send because
+   * the transcript outgrew the request limits (lib/chatRequestLimits.ts). Zero
+   * or absent when nothing was left out; the model is told only when it was.
+   */
+  omittedEarlierMessages?: number;
+  /**
+   * The user's IANA time zone as the client reported it, already validated by
+   * `parseClientTimeZone`. Absent: the date block says it is UTC.
+   */
+  clientTimeZone?: string | null;
   /** `feature.imageGenerationEnabled`, read from the cached snapshot. */
   imageGenerationFlagEnabled: boolean;
   /** `planAllowsImageGeneration(tier)` for this caller. */
@@ -180,6 +198,20 @@ const artifactStateOf = (plan: ArtifactToolPlan | null): ImageArtifactState => {
   return "unavailable";
 };
 
+/**
+ * One line telling the model its history starts mid-conversation. Without it a
+ * cut transcript reads as the whole conversation, and a question about
+ * something said earlier is answered from a guess.
+ */
+export const buildOmittedHistoryPrompt = (omitted: number): string =>
+  omitted > 0
+    ? [
+        "# Conversation history",
+        `${omitted} earlier message${omitted === 1 ? " was" : "s were"} left out of this conversation to fit the request limits; what follows begins partway through it.`,
+        "If the user refers to something you cannot find in what you can see, say that part of the conversation is no longer available to you instead of guessing.",
+      ].join("\n")
+    : "";
+
 export const buildChatTurnSystemBlocks = (
   input: ChatTurnSystemBlocksInput
 ): ChatTurnSystemBlocks => {
@@ -240,8 +272,11 @@ export const buildChatTurnSystemBlocks = (
     appManagedSearchEnabled: input.appManagedSearchEnabled,
   });
   const webSearchCapabilityPrompt =
-    buildWebSearchCapabilitySystemPrompt(webSearchTurnState);
-  const currentDatePrompt = buildChatCurrentDatePrompt(input.now);
+    buildWebSearchCapabilitySystemPrompt(webSearchTurnState, {
+      urlReadAvailable: input.urlReadAvailable === true,
+    });
+  const currentDatePrompt = buildChatCurrentDatePrompt(input.now, input.clientTimeZone);
+  const omittedHistoryPrompt = buildOmittedHistoryPrompt(input.omittedEarlierMessages ?? 0);
   // Off by default: it is input tokens on every turn (lib/chatChartPrompt.ts).
   const chartPrompt = chatInlineChartPromptEnabled() ? CHAT_INLINE_CHART_PROMPT : "";
   // Only on a turn that asked for it, so it is priced only there.
@@ -254,6 +289,10 @@ export const buildChatTurnSystemBlocks = (
     { role: "system", content: currentDatePrompt },
     ...(chartPrompt ? [{ role: "system" as const, content: chartPrompt }] : []),
     ...(studyPrompt ? [{ role: "system" as const, content: studyPrompt }] : []),
+    // Only when the transcript was cut, so an ordinary turn carries nothing extra.
+    ...(omittedHistoryPrompt
+      ? [{ role: "system" as const, content: omittedHistoryPrompt }]
+      : []),
     // Only on a turn that cannot search; an empty block would be a system
     // message saying nothing, priced and sent.
     ...(webSearchCapabilityPrompt
@@ -293,6 +332,7 @@ export const buildChatTurnSystemBlocks = (
     estimateTextTokens(currentDatePrompt) +
     estimateTextTokens(chartPrompt) +
     estimateTextTokens(studyPrompt) +
+    estimateTextTokens(omittedHistoryPrompt) +
     estimateTextTokens(artifactPlan.systemPrompt) +
     estimateTextTokens(imageCapabilityPrompt) +
     estimateTextTokens(webSearchCapabilityPrompt) +

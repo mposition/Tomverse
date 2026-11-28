@@ -1266,6 +1266,18 @@ run(
     "tests/integration/code-web-search.db.test.mjs"],
   "Running the coding API web search's surcharge, vendor budget, cap, idempotency, cancellation and expiry scenarios",
 );
+// Desktop Code on the signed-in Desktop session (no API key): the same account
+// caller, reservation, settlement, refund and receipt as a key, its own
+// Idempotency-Key scope, the session and origin refusals, the account's
+// concurrency and cost limits and account deletion. Fakes only the model
+// provider and the search backend; own process for its module mocks.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/external-api-desktop-session.db.test.mjs"],
+  "Running the coding API's Desktop session caller, billing parity, refusal, limit and deletion scenarios",
+);
 // The budget suite mocks Prisma and the audit writer while exercising real
 // PostgreSQL constraints. Module mocks must be isolated from the batch above.
 run(

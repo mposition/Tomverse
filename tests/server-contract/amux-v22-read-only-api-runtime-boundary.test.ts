@@ -3,6 +3,10 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
 
+// The conclusion switch is on by default (2026-11-28); this file is not about
+// prior conclusions, and its fake transaction reads no dependencies.
+process.env.TOMVERSE_AMUX_V22_CONCLUSION = "off";
+
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 const now = new Date("2026-10-13T12:00:00.000Z");

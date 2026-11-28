@@ -104,7 +104,7 @@ import {
     type ChatImageDecision,
 } from "@/lib/chatImageIntentCore";
 import { CHAT_IMAGE_TURN_CONTENT_PREFIX } from "@/lib/chatImageTurnCore";
-import { autoLlmRouterCandidates, previousAnswerExcerpt, withRouterRewrite } from "@/lib/autoLlmRouterCore";
+import { autoLlmRouterCandidates, previousAnswerExcerpt, previousAnswerWasCut, withRouterRewrite } from "@/lib/autoLlmRouterCore";
 import {
     consumePreviewedPromptRefinerChatExecution,
     previewPromptRefinerChatExecution,
@@ -241,7 +241,8 @@ import { ArtifactToolRejectionLog } from "@/lib/generatedArtifactRejectionLog";
 import { persistArtifactRows } from "@/lib/generatedArtifactStorage";
 import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";
 import { readPublicCompletedChatMessage } from "@/lib/publicChatMessage";
-import { splitProviderInstructions } from "@/lib/chatProviderPrompt";
+import { prepareProviderMessages, splitProviderInstructions } from "@/lib/chatProviderPrompt";
+import { parseClientTimeZone } from "@/lib/chatCurrentDatePrompt";
 import { resolveChatCompletionOutcome } from "@tomverse/chat-core";
 import { ERROR_REPORT_TOKEN_HEADER } from "@/lib/errorReportContract";
 import { issueChatErrorReportGrant } from "@/lib/traceErrorEvidence";
@@ -261,7 +262,7 @@ import {
     submitDeepResearchJob,
 } from "@/lib/perplexityDeepResearch";
 import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
-import { CHAT_MAX_STORED_ANSWER_CHARACTERS } from "@/lib/chatRequestLimits";
+import { CHAT_MAX_STORED_ANSWER_CHARACTERS, parseOmittedEarlierMessages } from "@/lib/chatRequestLimits";
 import { OfficeTextOverflowError, parseOfficeSafely } from "@/lib/officeSecurity";
 import {
     CHAT_ATTACHMENT_PARSE_CHARACTERS,
@@ -407,7 +408,8 @@ import {
     projectToolsAvailable,
     PROJECT_TOOL_MAX_STEPS,
 } from "@/lib/projectChatTools";
-import { withChatReadTools } from "@/lib/chatReadTools";
+import { chatUrlReadOffered, withChatReadTools } from "@/lib/chatReadTools";
+import { pastChatCitationsUsed } from "@/lib/chatHistoryReference";
 import type { ChatToolSlot } from "@/lib/chatToolLoop";
 import { projectReceiptSources } from "@/lib/projectSourceAccess";
 import { resolveConversationProjectScope } from "@/lib/projectWorkspaceService";
@@ -510,6 +512,7 @@ import {
     SHADOW_CANDIDATE_ESTIMATOR_VERSION,
 } from "@/lib/tokenEstimateShadowRecorder";
 import { buildChatTurnContext } from "@/lib/chatTurnContext";
+import { readPersonalizationTurnBlock } from "@/lib/chatPersonalization";
 import { isTemporaryConversationExpired, TEMPORARY_CHAT_EXPIRED } from "@/lib/temporaryChatAccess";
 import { verifyingSemanticModes } from "@/lib/semanticRetrievalCore";
 import { latestUserPromptText } from "@/lib/chatMemoryContextCore";
@@ -530,6 +533,7 @@ import {
     terminalChatResponseAttempt,
 } from "@/lib/chatResponseAttemptPersistence";
 import { markMessagesSuperseded, readSupersedesMessageIds, withoutSupersededChatMessages } from "@/lib/chatSupersededMessages";
+import { modelContextTranscript } from "@/lib/chatTranscriptRecovery";
 import {
     DatabaseWriteOutcomeUnknownError,
     databaseErrorMetadata,
@@ -1601,6 +1605,10 @@ async function handleChatPost(
         const currentLocation = parseChatLocation(
             (body as { currentLocation?: unknown } | null)?.currentLocation
         );
+        // Hints the client reports about its own request, each validated before it can reach a prompt.
+        const clientTurnHints = body as { omittedEarlierMessages?: unknown; clientTimeZone?: unknown } | null;
+        const omittedEarlierMessages = parseOmittedEarlierMessages(clientTurnHints?.omittedEarlierMessages);
+        const clientTimeZone = parseClientTimeZone(clientTurnHints?.clientTimeZone);
         const {
             messages: requestMessages,
             modelId,
@@ -1725,10 +1733,16 @@ async function handleChatPost(
         // Before anything reads the transcript, so the file a retry repeated is
         // resolved, measured, priced and sent once. The log line above keeps the
         // shape the client sent.
-        const { messages, removedReferenceCount } =
+        const { messages: collapsedMessages, removedReferenceCount } =
             collapseRepeatedAttachments(await withoutSupersededChatMessages({
                 userId: session?.user?.id, conversationId, messages: requestMessages, replacing: supersedesMessageIds,
             }));
+        // What the model reads of the earlier answers: a failed turn is one
+        // fixed marker, a stopped partial says it is incomplete, and a search
+        // answer keeps the URLs behind its [n] citations. Before anything
+        // measures or prices the transcript, so the estimate counts exactly
+        // what is sent.
+        const messages = modelContextTranscript(collapsedMessages);
         if (removedReferenceCount > 0) {
             console.info(JSON.stringify({
                 event: "chat_repeated_attachments_collapsed",
@@ -2425,6 +2439,7 @@ async function handleChatPost(
                     authorityId: capability.payload.authorityId,
                     sourcePrompt,
                 });
+                latency.checkpoint("guestRefiner");
             } catch {
                 await retainGuestAutoUnknown(guestAutoRun, "refiner");
                 throw new ChatAccessError(
@@ -2948,7 +2963,8 @@ async function handleChatPost(
                       // Atomic Refiner consume restores this exact preview
                       // before provider dispatch. A second rewrite would be
                       // discarded, including an explicit keep-original choice.
-                      rewriteAllowed: !importedSource && !refinerPreview && !turnCarriesAttachments(autoRoutingMessages),
+                      rewriteAllowed: !importedSource && !refinerPreview && !turnCarriesAttachments(autoRoutingMessages) &&
+                          !previousAnswerWasCut(autoRoutingMessages),
                       verifyPreparedContext: fusion ? undefined : verifyPreparedContext,
                       ...(fusion ? { locationFusion: { authoredText: latestUserPromptText(messages), scope: existingFusion ? "existing" : undefined,
                           resume: fusion.resume, searchUtcDate: fusion.searchUtcDate,
@@ -3551,7 +3567,7 @@ async function handleChatPost(
             const code = catalogueHostRefusalCode(error);
             if (!code) throw error;
             return returnKnownUndispatchedGuestAutoRefusal(tracedJsonError(
-                "이 모델은 카탈로그 경로로 보낼 수 없습니다.",
+                "This model cannot be sent through the catalogue route.",
                 code,
                 409,
                 traceId
@@ -3922,6 +3938,7 @@ async function handleChatPost(
             );
         }
         await consumeRefinerPreview();
+        latency.checkpoint("refinerConsumed");
         if (!hasContinuation) recordAutoSelection();
 
         if (modelConfig.usageClass === "deep-research" && session?.user?.id && conversationId && persistenceSourceUserMessageId) {
@@ -4078,6 +4095,7 @@ async function handleChatPost(
                 );
             }
             continuationContextConsumed = true;
+            latency.checkpoint("contextBundleConsumed");
             contextSystemPrompt = verifiedContext.systemPrompt;
             memoryData = verifiedContext.memoryData;
             memoryUsedCount = verifiedContext.memoryUsedCount;
@@ -4100,6 +4118,25 @@ async function handleChatPost(
                 verifiedContext.preferenceTokens;
             estimatedInputTokens += quotedContextTokens;
             inputEstimate.addTokens(quotedContextTokens);
+        } else if (
+            session?.user?.id && !contextBundle && !isResearchPreview &&
+            (conversationProductKey === "chat" || conversationProductKey === "review")
+        ) {
+            // The client sends without a bundle when preparing one failed ("Failure degrades open").
+            // Memory is dropped then, by design; the account's own personal instructions must not be:
+            // they are stored, cheap to read, and independent of retrieval. Same builder, same
+            // rendered block and hash as the bundle path, priced here like the bundle's share.
+            try {
+                const personal = await readPersonalizationTurnBlock(session.user.id);
+                if (personal.prompt) {
+                    contextSystemPrompt = personal.prompt;
+                    estimatedInputTokens += personal.tokens;
+                    inputEstimate.addTokens(personal.tokens);
+                    console.info(JSON.stringify({ event: "chat_personalization_without_bundle", traceId, preferencesHash: personal.hash, tokens: personal.tokens }));
+                }
+            } catch (error) {
+                console.warn(JSON.stringify({ event: "chat_personalization_without_bundle_failed", traceId, error: error instanceof Error ? error.name : "unknown" }));
+            }
         }
 
         /*
@@ -4147,11 +4184,26 @@ async function handleChatPost(
                 selected: req.headers.has(PASSAGE_HEADER), outcome: isResearchPreview || isDeepResearchTurn ? "unsupported" : finalContinuation.outcome,
                 plan: continuationSeed ? finalContinuation.seed?.plan : null });
         }
+        // Same gate and link scan withChatReadTools applies below, asked first so a turn that
+        // can read a pasted link is not also told the web is out of reach.
+        const urlReadAvailable = chatUrlReadOffered({
+            userId: session?.user?.id,
+            conversationId,
+            productKey: conversationProductKey,
+            model: modelConfig,
+            nativeSearch: nativeSearchEnabled,
+            otherToolOwner: Boolean(mcpConnectionId),
+            researchTurn: isResearchPreview || isDeepResearchTurn,
+            userMessages: messages.filter((m) => m.role === "user").map((m) => m.content),
+        });
         const turnSystemBlocks = buildChatTurnSystemBlocks({
             currentLocation,
             // Study mode is the reader's own opt-in for this turn; a research
             // preview carries none of the capability blocks.
             studyMode: studyMode === true && !isResearchPreview,
+            omittedEarlierMessages,
+            clientTimeZone,
+            urlReadAvailable,
             modelId: modelConfig.id,
             provider: modelConfig.provider,
             usageClass: modelConfig.usageClass,
@@ -4239,6 +4291,7 @@ async function handleChatPost(
         });
         projectTools = chatRead.tools;
         chatReadCitations = chatRead.citations;
+        latency.checkpoint("toolsBuilt");
         if (mcpConnector) {
             formattedMessages.push({ role: "system", content: MCP_UNTRUSTED_NOTICE });
             inputEstimate.addText(MCP_UNTRUSTED_NOTICE);
@@ -5814,6 +5867,7 @@ async function handleChatPost(
               });
         leaseOwnership = chatLeaseAcquired(accessGrant.leaseId);
         usageReservation = accessGrant.usageReservation;
+        latency.checkpoint("accessAcquired");
         // Shadow only, and awaited so the settlement update cannot race the
         // insert it depends on. The recorder is inert unless the flag is set
         // and swallows its own failures, so this cannot fail a paid request.
@@ -5846,6 +5900,7 @@ async function handleChatPost(
             );
         });
         if (!presearchQueries?.length) await providerBudgetNotice;
+        latency.checkpoint("budgetNoticeStarted");
 
         // Perplexity's "sonar-deep-research" model doesn't stream like every
         // other model here -- it's a submit-then-poll async job that can run
@@ -6437,7 +6492,7 @@ async function handleChatPost(
          */
         // Fallback gets the original execution view and its own admitted tool.
         // Primary presearch must not leak another attempt's sources or budget.
-        const fallbackSdkMessages = splitProviderInstructions(
+        const fallbackSdkMessagesBase = splitProviderInstructions(
             locationCacheBreakpoint ? uncachedLocationMessages : formattedMessages
         ).messages;
         // File-capable models offer artifact tools on ordinary text turns too.
@@ -6493,8 +6548,11 @@ async function handleChatPost(
             } finally { finishPresearch(); }
             await providerBudgetNotice;
         }
-        const { messages: sdkMessages, instructions: sdkInstructions } =
+        const { messages: splitSdkMessages, instructions: sdkInstructions } =
             splitProviderInstructions(formattedMessages);
+        // Perplexity rejects adjacent same-role turns, and the memory prelude and
+        // continuation data blocks are adjacent user messages by construction.
+        const sdkMessages = prepareProviderMessages(splitSdkMessages, modelConfig.provider);
         const manifestMessages = formattedMessages.map((message) => ({
             role: message.role,
             parts: Array.isArray(message.content)
@@ -8145,6 +8203,7 @@ async function handleChatPost(
                     attempt: dispatched.attemptIndex + 1, status: "unknown" };
                 // What the primary reported is not the fallback's failure.
                 observedStreamError = null;
+                const fallbackSdkMessages = prepareProviderMessages(fallbackSdkMessagesBase, plan.provider);
                 nextStream = await streamText({
                     model: plan.activeModel,
                     messages: fallbackSdkMessages,
@@ -8653,7 +8712,8 @@ async function handleChatPost(
                                 ...webSearchExecution.citations, ...mcpConnector.sources(),
                             ]);
                         }
-                        const readCitations = chatReadCitations();
+                        // A past chat the answer never names is not a source of it.
+                        const readCitations = pastChatCitationsUsed(chatReadCitations(), generatedText);
                         if (readCitations.length) {
                             webSearchExecution.citations = sanitizeWebSearchCitations([
                                 ...webSearchExecution.citations, ...readCitations,
@@ -10135,6 +10195,22 @@ async function handleChatPost(
         // dispatch record and then failed before a response stream existed
         // still has a duration. A request refused earlier (auth, rate limit,
         // credits) is not a turn and writes no timing line.
+        // A client that gives up before any header arrives is a 499 in the platform logs and, with no
+        // reservation yet, used to leave nothing here. Say how far the turn got and which step it was in,
+        // whether or not a reservation exists. Not a turn timing line: it never records a latency sample.
+        if (req.signal.aborted && !turnTimingLogged) {
+            try {
+                console.info(JSON.stringify({
+                    event: "chat_prestream_abort_timing",
+                    traceId,
+                    modelId: dispatchModelIdForLog ?? null,
+                    ...latency.prestream(),
+                    timestamp: new Date().toISOString(),
+                }));
+            } catch {
+                // Diagnostics only.
+            }
+        }
         if ((dispatchRecord || usageReservation) && !turnTimingLogged) {
             turnTimingLogged = true;
             latency.finish("failed_before_stream", dispatchModelIdForLog ?? null, dispatchProviderForLog ?? null);
@@ -10488,8 +10564,8 @@ async function handleChatPost(
             );
             return withoutRejectionLine(tracedJsonError(
                 localFailure.layer === "storage"
-                    ? "첨부파일 저장소를 읽지 못했습니다. 잠시 후 다시 시도해 주세요."
-                    : "요청을 처리하지 못했습니다.",
+                    ? "The attachment storage could not be read. Please try again shortly."
+                    : "The request could not be processed.",
                 localFailure.layer === "storage"
                     ? ATTACHMENT_STORAGE_UNAVAILABLE_CODE
                     : "CHAT_APPLICATION_ERROR",
@@ -10569,7 +10645,7 @@ async function handleChatPost(
                 { failureLayer: "application", phase: "request" }
             );
             return withoutRejectionLine(tracedJsonError(
-                "요청을 처리하지 못했습니다.",
+                "The request could not be processed.",
                 "CHAT_APPLICATION_ERROR",
                 500,
                 traceId,
@@ -10586,7 +10662,7 @@ async function handleChatPost(
         }
 
         return withoutRejectionLine(tracedJsonError(
-            "AI 응답 생성에 실패했습니다.",
+            "The AI response could not be generated.",
             "AI_PROVIDER_ERROR",
             500,
             traceId,
