@@ -147,7 +147,7 @@ test("whatever the rewrite guidance says, the deterministic boundary holds", () 
     ];
     const kept = answer("Fix the parser above so it handles empty input.", "fix it").rewrite;
     const view = withRouterRewrite(history, kept);
-    assert.deepEqual(view.map((message) => message.content), ["write a parser", "def parse(): ...", kept]);
+    assert.deepEqual(view.map((message) => message.content), ["write a parser", "def parse(): ...", `fix it\n\nRouter interpretation: ${kept}`]);
     assert.equal(view[0], history[0]);
     assert.deepEqual(history.map((message) => message.content), ["write a parser", "def parse(): ...", "fix it"]);
   }

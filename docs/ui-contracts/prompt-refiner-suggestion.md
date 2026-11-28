@@ -446,14 +446,17 @@ Auto LLM router(`lib/autoLlmRouter.ts`)는 모델을 고르는 같은 호출에�
   정한다. 적용 대상은 로그인 사용자의 Auto 라우팅 턴, 1,500자 이하의 일반 텍스트 메시지,
   기존 Refiner 제안이 이미 적용되지 않은 턴뿐이다. 대화의 어느 메시지에든 첨부(Chat이 문자열
   `content` 옆에 보내는 `attachments`)가 있으면 재작성을 요청하지도 적용하지도 않는다. router는
-  첨부 내용을 읽지 않으므로 "이 파일"이나 "그 코드"가 무엇인지 알 수 없기 때문이다. guest Smart
-  Adaptive 경로는 바뀌지 않는다.
+  첨부 내용을 읽지 않으므로 "이 파일"이나 "그 코드"가 무엇인지 알 수 없기 때문이다. 직전 답변이
+  router가 읽는 600자보다 길어 잘렸을 때도 같다(`previousAnswerWasCut()`): 앞부분만 본 router가
+  지칭을 잘못 풀 수 있으므로 재작성을 요청하지 않는다. guest Smart Adaptive 경로는 바뀌지 않는다.
 
 다음은 이 경로에서도 그대로 지킨다.
 
 - §2: 저장되는 사용자 Message는 원문이다. 재작성문은 답변 모델이 읽는 실행 입력
   (`executionMessages`의 마지막 사용자 텍스트)에만 들어가며(`withRouterRewrite()`), 구조화된
-  content(첨부·part)인 턴은 바꾸지 않는다.
+  content(첨부·part)인 턴은 바꾸지 않는다. 실행 입력에서도 원문을 지우지 않는다: 사용자가 쓴
+  문장 뒤에 빈 줄을 두고 `Router interpretation: <재작성문>`으로 덧붙인다. router가 본 것은
+  잘린 프롬프트와 직전 답변 앞부분뿐이라, 재작성이 원문만 가진 세부를 지우면 안 되기 때문이다.
 - §1: 무엇도 스스로 전송하지 않는다. 재작성은 사용자가 이미 보낸 턴의 실행 입력일 뿐이다.
 - 표시: 답변의 Auto 배지 아래에 접힌 "Auto가 이해한 메시지"로 재작성문과 "보내신 메시지는
   쓰신 그대로 저장됩니다"를 보인다(`components/chat/AutoRewriteDisclosure.tsx`). 배지가 있는

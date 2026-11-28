@@ -27,9 +27,9 @@
  * remaining text, so a marker cannot hide inside another marker's payload.
  */
 
-import { chatStreamDisplayText } from "@tomverse/chat-core";
+import { createChatStreamDisplayProjector } from "@tomverse/chat-core";
 import { mcpProgressFromStream, type McpProgressState } from "@/lib/mcpConnectorProgress";
-import { splitStreamKeepaliveSignal } from "@/lib/chatStreamKeepalive";
+import { splitStreamKeepaliveSignal, type ChatStreamKeepaliveSignal } from "@/lib/chatStreamKeepalive";
 import { splitArtifactProgressSignal } from "@/lib/generatedArtifactProgressSignal";
 import { splitRoutingRetrySignal } from "@/lib/routingRetrySignal";
 import { splitSearchMetadataTrailer } from "@/lib/webSearchStreamTrailer";
@@ -101,10 +101,13 @@ export const consumeChatStream = async (input: {
   let isGeneratingArtifact = false;
   let generatingArtifactFormat: string | null = null;
   let serverStallCode: ChatTimeoutErrorCode | null = null;
-  // Complete keepalive markers already reported. The splitter runs over the
-  // whole accumulation each pass, so its last signal is the same object on
-  // every later pass; only a higher count is a keepalive that just arrived.
-  let keepalivesSeen = 0;
+  // Reads the stream once, remembering where it got to (see streamText.ts).
+  const projector = createChatStreamDisplayProjector();
+  let mcpProgress: McpProgressState | undefined;
+  // Once the "building a file" marker has arrived the card stays up, and every
+  // later chunk keeps counting as progress, as it did when each pass re-split
+  // the whole accumulation and found the same last signal again.
+  let artifactSignalSeen = false;
 
   for (;;) {
     let read: ReadableStreamReadResult<Uint8Array>;
@@ -121,38 +124,44 @@ export const consumeChatStream = async (input: {
 
     rawStreamText += decoder.decode(value, { stream: true });
 
-    const routing = splitRoutingRetrySignal(rawStreamText);
-    if (routing.signal) retryingWithModelId = routing.signal.modelId;
-
-    const keepalive = splitStreamKeepaliveSignal(routing.text);
-    const keepaliveArrived = keepalive.count > keepalivesSeen;
+    // Only controls that completed in this chunk are read. The projector
+    // remembers how far it got, so nothing already handled is scanned again
+    // and a stream costs time linear in its length, not quadratic.
+    const previousLength = displayText.length;
+    displayText = projector.project(rawStreamText);
+    let keepaliveArrived = false;
+    let keepaliveSignal: ChatStreamKeepaliveSignal | null = null;
+    for (const control of projector.takeControls()) {
+      const routing = splitRoutingRetrySignal(control);
+      if (routing.signal) retryingWithModelId = routing.signal.modelId;
+      const keepalive = splitStreamKeepaliveSignal(routing.text);
+      if (keepalive.count > 0) keepaliveArrived = true;
+      if (keepalive.signal) keepaliveSignal = keepalive.signal;
+      const artifactProgress = splitArtifactProgressSignal(keepalive.text);
+      if (artifactProgress.signal) {
+        artifactSignalSeen = true;
+        isGeneratingArtifact = true;
+        generatingArtifactFormat = artifactProgress.signal.format;
+      }
+      const mcp = mcpProgressFromStream(control);
+      if (mcp) mcpProgress = mcp;
+    }
     if (keepaliveArrived) {
-      keepalivesSeen = keepalive.count;
       // Resets the silence clock and nothing else. It deliberately does not
       // extend the first-response deadline -- see lib/chatStreamLiveness.ts
       // -- or a provider that had permanently stopped would be hidden for as
       // long as the server kept writing.
-      liveness.noteKeepalive(keepalive.signal?.intervalMs);
+      liveness.noteKeepalive(keepaliveSignal?.intervalMs);
     }
-    if (keepalive.signal?.state === "stalled") {
-      serverStallCode = keepalive.signal.code ?? "CHAT_FIRST_RESPONSE_TIMEOUT";
+    if (keepaliveSignal?.state === "stalled") {
+      serverStallCode = keepaliveSignal.code ?? "CHAT_FIRST_RESPONSE_TIMEOUT";
     }
-
-    const artifactProgress = splitArtifactProgressSignal(keepalive.text);
-    if (artifactProgress.signal) {
-      isGeneratingArtifact = true;
-      generatingArtifactFormat = artifactProgress.signal.format;
-    }
-
-    const previousLength = displayText.length;
-    displayText = chatStreamDisplayText(rawStreamText);
 
     // Progress as the user would judge it: answer text that grew, or the card
     // saying a file is being built. An out-of-band marker on its own is not
     // progress, and counting it as progress is exactly how a keepalive would
     // end up restarting the clock it exists to be independent of.
-    const advanced =
-      displayText.length > previousLength || Boolean(artifactProgress.signal);
+    const advanced = displayText.length > previousLength || artifactSignalSeen;
     if (advanced) liveness.noteVisibleChunk();
     // A routing notice, a progress marker, the trailer, or the torn first
     // half of a keepalive: the server is writing, which is all the silence
@@ -160,7 +169,7 @@ export const consumeChatStream = async (input: {
     else if (!keepaliveArrived) liveness.noteServerSignal?.();
 
     onProgress({
-      ...(mcpProgressFromStream(rawStreamText) ? { mcpProgress: mcpProgressFromStream(rawStreamText) } : {}),
+      ...(mcpProgress ? { mcpProgress } : {}),
       displayText,
       retryingWithModelId,
       isGeneratingArtifact,
@@ -182,7 +191,7 @@ export const consumeChatStream = async (input: {
     );
 
   return {
-    displayText: chatStreamDisplayText(rawStreamText),
+    displayText: projector.project(rawStreamText),
     retryingWithModelId,
     isGeneratingArtifact,
     generatingArtifactFormat,

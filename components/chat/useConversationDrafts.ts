@@ -191,6 +191,28 @@ export function releasedPreparedDraftNeedsSave(input: Parameters<
 }
 
 const DRAFT_SAVE_DEBOUNCE_MS = 350;
+// A keepalive request may carry at most 64 KiB in total; stay well inside it
+// and count three bytes per UTF-16 unit so non-Latin text is not undercounted.
+const DRAFT_KEEPALIVE_MAX_BODY_UNITS = 20_000;
+
+/** Whether a draft write may outlive the page: asked for, and small enough. */
+export const draftRequestKeepalive = (body: string, wanted: boolean) =>
+  wanted && body.length <= DRAFT_KEEPALIVE_MAX_BODY_UNITS;
+
+/**
+ * The page is going away (or being hidden, which on mobile is often the last
+ * thing a tab gets): every edit still waiting out its debounce is written now
+ * instead of being lost with the timer.
+ */
+export function flushPendingDraftSaves(
+  timers: Map<string, ReturnType<typeof setTimeout>>,
+  persist: (key: string) => void
+) {
+  const keys = [...timers.keys()];
+  timers.forEach((timer) => clearTimeout(timer));
+  timers.clear();
+  keys.forEach(persist);
+}
 const serverScopeKey = (scopeId: string | null | undefined) => scopeId || "new";
 const draftKeyIdentitySegment = (identityKey: string | null) =>
   `draft|${identityKey ?? UNRESOLVED_IDENTITY_DRAFT_SEGMENT}|`;
@@ -221,7 +243,10 @@ const releasePreviews = (items: ChatAttachment[], keep: ChatAttachment[]) => {
 /**
  * Composer drafts, one per conversation. Authenticated Chat callers and
  * server-identified Review handoff targets synchronize through their separate
- * revision-CAS draft endpoints. Other Review and Guest drafts stay in tab memory.
+ * revision-CAS draft endpoints. Other Review and Guest drafts stay in tab memory
+ * only: docs/policy/conversation-draft-identity-scope.md keeps unsent text out
+ * of device storage, so a reload still loses them. A synchronized draft's last
+ * edit is flushed with a keepalive request on pagehide and when the tab hides.
  *
  * The composer used to be a single `inputValue` shared by every conversation,
  * so opening another conversation from the sidebar carried the half-written
@@ -295,7 +320,9 @@ export function useConversationDrafts(
     key: string;
     timer: ReturnType<typeof setTimeout>;
   } | null>(null);
-  const persistKeyRef = useRef<(key: string) => Promise<boolean>>(async () => false);
+  const persistKeyRef = useRef<
+    (key: string, exact?: ConversationDraft, exactGeneration?: number, keepalive?: boolean) => Promise<boolean>
+  >(async () => false);
   const identityKeyRef = useRef(identityKey);
   const identityFenceRef = useRef({ identityKey, epoch: 0 });
 
@@ -579,7 +606,8 @@ export function useConversationDrafts(
   const persistKey = useCallback(async (
     key: string,
     exact?: ConversationDraft,
-    exactGeneration?: number
+    exactGeneration?: number,
+    keepalive = false
   ) => {
     if (!durableSyncEnabled) return true;
     const meta = syncMetaRef.current.get(key);
@@ -627,12 +655,14 @@ export function useConversationDrafts(
             succeeded = true;
             return;
           }
+          const deleteBody = JSON.stringify({ expectedRevision: meta.revision });
           const response = await fetch(
             endpoint,
             {
               method: "DELETE",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ expectedRevision: meta.revision }),
+              body: deleteBody,
+              keepalive: draftRequestKeepalive(deleteBody, keepalive),
               signal: controller.signal,
             }
           );
@@ -673,16 +703,18 @@ export function useConversationDrafts(
         }
         const generation = exactGeneration ?? meta.generation;
         const expectedRevision = meta.revision;
+        const putBody = JSON.stringify({
+          expectedRevision,
+          text: snapshot.text,
+          attachmentReferences: references,
+        });
         const response = await fetch(
           endpoint,
           {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              expectedRevision,
-              text: snapshot.text,
-              attachmentReferences: references,
-            }),
+            body: putBody,
+            keepalive: draftRequestKeepalive(putBody, keepalive),
             signal: controller.signal,
           }
         );
@@ -781,6 +813,25 @@ export function useConversationDrafts(
   useEffect(() => {
     persistKeyRef.current = persistKey;
   }, [persistKey]);
+
+  // Closing or reloading the tab inside the debounce window used to drop the
+  // last edit. The keepalive flag lets the write finish after the page is gone.
+  useEffect(() => {
+    if (!durableSyncEnabled) return;
+    const flush = () =>
+      flushPendingDraftSaves(saveTimersRef.current, (key) => {
+        void persistKeyRef.current(key, undefined, undefined, true);
+      });
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [durableSyncEnabled]);
 
   const scheduleSave = useCallback((key: string) => {
     if (!durableSyncEnabled) return;
