@@ -82,6 +82,8 @@ export async function GET(req: Request, context: { params: Promise<{ shareToken:
         report: copy.report,
         expires: formatArtifactWorkspaceCopy(copy.expires, { date: formatDate(lang, share.expiresAt) }),
         frameTitle: copy.frameTitle,
+        gateNotice: copy.gateNotice,
+        gateOpen: copy.gateOpen,
       },
       labels: {
         errorTitle: chat.artifactWorkspaceErrorTitle,

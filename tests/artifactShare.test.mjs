@@ -15,6 +15,7 @@ import {
 } from "../lib/artifactShareAccess.ts";
 import {
     ARTIFACT_SHARE_FRAME_SANDBOX,
+    ARTIFACT_SHARE_GATE_SCRIPT,
     ARTIFACT_SHARE_NOT_FOUND_CSP,
     artifactSharePageCsp,
     artifactSharePageHeaders,
@@ -22,7 +23,12 @@ import {
     buildArtifactSharePage,
 } from "../lib/artifactSharePage.ts";
 import { ARTIFACT_SHARE_OVERRIDE_HEADERS, isArtifactSharePagePath } from "../lib/artifactSharePageHeaders.ts";
-import { HTML_PREVIEW_MAX_BYTES, HTML_PREVIEW_OUTER_CSP, htmlPreviewCsp } from "../lib/htmlArtifactPreview.ts";
+import {
+    HTML_PREVIEW_GUARD_SCRIPT,
+    HTML_PREVIEW_MAX_BYTES,
+    HTML_PREVIEW_OUTER_CSP,
+    htmlPreviewCsp,
+} from "../lib/htmlArtifactPreview.ts";
 import { reactPreviewCsp } from "../lib/chatArtifactPreview.ts";
 
 const ORIGIN = "https://tomverse.app";
@@ -141,6 +147,9 @@ test("the page's policy is the preview frame's policy plus sandbox and no framin
     assert.deepEqual(page.get("form-action"), ["'none'"]);
     assert.deepEqual(page.get("frame-src"), ["'none'"]);
     assert.deepEqual(page.get("img-src"), ["data:", "blob:"]);
+    // CSP3's WebRTC switch, in the page's own policy and (through htmlPreviewCsp) in every frame below it.
+    assert.deepEqual(page.get("webrtc"), ["'block'"]);
+    assert.deepEqual(frame.get("webrtc"), ["'block'"]);
     assert.ok(!page.get("script-src").includes("'unsafe-eval'"));
     // Exactly the string the route sends.
     assert.equal(
@@ -163,6 +172,8 @@ const COPY = {
     report: "Report",
     expires: "Link expires 28 Dec 2026",
     frameTitle: "Shared page content",
+    gateNotice: "This page was made by someone else. Tomverse did not make or check it. Don't enter passwords, payment details or verification codes.",
+    gateOpen: "Show the page",
 };
 const LABELS = { errorTitle: "e", loadFailed: "l", noComponent: "n", missingPackage: "m {name}" };
 
@@ -181,15 +192,26 @@ test("the shared page's code is never part of our document: it is only inside th
         assetOrigin: ORIGIN,
         reportUrl: `${ORIGIN}/support`,
     });
-    // No markup of the page appears in the top document: no script, form or handler of any kind.
-    assert.doesNotMatch(html, /<script|<form|<input/i);
+    // No markup of the page appears in the top document: no form, input or handler, and the one script is our fixed one.
+    assert.doesNotMatch(html, /<form|<input/i);
     assert.doesNotMatch(html.replace(/srcdoc="[^"]*"/, ""), /onclick|evil\.test/i);
+    assert.deepEqual(html.match(/<script[^>]*>[\s\S]*?<\/script>/g), [`<script>${ARTIFACT_SHARE_GATE_SCRIPT}</script>`]);
     assert.equal((html.match(/<iframe /g) ?? []).length, 1);
     assert.match(html, /<iframe [^>]*sandbox="allow-scripts"[^>]*>/);
     assert.match(html, /referrerpolicy="no-referrer"/);
     assert.doesNotMatch(html, /<iframe [^>]* src=/);
-    // The notice is ours, outside and above the frame.
-    assert.ok(html.indexOf(COPY.notice) < html.indexOf("<iframe"));
+    // The notice is ours, outside and above the frame (as the page writes it, HTML-escaped).
+    const escaped = (text) => text.replace(/'/g, "&#39;");
+    assert.ok(html.indexOf(escaped(COPY.notice)) > 0);
+    assert.ok(html.indexOf(escaped(COPY.notice)) < html.indexOf("<iframe"));
+    // The page is not drawn until the visitor asks: the confirmation comes first, the frame waits in a template.
+    const gate = html.indexOf('data-testid="artifact-share-gate"');
+    const template = html.indexOf('<template id="artifact-share-frame-template">');
+    assert.ok(gate > 0 && template > gate && html.indexOf("<iframe") > template);
+    assert.ok(html.indexOf("</template>") > html.indexOf("</iframe>"), "the frame is inside the template");
+    assert.ok(html.includes(escaped(COPY.gateNotice)) && html.includes(`>${COPY.gateOpen}</button>`));
+    // The gate script moves the frame and touches nothing of the shared page.
+    assert.doesNotMatch(ARTIFACT_SHARE_GATE_SCRIPT, /srcdoc|innerHTML|eval|Function|fetch|location/);
     assert.ok(html.includes(`href="${ORIGIN}/support"`));
     assert.match(html, /<meta name="robots" content="noindex, nofollow, noarchive">/);
     assert.match(html, /<meta name="referrer" content="no-referrer">/);
@@ -198,9 +220,13 @@ test("the shared page's code is never part of our document: it is only inside th
     const outer = srcdocOf(html);
     assert.ok(outer.startsWith(`<!doctype html><meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_OUTER_CSP}">`));
     assert.match(outer, /<iframe sandbox="allow-scripts" referrerpolicy="no-referrer"/);
-    // The page, with the preview's policy in front of it.
+    // The page, with the preview's policy in front of it and the WebRTC guard right after, before anything the page says.
     const inner = srcdocOf(outer);
-    assert.ok(inner.startsWith(`<!doctype html><meta http-equiv="Content-Security-Policy" content="${htmlPreviewCsp(ORIGIN)}">`));
+    assert.ok(
+        inner.startsWith(
+            `<!doctype html><meta http-equiv="Content-Security-Policy" content="${htmlPreviewCsp(ORIGIN)}"><script>${HTML_PREVIEW_GUARD_SCRIPT}</script>`
+        )
+    );
     assert.ok(inner.endsWith(hostile));
 });
 

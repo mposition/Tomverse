@@ -20,7 +20,8 @@ export function HtmlArtifactPreviewFrame({ html, title }: { html: string; title:
     // Scripts in it never run. Only the rewritten text leaves this function, into the sandboxed frame.
     const nonce = typeof document === "undefined" ? null : document.querySelector<HTMLScriptElement>("script[nonce]")?.nonce;
     const page = typeof DOMParser === "undefined" ? html : withEmbedderNonce(html, nonce, (text) => new DOMParser().parseFromString(text, "text/html"));
-    return buildHtmlPreviewSrcdoc(page, typeof window === "undefined" ? null : window.location.origin);
+    // The guard script ahead of the page needs the same nonce, or the app's policy would block it.
+    return buildHtmlPreviewSrcdoc(page, typeof window === "undefined" ? null : window.location.origin, { nonce });
   }, [html]);
   return (
     <iframe

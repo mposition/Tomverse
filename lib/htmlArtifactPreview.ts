@@ -77,6 +77,10 @@ export const htmlPreviewCsp = (assetOrigin?: string | null) => {
         "object-src 'none'",
         "worker-src 'none'",
         "manifest-src 'none'",
+        // CSP3's WebRTC switch. No shipping browser enforces it yet (measured: Chromium 159 still sends STUN; the
+        // Firefox and WebKit bugs are open), and an unknown directive is ignored rather than voiding the policy, so it
+        // costs nothing now and applies the day it ships. Until then HTML_PREVIEW_GUARD_SCRIPT is what stops WebRTC.
+        "webrtc 'block'",
     ].join("; ");
 };
 
@@ -101,6 +105,93 @@ export const HTML_PREVIEW_OUTER_CSP = "frame-src 'none'";
 const attributeEscape = (value: string) => value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 
 /**
+ * The WebRTC names a page could open a connection through. CSP's
+ * `connect-src` does not cover WebRTC: a page could put text into a STUN or
+ * TURN request to any host and port (measured in Chromium). Every global whose
+ * name starts with RTC, webkitRTC or mozRTC is locked too, so a name added to
+ * the platform later is covered without editing this list.
+ */
+export const HTML_PREVIEW_WEBRTC_GLOBALS = [
+    "RTCPeerConnection",
+    "webkitRTCPeerConnection",
+    "mozRTCPeerConnection",
+    "RTCDataChannel",
+    "RTCSessionDescription",
+    "RTCIceCandidate",
+    "RTCRtpSender",
+    "RTCRtpReceiver",
+    "RTCRtpTransceiver",
+    "RTCDtlsTransport",
+    "RTCIceTransport",
+    "RTCSctpTransport",
+    "MediaStreamTrack",
+    "MediaStream",
+    "MediaDevices",
+] as const;
+
+/**
+ * Runs in the preview frame before anything the page says (it follows only our
+ * policy `<meta>`), and takes WebRTC out of the frame:
+ *
+ *   * each name above, and every other RTC global, becomes a non-writable,
+ *     non-configurable `undefined` on the window, and so do
+ *     `navigator.mediaDevices` and the legacy `getUserMedia` names, on the
+ *     prototype and the instance -- the page cannot delete or redefine them;
+ *   * a nested frame would be a fresh window with its own constructors, so
+ *     every frame-like element is removed as soon as it is inserted (a
+ *     mutation observer, which runs before a nested document can load), and
+ *     `contentWindow`/`contentDocument` are locked to `undefined`. The other
+ *     ways to a fresh realm are closed elsewhere: popups by the sandbox, workers
+ *     by `worker-src 'none'`, navigating to another document by the outer
+ *     document's `frame-src 'none'`.
+ *
+ * The observer uses only functions captured here, before the page runs, so a
+ * page that replaces `Element.prototype.matches`, `NodeList.prototype.length`
+ * or `Reflect.apply` afterwards cannot blind it. No backslashes and no closing
+ * script tag, so it is the same text in source, in `srcdoc` and at runtime.
+ */
+export const HTML_PREVIEW_GUARD_SCRIPT = `(function () {
+  var apply = Reflect.apply, define = Object.defineProperty, describe = Object.getOwnPropertyDescriptor;
+  var lock = function (target, name) {
+    try { define(target, name, { value: undefined, writable: false, enumerable: false, configurable: false }); } catch (error) {}
+  };
+  var names = ${JSON.stringify(HTML_PREVIEW_WEBRTC_GLOBALS)};
+  var own = Object.getOwnPropertyNames(window);
+  for (var i = 0; i < own.length; i++) { if (/^(webkit|moz)?RTC/.test(own[i])) names.push(own[i]); }
+  for (var j = 0; j < names.length; j++) lock(window, names[j]);
+  var media = ["mediaDevices", "getUserMedia", "webkitGetUserMedia", "mozGetUserMedia"];
+  for (var k = 0; k < media.length; k++) { lock(Navigator.prototype, media[k]); lock(navigator, media[k]); }
+  var holders = ["HTMLIFrameElement", "HTMLFrameElement", "HTMLObjectElement", "HTMLEmbedElement"];
+  for (var h = 0; h < holders.length; h++) {
+    var holder = window[holders[h]];
+    if (holder) { lock(holder.prototype, "contentWindow"); lock(holder.prototype, "contentDocument"); }
+  }
+  var frames = "iframe,frame,frameset,object,embed,portal,fencedframe";
+  var addedNodes = describe(MutationRecord.prototype, "addedNodes").get;
+  var listLength = describe(NodeList.prototype, "length").get;
+  var listItem = NodeList.prototype.item;
+  var nodeType = describe(Node.prototype, "nodeType").get;
+  var matches = Element.prototype.matches, remove = Element.prototype.remove, select = Element.prototype.querySelectorAll;
+  var each = function (list, visit) {
+    var count = apply(listLength, list, []);
+    for (var n = 0; n < count; n++) visit(apply(listItem, list, [n]));
+  };
+  var removeNode = function (node) { apply(remove, node, []); };
+  var drop = function (node) {
+    if (apply(nodeType, node, []) !== 1) return;
+    if (apply(matches, node, [frames])) { removeNode(node); return; }
+    each(apply(select, node, [frames]), removeNode);
+  };
+  new MutationObserver(function (records) {
+    for (var r = 0; r < records.length; r++) each(apply(addedNodes, records[r], []), drop);
+  }).observe(document, { childList: true, subtree: true });
+})();`;
+
+/** A CSP nonce as an embedding document can carry it (base64 characters). */
+export const isEmbedderNonce = (nonce: string | null | undefined): nonce is string =>
+    typeof nonce === "string" && /^[A-Za-z0-9+/_=-]{8,200}$/.test(nonce);
+
+/**
  * The page the user sees is a frame inside a frame.
  *
  * The inner document is the model's page, with our policy placed in front of
@@ -113,10 +204,22 @@ const attributeEscape = (value: string) => value.replace(/&/g, "&amp;").replace(
  * policy cannot close, because `navigate-to` was never shipped -- is refused
  * before a request leaves. The initial `srcdoc` load is not a network
  * navigation and is not affected.
+ *
+ * Right after our policy, ahead of the page, comes HTML_PREVIEW_GUARD_SCRIPT.
+ * In the chat the frame inherits the app's nonce policy, so the guard carries
+ * the embedding document's nonce (`options.nonce`) or it would not run; the
+ * public share page has no nonce and needs none.
  */
-export function buildHtmlPreviewSrcdoc(html: string, assetOrigin?: string | null): string {
+export function buildHtmlPreviewSrcdoc(
+    html: string,
+    assetOrigin?: string | null,
+    options: { nonce?: string | null } = {}
+): string {
     const page = html.replace(LEADING_DOCTYPE, "");
-    const inner = `<!doctype html><meta http-equiv="Content-Security-Policy" content="${htmlPreviewCsp(assetOrigin)}">${page}`;
+    const nonce = isEmbedderNonce(options.nonce) ? ` nonce="${options.nonce}"` : "";
+    const inner =
+        `<!doctype html><meta http-equiv="Content-Security-Policy" content="${htmlPreviewCsp(assetOrigin)}">` +
+        `<script${nonce}>${HTML_PREVIEW_GUARD_SCRIPT}</script>${page}`;
     return (
         `<!doctype html><meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_OUTER_CSP}">` +
         `<body style="margin:0;height:100vh;overflow:hidden">` +
@@ -147,7 +250,7 @@ export function withEmbedderNonce(
     nonce: string | null | undefined,
     parse: (html: string) => { querySelectorAll: (selector: string) => ArrayLike<{ setAttribute: (name: string, value: string) => void }>; documentElement: { outerHTML: string } }
 ): string {
-    if (!nonce || !/^[A-Za-z0-9+/_=-]{8,200}$/.test(nonce)) return html;
+    if (!isEmbedderNonce(nonce)) return html;
     const document = parse(html);
     for (const element of Array.from(document.querySelectorAll('script, style, link[rel~="stylesheet" i]'))) {
         element.setAttribute("nonce", nonce);

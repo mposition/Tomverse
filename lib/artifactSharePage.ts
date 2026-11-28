@@ -11,7 +11,9 @@
  *       -> iframe sandbox="allow-scripts" srcdoc=  (the page, htmlPreviewCsp first; reactPreviewCsp too for React)
  *
  * The page's code is never the top document. The top document is ours: a
- * fixed notice bar, a report link and the frame, with no script of its own.
+ * fixed notice bar, a report link, a confirmation the visitor answers before
+ * the page is drawn, and the frame; its one script is the fixed
+ * ARTIFACT_SHARE_GATE_SCRIPT, which only moves the frame into the page.
  * Its policy's `sandbox` directive gives even this document an opaque origin,
  * so a mistake in this template could not run script with the application's
  * origin. The frame policy is the preview's, unchanged, and every document
@@ -61,7 +63,30 @@ export type ArtifactSharePageCopy = {
   /** Already formatted with the date. */
   expires: string;
   frameTitle: string;
+  /** The confirmation shown before the page is drawn, and its button. */
+  gateNotice: string;
+  gateOpen: string;
 };
+
+/**
+ * The page is not drawn until the visitor asks for it. Until then the frame is
+ * markup inside a `<template>`, which the browser parses but never renders or
+ * loads; this fixed script, the top document's only one, moves it into the
+ * page when "Show the page" is pressed. Nothing of the shared page is in the
+ * script -- it only moves the element -- and nothing is remembered, so the
+ * confirmation shows on every visit.
+ */
+export const ARTIFACT_SHARE_GATE_SCRIPT = `(function () {
+  var button = document.getElementById("artifact-share-open");
+  var gate = document.getElementById("artifact-share-gate");
+  var template = document.getElementById("artifact-share-frame-template");
+  if (!button || !gate || !template) return;
+  button.addEventListener("click", function () {
+    var frame = template.content.cloneNode(true);
+    template.parentNode.replaceChild(frame, template);
+    gate.remove();
+  }, { once: true });
+})();`;
 
 const STYLE =
   ":root{color-scheme:light dark;--bg:#fff;--fg:#18181b;--bar:#fef3c7;--bar-fg:#78350f;--bar-line:#fcd34d}" +
@@ -74,6 +99,10 @@ const STYLE =
   "header a{display:inline-flex;align-items:center;min-height:44px;padding:0 4px;color:inherit;font-weight:700}" +
   "header a:focus-visible{outline:2px solid currentColor;outline-offset:2px}" +
   "main{flex:1;min-height:0;display:flex}iframe{flex:1;width:100%;height:100%;border:0;background:#fff}" +
+  ".gate{margin:auto;max-width:30rem;padding:24px 16px;text-align:center}.gate p{margin:0 0 16px;font-size:15px;line-height:1.55}" +
+  ".gate button{min-height:44px;padding:0 20px;border:0;border-radius:10px;background:#18181b;color:#fff;font:inherit;font-weight:700;cursor:pointer}" +
+  ".gate button:focus-visible{outline:2px solid #2563eb;outline-offset:2px}" +
+  "@media (prefers-color-scheme:dark){.gate button{background:#f4f4f5;color:#18181b}}" +
   ".empty{margin:auto;max-width:28rem;padding:24px 16px;text-align:center}.empty h1{font-size:18px;margin:0 0 8px}";
 
 const head = (lang: string, title: string) =>
@@ -108,8 +137,14 @@ export function buildArtifactSharePage(input: {
     `<p><strong>${escapeHtml(copy.notice)}</strong></p>` +
     `<div class="meta">${file}<span>${escapeHtml(copy.expires)}</span>` +
     `<a href="${escapeHtml(input.reportUrl)}" rel="noreferrer noopener" data-testid="artifact-share-report">${escapeHtml(copy.report)}</a></div>` +
-    `</header><main><iframe data-testid="artifact-share-frame" title="${escapeHtml(copy.frameTitle)}" sandbox="${ARTIFACT_SHARE_FRAME_SANDBOX}"` +
-    ` referrerpolicy="no-referrer" allow="" srcdoc="${escapeHtml(frame)}"></iframe></main></body></html>`
+    `</header><main>` +
+    `<section class="gate" id="artifact-share-gate" data-testid="artifact-share-gate" aria-labelledby="artifact-share-gate-text">` +
+    `<p id="artifact-share-gate-text"><strong>${escapeHtml(copy.gateNotice)}</strong></p>` +
+    `<button type="button" id="artifact-share-open" data-testid="artifact-share-open">${escapeHtml(copy.gateOpen)}</button></section>` +
+    // Inert until the button moves it into the page: nothing in a template is rendered or loaded.
+    `<template id="artifact-share-frame-template"><iframe data-testid="artifact-share-frame" title="${escapeHtml(copy.frameTitle)}" sandbox="${ARTIFACT_SHARE_FRAME_SANDBOX}"` +
+    ` referrerpolicy="no-referrer" allow="" srcdoc="${escapeHtml(frame)}"></iframe></template>` +
+    `</main><script>${ARTIFACT_SHARE_GATE_SCRIPT}</script></body></html>`
   );
 }
 

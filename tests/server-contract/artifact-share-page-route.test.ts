@@ -23,6 +23,8 @@ import { resolve } from "node:path";
 const ROOT = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(ROOT, path)).href;
 const require = createRequire(import.meta.url);
+// A pure module the route uses unreplaced; only its fixed script text is compared here.
+const { ARTIFACT_SHARE_GATE_SCRIPT } = require(resolve(ROOT, "lib/artifactSharePage.ts")) as { ARTIFACT_SHARE_GATE_SCRIPT: string };
 
 process.env.E2E_DISABLE_DATABASE = "true";
 process.env.NEXTAUTH_URL ||= "http://127.0.0.1:3100";
@@ -128,6 +130,7 @@ test("the page carries its own enforced policy and the conversation share's cach
   assert.match(csp, /connect-src 'none'/);
   assert.match(csp, /form-action 'none'/);
   assert.match(csp, /frame-src 'none'/);
+  assert.match(csp, /; webrtc 'block'; /);
   assert.ok(csp.includes(`script-src 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com ${ORIGIN}/vendor/artifact-preview/;`));
   assert.equal(response.headers.get("content-security-policy-report-only"), null);
   assert.equal(response.headers.get("content-type"), "text/html; charset=utf-8");
@@ -142,8 +145,26 @@ test("the page carries its own enforced policy and the conversation share's cach
 
   const body = await response.text();
   assert.match(body, /<iframe data-testid="artifact-share-frame"[^>]* sandbox="allow-scripts"/);
-  assert.doesNotMatch(body, /<script/);
   assert.ok(body.includes(`href="${ORIGIN}/support"`));
+});
+
+test("the response asks first: the confirmation is drawn and the frame waits, inert, until the visitor opens it", async () => {
+  reset();
+  const { GET } = await load();
+  const body = await (await GET(request({ cookie: "__Secure-next-auth.session-token=SESSION-SECRET-123" }), context())).text();
+  assert.deepEqual(world.sessionReads, []);
+  // The visitor's language: the confirmation sentence and its button.
+  assert.ok(body.includes("다른 사람이 만든 화면입니다. Tomverse가 만들거나 확인한 것이 아닙니다. 비밀번호·결제 정보·인증 코드를 입력하지 마세요."));
+  assert.match(body, /<button type="button" id="artifact-share-open" data-testid="artifact-share-open">화면 보기<\/button>/);
+  // The only frame is inside a template, after the confirmation; the top notice stays above both.
+  const gate = body.indexOf('data-testid="artifact-share-gate"');
+  const template = body.indexOf('<template id="artifact-share-frame-template"><iframe ');
+  assert.ok(body.indexOf('data-testid="artifact-share-notice"') < gate && gate < template, "notice, then confirmation, then the inert frame");
+  assert.equal(body.split("<iframe ").length, 2);
+  assert.ok(body.indexOf("</template>") > body.indexOf("</iframe>"));
+  // The one script is the fixed gate script: it moves the frame, and carries nothing of the shared page.
+  assert.deepEqual(body.match(/<script[^>]*>[\s\S]*?<\/script>/g), [`<script>${ARTIFACT_SHARE_GATE_SCRIPT}</script>`]);
+  assert.ok(!body.includes("SESSION-SECRET-123"));
 });
 
 test("a wrong token, the switch off and a link that is not live are the same 404", async () => {

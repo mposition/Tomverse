@@ -487,7 +487,10 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
   - 내용은 `srcdoc`으로만 넣고 URL로 로드하지 않습니다. 문서 맨 앞에 CSP `<meta>`를 둡니다(page 안의
     `<head>`를 패턴으로 찾아 끼우면 주석 안에 들어갈 수 있으므로 앞에 붙입니다): `default-src 'none'`,
     `connect-src 'none'`, `form-action 'none'`, `base-uri 'none'`, `frame-src 'none'`, `object-src 'none'`,
-    script·style·글꼴은 inline과 cdnjs·jsdelivr·unpkg만, 이미지는 inline(`data:`·`blob:`)만, `'unsafe-eval'` 없음.
+    script·style·글꼴은 inline과 cdnjs·jsdelivr·unpkg만, 이미지는 inline(`data:`·`blob:`)만, `'unsafe-eval'` 없음,
+    `webrtc 'block'`(2026-11-28, 아직 집행하는 브라우저가 없어 아래 WebRTC 가드가 실제 차단이다 — §19.7).
+    CSP `<meta>` 바로 뒤, page보다 먼저 WebRTC 가드 script(`HTML_PREVIEW_GUARD_SCRIPT`)가 돈다. 채팅에서는 앱의 nonce 정책을
+    상속하므로 가드도 앱 문서의 nonce를 단다(`buildHtmlPreviewSrcdoc(..., { nonce })`).
     이미지 URL에 page의 글을 실어 어느 host로도 보낼 수 없습니다. React 미리보기 문서는 자기 `<head>` 맨 앞에
     더 좁은 정책(`reactPreviewCsp`)을 하나 더 둡니다. 두 정책이 함께 적용되어 고정한 세 파일과 inline script만 실행됩니다.
     그 세 파일은 **이 앱이 직접 제공합니다**(`public/vendor/artifact-preview/`, 아래). 그래서 React 미리보기에는 제3자 host가
@@ -1313,9 +1316,10 @@ route `app/(site)/(application)/share/a/[shareToken]/route.ts`, 문서와 헤더
 - **정적 응답이다.** 경로의 토큰과 `Accept-Language`(또는 `?lang=`)만 읽고 세션·쿠키·인증 헤더를 읽지 않는다. 같은
   페이지가 로그인한 방문자에게도 바이트 그대로 간다(server-contract 테스트가 세션 resolver·next-auth·`next/headers`를
   호출되면 실패하게 바꿔 확인).
-- 구조: 우리 문서(공지 막대, 신고 링크, frame 하나, script 없음) → `iframe sandbox="allow-scripts" srcdoc=`
+- 구조: 우리 문서(공지 막대, 신고 링크, 처음 열 때 확인 화면, `<template>` 안의 frame 하나, 고정 script 하나 —
+  `ARTIFACT_SHARE_GATE_SCRIPT`, §19.7) → `iframe sandbox="allow-scripts" srcdoc=`
   (`buildHtmlPreviewSrcdoc`의 바깥 문서, `frame-src 'none'`) → `iframe sandbox="allow-scripts" srcdoc=`(공유된 화면,
-  앞에 `htmlPreviewCsp`, React는 `reactPreviewCsp`도). 공유된 코드는 우리 문서에 들어가지 않고 escape된 `srcdoc` 안에만
+  앞에 `htmlPreviewCsp`와 WebRTC 가드, React는 `reactPreviewCsp`도). 공유된 코드는 우리 문서에 들어가지 않고 escape된 `srcdoc` 안에만
   있다. 문서는 `buildCodePreviewDocument`가 만들므로 채팅 미리보기와 같은 것이다.
 - 우리 문서의 CSP(HTTP header, 항상 enforce): `sandbox allow-scripts; ` + `htmlPreviewCsp(origin)` + `; frame-ancestors 'none'`.
   `sandbox` 덕분에 **최상위 문서도 opaque origin**이라(측정: `self.origin === "null"`, `document.cookie`는 SecurityError) 이
@@ -1344,11 +1348,9 @@ localStorage·부모와 최상위 DOM 접근(SecurityError). 공지 막대는 fr
 
 남는 것:
 
-- **WebRTC는 막히지 않는다.** `RTCPeerConnection`의 STUN/TURN 요청이 sandbox frame에서 임의의 host·port로 나갔다(UDP
-  소켓이 binding 요청을 받음). CSP `connect-src`는 WebRTC를 다루지 않고, CSP3의 `webrtc 'block'`은 Chromium 159가 적용하지
-  않았다(넣어도 UDP가 나감, 측정). 그래서 공유된 화면이 방문자가 입력한 글을 STUN 서버 이름(DNS)이나 TURN 사용자 이름에 실어
-  보낼 수 있다. 공지 막대가 비밀번호·결제 정보를 넣지 말라고 하는 이유다. 같은 frame 정책을 쓰는 §9 채팅 미리보기에도 같은
-  통로가 있다고 본다(추정, 채팅 화면에서는 측정하지 않음).
+- **WebRTC(처음 측정, 2026-11-28 오전).** `RTCPeerConnection`의 STUN/TURN 요청이 sandbox frame에서 임의의 host·port로
+  나갔다. CSP `connect-src`는 WebRTC를 다루지 않고, CSP3의 `webrtc 'block'`은 Chromium 159가 적용하지 않았다. 운영자 결정으로
+  §19.7의 가드를 넣은 뒤에는 공개 페이지와 채팅 미리보기 모두 측정한 모든 경로에서 UDP 패킷이 0개다. 남는 위험은 §19.7 끝에 적었다.
 - 세 CDN의 script·style·글꼴은 계속 받을 수 있으므로 화면이 CDN 주소에 글을 실으면 CDN 운영자 로그에 남을 수 있다(§9와 같음).
 - 별도 sandbox 도메인이 없다. 최상위 문서까지 opaque origin이라 PR #4311에서 남긴 "navigation으로 내보내기는 `frame-src`에
   의존"은 측정으로 막힘을 확인했지만, 그 한 겹이 브라우저의 `frame-src` 의미에 기댄다는 점은 같다. DNS prefetch
@@ -1361,5 +1363,70 @@ localStorage·부모와 최상위 DOM 접근(SecurityError). 공지 막대는 fr
 
 `tests/artifactShare.test.mjs`(스위치 조합, 거절 순서와 코드, 공유 가능 언어, 답변 포함 검사, 공개 페이지 CSP가 미리보기
 정책과 지시문별로 같고 `sandbox`·`frame-ancestors`만 더함, frame sandbox, 공유 코드가 우리 문서에 없음, React 문서, 크기,
-헤더), `tests/integration/artifact-share.db.test.ts`(migration 스키마: 생성·재사용·만료·중지·남의 것 거절·잠금 경합·cascade·
-계정 삭제와 내보내기·CHECK), `tests/server-contract/artifact-share-page-route.test.ts`(세션 미사용, 헤더, 같은 404, proxy 예외).
+헤더, 확인 화면과 `<template>`, 가드가 frame 문서 맨 앞), `tests/htmlArtifactPreview.test.mjs`(`webrtc 'block'`, 가드 위치와
+nonce, 가드가 잠그는 이름), `tests/robotsRoute.test.mjs`(광고 크롤러), `tests/integration/artifact-share.db.test.ts`(migration
+스키마: 생성·재사용·만료·중지·남의 것 거절·잠금 경합·cascade·계정 삭제와 내보내기·CHECK),
+`tests/server-contract/artifact-share-page-route.test.ts`(세션 미사용, 헤더, 같은 404, proxy 예외, 확인 화면이 먼저).
+
+### 19.7 스크립트를 허용하고 보강한다 (운영자 결정 2026-11-28)
+
+공유 페이지는 스크립트를 허용하는 방식을 유지하고 네 가지를 더한다. 참고: 타 플랫폼 중 WebRTC를 실제로 막는 곳은 없었고
+(Claude만 CSP에 `webrtc 'block'`을 선언), 실제 악용은 광고 크롤러를 통해 공유 페이지로 사람을 보내 다운로드나 명령 실행을
+유도한 것이었다.
+
+1. **CSP `webrtc 'block'`.** `htmlPreviewCsp`에 넣어 공개 페이지의 응답 CSP와 모든 frame 문서의 meta CSP(채팅 미리보기
+   포함)에 들어간다. Chromium 159는 "Unrecognized Content-Security-Policy directive 'webrtc'"라고 무시하고 나머지 지시문은
+   계속 집행한다(측정: 같은 정책 아래 fetch·XHR·beacon은 `connect-src 'none'`, 이미지는 `img-src`, Worker는 `worker-src`로
+   막혀 공격자 HTTP 요청 0건). 브라우저가 구현하는 날부터 적용된다.
+2. **WebRTC 가드**(`HTML_PREVIEW_GUARD_SCRIPT`, `lib/htmlArtifactPreview.ts`). frame 문서의 CSP meta 바로 뒤, page보다 먼저
+   돈다. 하는 일:
+   - `HTML_PREVIEW_WEBRTC_GLOBALS`와 이름이 RTC·webkitRTC·mozRTC로 시작하는 모든 전역을 window에서 쓰기·재정의·삭제가
+     안 되는 `undefined`로 고정한다.
+   - `navigator.mediaDevices`와 옛 `getUserMedia` 이름도 Navigator 프로토타입과 인스턴스에서 같은 방식으로 고정한다.
+   - 새 realm으로 가는 중첩 frame(`iframe,frame,frameset,object,embed,portal,fencedframe`)은 넣는 즉시 mutation observer가
+     지운다. observer는 page가 실행되기 전에 잡아 둔 함수만 쓰므로, page가 나중에 프로토타입을 바꿔도 무력화되지 않는다.
+   - `contentWindow`·`contentDocument`는 `undefined`로 고정한다.
+   - 다른 realm으로 가는 길은 이미 막혀 있다: popup은 sandbox, Worker는 `worker-src 'none'`, 다른 문서로의 이동(data:·blob:)은
+     바깥 문서의 `frame-src 'none'`이 막는다.
+   - 채팅 미리보기에도 같은 함수로 들어간다. 앱 CSP가 nonce 기반이라 가드는 앱 문서의 nonce를 단다.
+3. **광고 크롤러 차단.** `AdsBot-Google`·`AdsBot-Google-Mobile`·`adidxbot`은 `*` 그룹을 읽지 않으므로 이름을 단 그룹을 둔다
+   (`AD_LANDING_CRAWLERS`, `app/robots.ts`). 그룹은 `*`와 같은 비공개 경로를 받고, 거기에 `/share`가 있어 대화 공유(`/share/<token>`)와
+   공개 페이지(`/share/a/<token>`)가 모두 막힌다. 공개 페이지(`/`, `/pricing` 등)는 열려 있어 사이트의 광고는 그대로 랜딩한다.
+   정식 도메인이 아닌 배포(staging)는 기존대로 `*` 한 그룹만 둔다(광고 대상이 아님).
+4. **처음 열 때 확인 화면.** 공개 페이지는 frame을 바로 그리지 않고 "다른 사람이 만든 화면입니다. Tomverse가 만들거나 확인한 것이
+   아닙니다. 비밀번호·결제 정보·인증 코드를 입력하지 마세요"와 "화면 보기" 버튼을 보인다(8개 언어,
+   `locales/artifactWorkspace.ts` `page.gateNotice`·`gateOpen`). frame은 `<template>` 안에 있어 렌더·로드되지 않는다.
+   버튼을 누르면 같은 응답 안의 고정 script(`ARTIFACT_SHARE_GATE_SCRIPT`)가 frame을 페이지로 옮긴다. 확인 기록은 남기지 않고
+   매번 보이며, 응답은 여전히 세션을 읽지 않는 정적 응답이다. 상단 공지 막대와 신고 링크는 그대로다.
+
+**측정**(2026-11-28 오후, Playwright Chromium 159.0.8154.6). 우회 시도마다 다른 UDP 포트로 STUN을 보내게 해, 패킷이 어느
+시도에서 나왔는지 구분했다.
+
+| 시도 | 결과 | UDP 패킷 |
+|---|---|---|
+| 대조군: 가드 없는 sandbox frame, 같은 CSP(`webrtc 'block'` 포함) | STUN 전송 | 4 |
+| `new RTCPeerConnection` | TypeError | 0 |
+| `window["RTCPeer"+"Connection"]` | TypeError | 0 |
+| `webkitRTCPeerConnection` | TypeError | 0 |
+| `Reflect.construct(window.RTCPeerConnection, …)` | TypeError | 0 |
+| `Object.getPrototypeOf`로 window 프로토타입 사슬 탐색 | 없음 | 0 |
+| `delete` 후 `Object.defineProperty`로 재정의 | TypeError, 여전히 undefined | 0 |
+| `document.createElement("iframe")` 후 바로 `contentWindow` | `undefined` | 0 |
+| 같은 iframe을 `window[n]`으로 | SecurityError | 0 |
+| 정적 `<iframe srcdoc>`, 동적 srcdoc, `innerHTML` iframe, `javascript:` URL iframe, `<object data=data:…>` | 삽입 즉시 제거(남은 frame 0) | 0 |
+| iframe `onload` 뒤 `contentWindow` | TypeError | 0 |
+| `document.open()`/`write()`로 문서 교체 | 같은 window, 가드 유지 | 0 |
+| `location`을 data:·blob: URL로 | frame이 오류 페이지(`frame-src 'none'`) | 0 |
+| `window.open` | null(sandbox) | 0 |
+| blob Worker | `worker-src` 위반으로 생성 거부 | 0 |
+
+- 같은 실행에서 공격자 HTTP 요청은 0건이었다.
+- 확인 화면: 버튼을 누르기 전에는 frame 0개, UDP 0개. 누른 뒤에는 정상 HTML(inline script)·SVG·React 공유가 모두 그려졌다.
+- 채팅 미리보기(Next dev 서버, `CSP_MODE=enforce`): 가드가 nonce를 달고 실행됐고(`typeof RTCPeerConnection === "undefined"`),
+  정상 HTML이 그려졌으며 STUN 시도의 UDP 패킷은 0개였다.
+
+**남는 위험.**
+- 브라우저가 `webrtc 'block'`을 집행하지 않는 동안은 2번 가드가 WebRTC를 막는 유일한 수단이다.
+- 가드는 같은 realm 안의 JavaScript 방어라서, 측정하지 않은 새 realm 경로(브라우저에 새로 생기는 frame 종류, 아직 없는 API)가
+  생기면 뚫릴 수 있다. 그래서 전역 이름은 RTC 접두어로 넓게 잠그고, frame은 종류를 나열해 지운다.
+- DNS prefetch(`<link rel=dns-prefetch>`)와 CDN 로그 경로는 §19.5 그대로다.
