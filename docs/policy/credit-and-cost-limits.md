@@ -1297,7 +1297,7 @@ docs/policy/external-conversation-continuation.md §4.4, §5.1입니다.
   `taskOutput`만 다르고, 모든 유료 호출은 위의 dispatch 하나 = Chat 예약 하나와 run 총액 불변식을 그대로 지납니다.
   새 가격, 새 credit 계산, 새 상한 값이 없습니다(강도는 기존 standard/deep 프로필, 승인 총액 상한은
   `RESEARCH_ENGINE_MAX_APPROVED_CREDITS`). 마지막 결과 파일(docx·xlsx·pptx)은 이미 정산된 보고서를 모델 호출 없이
-  배치한 것이라 예약도 정산도 없습니다. 생성 파일 정책의 "토큰 값만, 파일 자체에 별도 credit 없음"(§11)과 같습니다.
+  배치한 것이라 예약도 정산도 없습니다. 생성 파일 정책(docs/policy/generated-artifacts.md §11)의 "토큰 값만, 파일 자체에 별도 credit 없음"과 같습니다.
 
 ### 예약 작업: 회차 하나 = 일반 Chat turn 하나, 1회 상한은 사용자가 승인한 견적 (2026-11-27)
 
