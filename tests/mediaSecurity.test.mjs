@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  PDF_PAGE_NOTICE_MAX_CHARACTERS,
   describeUnreadPdfPages,
+  formatPdfPageRanges,
   extractPdfTextSafely,
   extractPdfTextWithPagesSafely,
   pdfReadingOutcome,
+  pdfTextCharacterBudget,
   validatePdfSafely,
 } from "../lib/mediaSecurity.ts";
 import { createQaPdfBuffer } from "./e2e/support/app-fixtures.ts";
@@ -93,59 +96,133 @@ test("pages past a truncation point are not reported as text-less", async () => 
   assert.deepEqual(result.textlessPages, []);
 });
 
-test("describeUnreadPdfPages names the pages and caps a long list", () => {
-  assert.match(describeUnreadPdfPages([3]), /page 3\./);
-  assert.match(describeUnreadPdfPages([3, 5]), /pages 3, 5\./);
-  const many = describeUnreadPdfPages(Array.from({ length: 100 }, (_, i) => i + 1));
-  assert.match(many, /and 60 more/);
-  assert.ok(many.length < 600);
+test("formatPdfPageRanges compresses runs, caps the list and counts the rest", () => {
+  assert.equal(formatPdfPageRanges([3]), "3");
+  assert.equal(formatPdfPageRanges([3, 5]), "3, 5");
+  assert.equal(formatPdfPageRanges([5, 3, 4, 9, 12, 13, 14]), "3-5, 9, 12-14");
+  assert.equal(formatPdfPageRanges([1, 3, 5, 7, 9], 3), "1, 3, 5 and 2 more pages");
+  assert.equal(formatPdfPageRanges([1, 3, 5, 7], 3), "1, 3, 5 and 1 more page");
+  assert.equal(formatPdfPageRanges([]), "");
 });
 
-test("describeUnreadPdfPages names a page read only in part, with or without unread pages", () => {
-  const both = describeUnreadPdfPages([4, 5], 40, 3);
-  assert.match(both, /pages 4, 5\./);
-  assert.match(both, /page 3 was read only in part, and any page after it was not read/);
-  const partialOnly = describeUnreadPdfPages([], 40, 7);
-  assert.match(partialOnly, /scanned pages were cut off: page 7 was read only in part/);
-  assert.doesNotMatch(partialOnly, /no extractable text/);
-  assert.match(partialOnly, /Do not describe/);
+test("describeUnreadPdfPages names scanned, partly read and not-reached pages, each only when there are any", () => {
+  const scanned = describeUnreadPdfPages({ unreadPages: [3, 5] });
+  assert.match(scanned, /no extractable text \(scanned or image-only\) were not read: 3, 5\./);
+  assert.doesNotMatch(scanned, /Read only in part|text limit/);
+  const partial = describeUnreadPdfPages({ partialPages: [7] });
+  assert.match(partial, /Read only in part \(cut off\): 7\./);
+  const budget = describeUnreadPdfPages({ budgetUnreadPages: [12, 13, 14, 15] });
+  assert.match(budget, /Not read because the text limit for this request was reached: 12-15\./);
+  assert.match(budget, /Document truncated/);
+  assert.match(budget, /Do not describe/);
 });
 
-// Review r-20261128-052701-5bbed8: what the model got of a scanned PDF, and
-// whether its text may be stored, is decided in one place.
-test("pdfReadingOutcome: everything answered is cacheable; a gap, a cut or an original sent is not", () => {
+// Review r-20261128-053429-7a866b: the notice must always fit in the room set aside for it.
+test("the page notice never passes its reserved room, however many pages are named", () => {
+  const worst = describeUnreadPdfPages({
+    // Every other page of a 500-page file, so no run compresses.
+    unreadPages: Array.from({ length: 250 }, (_, i) => i * 2 + 1),
+    partialPages: Array.from({ length: 50 }, (_, i) => i * 2 + 1000),
+    budgetUnreadPages: Array.from({ length: 250 }, (_, i) => i * 2 + 2000),
+  });
+  assert.ok(worst.length <= PDF_PAGE_NOTICE_MAX_CHARACTERS, `${worst.length} characters`);
+  assert.ok(describeUnreadPdfPages({ unreadPages: [1] }).length <= PDF_PAGE_NOTICE_MAX_CHARACTERS);
+});
+
+test("the text budget sets the notice's room aside first, at every edge", () => {
+  const MAX = PDF_PAGE_NOTICE_MAX_CHARACTERS;
+  // No room left, or only the margin, or only the margin and the notice: no room for the file.
+  for (const remaining of [-5, 0, 1, 63, 64, 65, 64 + MAX - 1, 64 + MAX]) {
+    assert.equal(pdfTextCharacterBudget(remaining), 0, `remaining ${remaining}`);
+  }
+  // One character past that, and the file may take one.
+  assert.equal(pdfTextCharacterBudget(64 + MAX + 1), 1);
+  assert.equal(pdfTextCharacterBudget(2_000_000), 2_000_000 - 64 - MAX);
+  // Text at its budget plus the longest notice stays within what the other extractors may use.
+  for (const remaining of [64 + MAX + 1, 64 + MAX + 2, 64 + 2 * MAX, 5_000, 2_000_000]) {
+    assert.ok(pdfTextCharacterBudget(remaining) + MAX <= remaining - 64, `remaining ${remaining}`);
+  }
+});
+
+test("a text pass that hits the limit says where it stopped, and the pages after are not scans", async () => {
+  const pdf = buildLinePdf([["Alpha beta gamma"], ["Delta epsilon"], [], ["Zeta"]]);
+  const whole = await extractPdfTextWithPagesSafely(pdf, 5_000);
+  assert.deepEqual([whole.budgetUnreadPages, whole.budgetPartialPage], [[], null]);
+  assert.deepEqual(whole.textlessPages, [3]);
+
+  const first = "[Page 1]\nAlpha beta gamma";
+  // The limit lands exactly at the end of page 1: page 1 is whole, 2-4 were never looked at.
+  const atEdge = await extractPdfTextWithPagesSafely(pdf, first.length);
+  assert.equal(atEdge.text, first);
+  assert.deepEqual([atEdge.budgetUnreadPages, atEdge.budgetPartialPage], [[2, 3, 4], null]);
+  assert.deepEqual(atEdge.textlessPages, [], "page 3 is a scan, but nobody looked");
+  // One character earlier: page 1 is cut in the middle.
+  const inside = await extractPdfTextWithPagesSafely(pdf, first.length - 1);
+  assert.deepEqual([inside.budgetUnreadPages, inside.budgetPartialPage], [[2, 3, 4], 1]);
+  // Text first, the scan after it, the limit not reached before it: the scan is found.
+  const reachScan = await extractPdfTextWithPagesSafely(pdf, "[Page 1]\nAlpha beta gamma\n\n[Page 2]\nDelta epsilon".length + 1);
+  assert.deepEqual(reachScan.textlessPages, [3]);
+  assert.deepEqual([reachScan.budgetUnreadPages, reachScan.budgetPartialPage], [[], 4]);
+  // The limit cuts the last page: it is partly read and nothing follows it.
+  const lastPdf = buildLinePdf([["Alpha"], ["Omega omega omega"]]);
+  const cutLast = await extractPdfTextWithPagesSafely(lastPdf, "[Page 1]\nAlpha\n\n[Page 2]\nOmega".length);
+  assert.deepEqual([cutLast.budgetUnreadPages, cutLast.budgetPartialPage], [[], 2]);
+});
+
+// Review r-20261128-052701-5bbed8: what the model got of a PDF, and whether its
+// text may be stored, is decided in one place.
+test("pdfReadingOutcome: everything answered is cacheable; a gap, a cut, a stop or an original sent is not", () => {
   const whole = { pageNumbers: [1, 2, 3], truncated: false, truncatedPage: null };
   assert.deepEqual(pdfReadingOutcome({ expectedPages: [1, 2, 3], ocr: whole }), {
     unreadPages: [],
-    partialPage: null,
+    partialPages: [],
+    budgetUnreadPages: [],
     cacheable: true,
   });
   // A page the provider skipped.
   assert.deepEqual(pdfReadingOutcome({ expectedPages: [1, 2, 3], ocr: { ...whole, pageNumbers: [1] } }), {
     unreadPages: [2, 3],
-    partialPage: null,
+    partialPages: [],
+    budgetUnreadPages: [],
     cacheable: false,
   });
-  // The budget cut page 2: it is partly read, page 3 is not read, neither is cacheable.
+  // The OCR budget cut page 2: it is partly read, page 3 is not read.
   assert.deepEqual(
     pdfReadingOutcome({ expectedPages: [1, 2, 3], ocr: { pageNumbers: [1], truncated: true, truncatedPage: 2 } }),
-    { unreadPages: [3], partialPage: 2, cacheable: false }
+    { unreadPages: [3], partialPages: [2], budgetUnreadPages: [], cacheable: false }
   );
   // OCR not run: every page asked for is unread.
   assert.deepEqual(pdfReadingOutcome({ expectedPages: [2, 4], ocr: null }), {
     unreadPages: [2, 4],
-    partialPage: null,
+    partialPages: [],
+    budgetUnreadPages: [],
     cacheable: false,
   });
   // The page count is not known and the text was cut: only the cut is reported.
   assert.deepEqual(
     pdfReadingOutcome({ expectedPages: [], ocr: { pageNumbers: [1], truncated: true, truncatedPage: 2 } }),
-    { unreadPages: [], partialPage: 2, cacheable: false }
+    { unreadPages: [], partialPages: [2], budgetUnreadPages: [], cacheable: false }
+  );
+  // The text pass stopped at the limit: its pages are named, kept apart from the scans, and the text is not the file.
+  assert.deepEqual(
+    pdfReadingOutcome({
+      expectedPages: [],
+      ocr: null,
+      budgetUnreadPages: [8, 9, 10],
+      budgetPartialPage: 7,
+    }),
+    { unreadPages: [], partialPages: [7], budgetUnreadPages: [8, 9, 10], cacheable: false }
+  );
+  // Scans read whole after a text pass that stopped short: still not cacheable.
+  assert.equal(
+    pdfReadingOutcome({ expectedPages: [3], ocr: { pageNumbers: [3], truncated: false, truncatedPage: null }, budgetUnreadPages: [5] }).cacheable,
+    false
   );
   // The model has the file itself: nothing is unread, and the text alone is never stored.
   assert.deepEqual(pdfReadingOutcome({ expectedPages: [2, 4], ocr: null, originalSentToModel: true }), {
     unreadPages: [],
-    partialPage: null,
+    partialPages: [],
+    budgetUnreadPages: [],
     cacheable: false,
   });
 });
@@ -158,5 +235,5 @@ test("the turn after the original was sent, the earlier message reads only the t
     expectedPages: [2, 4],
     ocr: { pageNumbers: [2, 4], truncated: false, truncatedPage: null },
   });
-  assert.deepEqual(outcome, { unreadPages: [], partialPage: null, cacheable: true });
+  assert.deepEqual(outcome, { unreadPages: [], partialPages: [], budgetUnreadPages: [], cacheable: true });
 });

@@ -103,13 +103,13 @@ test("a PDF with some text-less pages is not read as complete", () => {
     const pdf = route.slice(route.indexOf('if (format.category === "pdf") {'));
     const branch = pdf.slice(0, pdf.indexOf('if (format.category === "iwork") {'));
     assert.match(branch, /extractPdfTextWithPagesSafely\(/);
-    assert.match(branch, /\} else if \(textlessPdfPages\.length > 0\) \{/);
+    assert.match(branch, /\} else if \(textlessPdfPages\.length > 0 \|\| budgetUnreadPages\.length > 0/);
     // A model that reads PDFs gets the original beside the text, for the turn's own file...
     assert.match(branch, /isLatestMessage &&\s*!fromArchive &&\s*modelSupportsNativePdfInput\(modelConfig\)/);
     // ...otherwise the pages go through the same OCR path, and are named when they are not read.
     assert.match(branch, /runPdfOcr\(ocrRoom, textlessPdfPages\)/);
     // What is not read is named, and not stored as the file's text, by the one settle function.
-    assert.match(branch, /describeUnreadPdfPages\(outcome\.unreadPages, 40, outcome\.partialPage\)/);
+    assert.ok(branch.includes("describeUnreadPdfPages(outcome)"));
     assert.match(branch, /if \(!outcome\.cacheable\) textCacheBlocked = true;/);
     // The original is part of the estimate: native file parts are priced with the flat allowance.
     assert.match(route, /estimateNativeAttachmentTokens\(\s*fileParts\.length - imageInputTokenEstimates\.length/);
@@ -146,7 +146,15 @@ test("OCR sharing is keyed by the character budget, and a cut or short result is
     assert.match(route, /expectedPages: Array\.from\(\{ length: pdfPageCount \}/);
     assert.ok(route.includes("pdfPageCount = extraction.pageCount;"));
     // An earlier file's scanned text that did not fit its share still names the pages.
-    assert.match(route, /settlePdfReading\(\{\s*unreadPages: textlessPdfPages,\s*partialPage: null,\s*cacheable: false,/);
+    assert.match(route, /settlePdfReading\(\{\s*unreadPages: textlessPdfPages,\s*partialPages: budgetPartialPage === null \? \[\] : \[budgetPartialPage\],\s*budgetUnreadPages,\s*cacheable: false,/);
+    // The notice's room is set aside before the text is read: extraction, OCR and the gate use one budget function.
+    assert.ok(route.includes("pdfTextCharacterBudget(remainingCharacters)"));
+    assert.ok(route.includes("? pdfTextCharacterBudget(remainingCharacters) <= 0"));
+    assert.match(route, /const ocrRoom = pdfTextCharacterBudget\(\s*CHAT_ATTACHMENT_PARSE_CHARACTERS - totalExtractedCharacters\s*\);/);
+    // Pages the text pass never reached are named; they are not OCR'd or sent as the original.
+    assert.match(route, /textlessPdfPages\.length > 0 \|\| budgetUnreadPages\.length > 0 \|\| budgetPartialPage !== null/);
+    assert.match(route, /hasScans &&\s*isLatestMessage &&\s*!fromArchive &&\s*modelSupportsNativePdfInput/);
+    assert.match(route, /hasScans &&\s*ocrRoom > 0 &&/);
 });
 
 test("the PDF text worker reports only what the reader uses", () => {

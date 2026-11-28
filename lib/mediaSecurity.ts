@@ -238,9 +238,17 @@ const { parentPort, workerData } = require("node:worker_threads");
 
         let text = "";
         const textlessPages = [];
+        // Where the character limit ended the pass, so the caller knows which
+        // pages were never looked at: the page it stopped at, and whether that
+        // page was read in part.
+        let stoppedAtPage = null;
+        let stoppedPartial = false;
         const maxCharacters = Math.max(0, Number(workerData.maxCharacters) || 0);
         for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
-            if (text.length >= maxCharacters) break;
+            if (text.length >= maxCharacters) {
+                stoppedAtPage = pageNumber;
+                break;
+            }
             const page = await document.getPage(pageNumber);
             const content = await page.getTextContent({
                 includeMarkedContent: false,
@@ -251,6 +259,8 @@ const { parentPort, workerData } = require("node:worker_threads");
                 text += (text ? "\\n\\n" : "") + "[Page " + pageNumber + "]\\n" + pageText;
                 if (text.length > maxCharacters) {
                     text = text.slice(0, maxCharacters);
+                    stoppedAtPage = pageNumber;
+                    stoppedPartial = true;
                     break;
                 }
             } else {
@@ -266,6 +276,8 @@ const { parentPort, workerData } = require("node:worker_threads");
             text,
             textlessPages,
             pageCount: document.numPages,
+            stoppedAtPage,
+            stoppedPartial,
         });
     } catch {
         if (document) {
@@ -498,6 +510,14 @@ export type PdfTextExtraction = {
      */
     textlessPages: number[];
     pageCount: number;
+    /**
+     * Pages the character limit stopped the pass before reaching. They are not
+     * known to be scans -- nobody looked -- so they are named to the model, not
+     * sent to OCR or as the original.
+     */
+    budgetUnreadPages: number[];
+    /** The page the limit cut in the middle, if any. */
+    budgetPartialPage: number | null;
 };
 
 /** The extracted text and the pages that gave none, from one pass over the PDF. */
@@ -513,6 +533,8 @@ export async function extractPdfTextWithPagesSafely(
         text: string;
         textlessPages?: unknown;
         pageCount?: unknown;
+        stoppedAtPage?: unknown;
+        stoppedPartial?: unknown;
     }>(
         pdfTextWorkerSource,
         {
@@ -525,6 +547,10 @@ export async function extractPdfTextWithPagesSafely(
         [transferableBuffer]
     );
 
+    const pageCount = Number.isInteger(result.pageCount) ? (result.pageCount as number) : 0;
+    const stoppedAt = Number.isInteger(result.stoppedAtPage) ? (result.stoppedAtPage as number) : null;
+    const partial = stoppedAt !== null && result.stoppedPartial === true;
+    const firstUnreached = stoppedAt === null ? null : partial ? stoppedAt + 1 : stoppedAt;
     return {
         text: result.text.trim(),
         textlessPages: Array.isArray(result.textlessPages)
@@ -532,76 +558,137 @@ export async function extractPdfTextWithPagesSafely(
                   (page): page is number => Number.isInteger(page) && page >= 1
               )
             : [],
-        pageCount: Number.isInteger(result.pageCount) ? (result.pageCount as number) : 0,
+        pageCount,
+        budgetUnreadPages:
+            firstUnreached === null
+                ? []
+                : Array.from({ length: Math.max(0, pageCount - firstUnreached + 1) }, (_, index) => firstUnreached + index),
+        budgetPartialPage: partial ? stoppedAt : null,
     };
 }
 
 /**
- * The model-facing line for pages that were not read. Capped so a 500-page
- * scan does not spend the prompt on a list of numbers.
+ * The most characters the page notice may take. The budget for the file's own
+ * text (extraction, OCR) is cut by this much before it is spent, so attaching
+ * the notice can never be what pushes a request over its character limit.
  */
-export function describeUnreadPdfPages(
-    pages: readonly number[],
-    limit = 40,
-    partialPage: number | null = null
-): string {
-    const shown = pages.slice(0, limit).join(", ");
-    const rest = pages.length - limit;
-    const unread =
-        pages.length > 0
-            ? `This PDF has pages with no extractable text (scanned or image-only) that were not read: ` +
-              `page${pages.length === 1 ? "" : "s"} ${shown}${rest > 0 ? ` and ${rest} more` : ""}. `
-            : "";
-    const partial =
-        partialPage !== null
-            ? `${pages.length > 0 ? "Also, p" : "This PDF's scanned pages were cut off: p"}age ${partialPage} was read only in part, ` +
-              `and any page after it was not read. `
-            : "";
+export const PDF_PAGE_NOTICE_MAX_CHARACTERS = 1_000;
+
+/**
+ * What a PDF's own text may take of the characters a request has left: all but
+ * the margin every extractor keeps (64) and the room set aside for the page
+ * notice. 0 means there is no room for the file at all. The text and its notice
+ * together therefore never pass `remaining - 64`, which is where the other
+ * extractors stop.
+ */
+export const pdfTextCharacterBudget = (remainingCharacters: number) =>
+    Math.max(0, Math.floor(remainingCharacters) - 64 - PDF_PAGE_NOTICE_MAX_CHARACTERS);
+
+/** Pages as ranges ("3-5, 9, 12-40"), at most `maxRanges` of them, then "and N more pages". */
+export function formatPdfPageRanges(pages: readonly number[], maxRanges = 8): string {
+    const sorted = [...new Set(pages)].sort((a, b) => a - b);
+    const ranges: string[] = [];
+    let covered = 0;
+    for (let index = 0; index < sorted.length; ) {
+        let end = index;
+        while (end + 1 < sorted.length && sorted[end + 1] === sorted[end] + 1) end += 1;
+        if (ranges.length >= maxRanges) break;
+        ranges.push(end > index ? `${sorted[index]}-${sorted[end]}` : `${sorted[index]}`);
+        covered += end - index + 1;
+        index = end + 1;
+    }
+    const rest = sorted.length - covered;
+    return ranges.join(", ") + (rest > 0 ? ` and ${rest} more page${rest === 1 ? "" : "s"}` : "");
+}
+
+/**
+ * The model-facing notice for the pages of a PDF it did not get whole. Three
+ * kinds, each only when there are any: scanned pages that were not read, pages
+ * read only in part, and pages not looked at because the text limit was
+ * reached. Page lists are compressed to ranges and capped, so the notice never
+ * passes PDF_PAGE_NOTICE_MAX_CHARACTERS however many pages there are.
+ */
+export function describeUnreadPdfPages(gaps: {
+    unreadPages?: readonly number[];
+    partialPages?: readonly number[];
+    budgetUnreadPages?: readonly number[];
+}): string {
+    const unread = gaps.unreadPages ?? [];
+    const partial = gaps.partialPages ?? [];
+    const budget = gaps.budgetUnreadPages ?? [];
+    const sentences: string[] = [];
+    if (unread.length > 0) {
+        sentences.push(
+            `Pages with no extractable text (scanned or image-only) were not read: ${formatPdfPageRanges(unread)}.`
+        );
+    }
+    if (partial.length > 0) {
+        sentences.push(`Read only in part (cut off): ${formatPdfPageRanges(partial, 4)}.`);
+    }
+    if (budget.length > 0) {
+        sentences.push(
+            `Not read because the text limit for this request was reached: ${formatPdfPageRanges(budget)}.`
+        );
+    }
     return (
-        `[${unread}${partial}` +
+        `[Document truncated. ${sentences.join(" ")} ` +
         `Their contents are unknown to you. Do not describe, summarise or infer anything about them; ` +
         `say which pages could not be read.]`
     );
 }
 
 export type PdfReadingOutcome = {
-    /** Pages the model got nothing of. */
+    /** Scanned pages the model got nothing of. */
     unreadPages: number[];
-    /** The page OCR read only in part, if any. */
-    partialPage: number | null;
+    /** Pages read only in part: cut by the text limit, in extraction or in OCR. */
+    partialPages: number[];
+    /** Pages never looked at because the text limit was reached first. */
+    budgetUnreadPages: number[];
     /** The text taken from this file may be stored as the file's text. */
     cacheable: boolean;
 };
 
 /**
- * What came of reading a PDF's scanned pages: which pages the model did not
- * get, which it got in part, and whether the text may be stored as the file's
- * text for the next turn. The one place that is decided, for a wholly scanned
- * file, a partly scanned one, and one whose original was sent as a file.
+ * What came of reading a PDF: which pages the model did not get, which it got
+ * in part, and whether the text may be stored as the file's text for the next
+ * turn. The one place that is decided, for a wholly scanned file, a partly
+ * scanned one, one whose original was sent as a file, and one the text limit
+ * stopped short.
  *
  * - `expectedPages` is every page OCR was meant to read (empty when the page
  *   count is not known, so only a cut or an original can be reported).
  * - `ocr` is what came back, null when OCR was not run or failed.
+ * - `budgetUnreadPages` / `budgetPartialPage` come from the text pass, which
+ *   stops at the limit. Those pages are not scans: they are named, never sent
+ *   to OCR or as the original.
  * - `originalSentToModel`: the model has the PDF itself, so no page is
  *   "unread", but its text alone is not the file -- never stored.
  */
 export function pdfReadingOutcome(input: {
     expectedPages: readonly number[];
     ocr: { pageNumbers: readonly number[]; truncated: boolean; truncatedPage: number | null } | null;
+    budgetUnreadPages?: readonly number[];
+    budgetPartialPage?: number | null;
     originalSentToModel?: boolean;
 }): PdfReadingOutcome {
+    const budgetUnreadPages = [...(input.budgetUnreadPages ?? [])];
+    const budgetPartialPage = input.budgetPartialPage ?? null;
+    const stoppedShort = budgetUnreadPages.length > 0 || budgetPartialPage !== null;
     if (input.originalSentToModel) {
-        return { unreadPages: [], partialPage: null, cacheable: false };
+        // The model has the file; the text layer alone is still not the file.
+        return { unreadPages: [], partialPages: [], budgetUnreadPages: [], cacheable: false };
     }
-    const partialPage = input.ocr?.truncatedPage ?? null;
+    const ocrPartialPage = input.ocr?.truncatedPage ?? null;
     // The page that was cut is named as partly read, not as unread.
     const unreadPages = pdfPagesNotRead(input.expectedPages, input.ocr?.pageNumbers ?? []).filter(
-        (page) => page !== partialPage
+        (page) => page !== ocrPartialPage
     );
+    const partialPages = [ocrPartialPage, budgetPartialPage].filter((page): page is number => page !== null);
     return {
         unreadPages,
-        partialPage,
-        cacheable: unreadPages.length === 0 && partialPage === null && !input.ocr?.truncated,
+        partialPages,
+        budgetUnreadPages,
+        cacheable: unreadPages.length === 0 && partialPages.length === 0 && !stoppedShort && !input.ocr?.truncated,
     };
 }
 

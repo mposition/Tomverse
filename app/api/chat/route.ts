@@ -292,6 +292,7 @@ import {
     AnimatedImageError,
     describeUnreadPdfPages,
     pdfReadingOutcome,
+    pdfTextCharacterBudget,
     type PdfReadingOutcome,
     extractPdfTextWithPagesSafely,
     normalizeImageSafely,
@@ -4506,7 +4507,11 @@ async function handleChatPost(
                     CHAT_ATTACHMENT_PARSE_CHARACTERS - totalExtractedCharacters;
                 const strictLatestText = isLatestMessage &&
                     (format.category === "office" || format.category === "text");
-                if (remainingCharacters <= (strictLatestText ? 0 : 64)) {
+                if (
+                    format.category === "pdf"
+                        ? pdfTextCharacterBudget(remainingCharacters) <= 0
+                        : remainingCharacters <= (strictLatestText ? 0 : 64)
+                ) {
                     if (!isLatestMessage) return omitPastAttachment();
                     throw new ChatAccessError(
                         413,
@@ -4617,22 +4622,30 @@ async function handleChatPost(
                     // read (or read in part) and the cache block follow from it.
                     const settlePdfReading = (outcome: PdfReadingOutcome) => {
                         if (!outcome.cacheable) textCacheBlocked = true;
-                        if (outcome.unreadPages.length > 0 || outcome.partialPage !== null) {
-                            addExtractedText(
-                                "PDF page notice",
-                                describeUnreadPdfPages(outcome.unreadPages, 40, outcome.partialPage)
-                            );
+                        if (
+                            outcome.unreadPages.length > 0 ||
+                            outcome.partialPages.length > 0 ||
+                            outcome.budgetUnreadPages.length > 0
+                        ) {
+                            // The room for it was set aside before the text was read
+                            // (pdfTextCharacterBudget), so it cannot pass the limit.
+                            addExtractedText("PDF page notice", describeUnreadPdfPages(outcome));
                         }
                     };
+                    // Pages the text pass never reached, because it ran into the limit.
+                    let budgetUnreadPages: number[] = [];
+                    let budgetPartialPage: number | null = null;
                     let pdfValidated = false;
                     try {
                         const extraction = await extractPdfTextWithPagesSafely(
                             buffer,
-                            remainingCharacters - 64
+                            pdfTextCharacterBudget(remainingCharacters)
                         );
                         extractedPdfText = extraction.text;
                         textlessPdfPages = extraction.textlessPages;
                         pdfPageCount = extraction.pageCount;
+                        budgetUnreadPages = extraction.budgetUnreadPages;
+                        budgetPartialPage = extraction.budgetPartialPage;
                     } catch (error) {
                         logRequestError(
                             "pdf_text_extraction_failed",
@@ -4762,7 +4775,7 @@ async function handleChatPost(
                         // other text once the file is bound to a message, so a
                         // resend, another panel or the next turn reads it.
                         try {
-                            const ocrResult = await runPdfOcr(remainingCharacters - 64);
+                            const ocrResult = await runPdfOcr(pdfTextCharacterBudget(remainingCharacters));
                             if (ocrResult?.text) {
                                 extractedPdfText = ocrResult.text;
                                 // Text for some pages is not text for all: every page
@@ -4790,7 +4803,7 @@ async function handleChatPost(
                                 );
                             }
                         }
-                    } else if (textlessPdfPages.length > 0) {
+                    } else if (textlessPdfPages.length > 0 || budgetUnreadPages.length > 0 || budgetPartialPage !== null) {
                         /*
                           Text on some pages and none on others: a report with
                           a scanned appendix, a form with a pasted screenshot.
@@ -4807,7 +4820,12 @@ async function handleChatPost(
                         if (!addExtractedText(format.promptKind, extractedPdfText)) {
                             return "ok";
                         }
+                        // Scanned pages are read (OCR, or the original) when there are
+                        // any. Pages the text limit stopped short of are not scans:
+                        // they are named, below, and nothing is spent on them.
+                        const hasScans = textlessPdfPages.length > 0;
                         if (
+                            hasScans &&
                             isLatestMessage &&
                             !fromArchive &&
                             modelSupportsNativePdfInput(modelConfig)
@@ -4823,15 +4841,19 @@ async function handleChatPost(
                                 pdfReadingOutcome({
                                     expectedPages: textlessPdfPages,
                                     ocr: null,
+                                    budgetUnreadPages,
+                                    budgetPartialPage,
                                     originalSentToModel: true,
                                 })
                             );
                             return "ok";
                         }
                         let scanned: MistralOcrResult | null = null;
-                        const ocrRoom =
-                            CHAT_ATTACHMENT_PARSE_CHARACTERS - totalExtractedCharacters - 64;
+                        const ocrRoom = pdfTextCharacterBudget(
+                            CHAT_ATTACHMENT_PARSE_CHARACTERS - totalExtractedCharacters
+                        );
                         const ocrAllowance =
+                            hasScans &&
                             ocrRoom > 0 &&
                             (fromArchive ? archiveOcrBudget > archiveOcrUsed : true);
                         if (ocrAllowance) {
@@ -4858,6 +4880,8 @@ async function handleChatPost(
                         const outcome = pdfReadingOutcome({
                             expectedPages: textlessPdfPages,
                             ocr: scanned,
+                            budgetUnreadPages,
+                            budgetPartialPage,
                         });
                         if (
                             scanned?.text &&
@@ -4868,7 +4892,8 @@ async function handleChatPost(
                             // do not store the file's text as if it were whole.
                             settlePdfReading({
                                 unreadPages: textlessPdfPages,
-                                partialPage: null,
+                                partialPages: budgetPartialPage === null ? [] : [budgetPartialPage],
+                                budgetUnreadPages,
                                 cacheable: false,
                             });
                             return "ok";
