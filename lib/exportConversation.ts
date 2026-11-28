@@ -201,7 +201,7 @@ function encodeRfc5987(value: string) {
  */
 export function conversationExportContentDisposition(
     title: string,
-    extension: ".txt" | ".md" = TEXT_EXTENSION
+    extension: ".txt" | ".md" | ".pdf" = TEXT_EXTENSION
 ) {
     const fileName = `${sanitizeFileName(title)}${extension}`;
     // Sanitised again after the strip: removing "한" from "CON한" leaves a

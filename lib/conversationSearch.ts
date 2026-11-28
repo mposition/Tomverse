@@ -77,6 +77,12 @@ type NamedHitBase = {
     surface: ConversationSurface;
     snippet: string;
     snippetHighlight: { start: number; end: number } | null;
+    /**
+     * The conversation is archived (lib/conversationArchive.ts). Its hits are
+     * still the account's own history, so they are returned and marked; the
+     * model's search never sees them.
+     */
+    archived: boolean;
 } & ContinuationRowNaming;
 
 export type NativeSearchResult = NamedHitBase & {
@@ -122,6 +128,7 @@ const TARGET_SELECT = {
     id: true,
     title: true,
     productKey: true,
+    archivedAt: true,
     continuationBridge: {
         select: {
             ...CONTINUATION_NAMING_BRIDGE_SELECT,
@@ -331,10 +338,11 @@ export async function searchConversationMessages(input: {
                       AND c."temporaryExpiresAt" IS NULL
                       AND (${projectScope}::text IS NULL OR c."projectId" = ${projectScope})
                       AND c.id <> ${excluded}
-                      -- The model's search: never a locked conversation, a project's, or one whose
-                      -- memory is off (an unrecognised mode follows the account default).
+                      -- The model's search: never a locked conversation, a project's, an archived
+                      -- one, or one whose memory is off (an unrecognised mode follows the
+                      -- account default).
                       AND (NOT ${modelReference}::boolean OR (
-                           c.password IS NULL AND c."projectId" IS NULL
+                           c.password IS NULL AND c."projectId" IS NULL AND c."archivedAt" IS NULL
                            AND NOT (c."memoryMode" = 'off' OR (c."memoryMode" <> 'on' AND ${memoryDefaultOff}::boolean))))
                       AND NOT (c.id = ANY(${deniedConversationIds}::text[]))
                       -- A conversation whose bridge or source is not this
@@ -566,6 +574,7 @@ function toResult(
         }),
         snippet: snippet.text,
         snippetHighlight: snippet.highlight,
+        archived: target.archivedAt !== null,
     };
     if (pending.kind === "native") {
         return {

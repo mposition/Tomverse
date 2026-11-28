@@ -4,6 +4,7 @@ import { isGooglePickerConfig, loadGoogleDrivePicker } from "@/lib/googleDrivePi
 import type { ReviewWorkspaceControls } from "./useReviewWorkspace";
 import type { ResearchPreviewControls } from "./useResearchPreview";
 import { DeepResearchEngineRow, DeepResearchEngineSheet, useDeepResearchEngineOffer } from "./DeepResearchEngine";
+import { SavedPromptsTool } from "./SavedPromptsTool";
 import { McpChatPicker } from "@/components/plugins/McpChatPicker";
 import { ChatLocationControl } from "./ChatLocationControl";
 import { composerModelCountLabel } from "./composerModelCountLabel";
@@ -4128,6 +4129,19 @@ export function ChatInput({
                       </span>
                     </span>
                   </button>
+                  {/* Saved prompts: the whole feature is its own file; picking one
+                      fills this composer and sends nothing. */}
+                  <SavedPromptsTool
+                    language={lang}
+                    value={value}
+                    isGuestMode={Boolean(isGuestMode)}
+                    disabled={isDraftMutationDisabled}
+                    onInsert={(text) => {
+                      onChange(text);
+                      requestAnimationFrame(() => textareaRef.current?.focus());
+                    }}
+                    onDone={() => closeMenu(false)}
+                  />
                   {/*
                     One switch, flipped in place -- not a row that opens a
                     screen of choices. Web search is a single yes/no decision,
