@@ -5,6 +5,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { LanguageProvider } from "@/components/LanguageProvider";
 import { ChatArtifactWorkspaceProvider, CodeBlockStreamingScope } from "@/components/chat/ChatArtifactWorkspaceContext";
 import { CodeBlockPreview } from "@/components/chat/CodeBlockPreview";
+import { planCodeRunFileAdd } from "@/components/chat/CodeBlockRun";
+import { CODE_RUN_LIMITS } from "@/lib/chatCodeRun";
 import { SUPPORTED_LANGUAGES } from "@/lib/language";
 import { de } from "@/locales/de";
 import { en } from "@/locales/en";
@@ -91,4 +93,41 @@ test("every language has every Run sentence, with the same placeholders as Engli
       assert.equal(placeholders(chat[key]), placeholders((en.chat as unknown as Record<string, string>)[key]), `${name}.${key} placeholders`);
     }
   }
+});
+
+const file = (name: string, size: number) => ({ name, size });
+
+test("a file with the name of one already chosen replaces it, even when the list is full or at the size limit", () => {
+  const full = Array.from({ length: CODE_RUN_LIMITS.maxFiles }, (_, index) => file(`f${index}.csv`, 10));
+  const replaced = planCodeRunFileAdd(full, file("f2.csv", 20));
+  assert.equal(replaced.ok, true);
+  assert.equal(replaced.files.length, CODE_RUN_LIMITS.maxFiles);
+  assert.deepEqual(replaced.files.filter((entry) => entry.name === "f2.csv"), [file("f2.csv", 20)]);
+
+  const big = CODE_RUN_LIMITS.maxFileBytes;
+  const atLimit = [file("a.csv", big), file("b.csv", big)];
+  const swapped = planCodeRunFileAdd(atLimit, file("a.csv", big - 1));
+  assert.equal(swapped.ok, true);
+  assert.deepEqual(swapped.files.map((entry) => entry.size).sort(), [big - 1, big].sort());
+});
+
+test("a refused file changes nothing: the old file of the same name stays", () => {
+  const big = CODE_RUN_LIMITS.maxFileBytes;
+  // Replacing would still push the total past its limit.
+  const two = [file("a.csv", 1), file("b.csv", big), file("c.csv", big)];
+  const tooBig = planCodeRunFileAdd(two, file("a.csv", big));
+  assert.deepEqual(tooBig, { ok: false, reason: "total", files: two });
+  // Over the size of one file.
+  const oversize = planCodeRunFileAdd(two, file("a.csv", big + 1));
+  assert.deepEqual(oversize, { ok: false, reason: "size", files: two });
+  // A new name on a full list is still refused.
+  const full = Array.from({ length: CODE_RUN_LIMITS.maxFiles }, (_, index) => file(`f${index}.csv`, 1));
+  assert.deepEqual(planCodeRunFileAdd(full, file("new.csv", 1)), { ok: false, reason: "count", files: full });
+  // The list handed back is a copy, not the caller's array.
+  assert.notEqual(planCodeRunFileAdd(full, file("new.csv", 1)).files, full);
+});
+
+test("a new name is added after the others", () => {
+  const plan = planCodeRunFileAdd([file("a.csv", 1)], file("b.csv", 2));
+  assert.deepEqual(plan, { ok: true, files: [file("a.csv", 1), file("b.csv", 2)] });
 });

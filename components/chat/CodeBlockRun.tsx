@@ -68,6 +68,20 @@ const FRAME_SILENCE_MS = CODE_RUN_LIMITS.loadTimeoutMs + CODE_RUN_LIMITS.runTime
 
 const megabytes = (bytes: number) => String(Math.round(bytes / (1024 * 1024)));
 
+/**
+ * Whether a chosen file may join the ones already chosen, and what the list is then. A file with the name of one
+ * already there replaces it, so the old one is set aside first and the limits are checked against what would remain.
+ * A refusal changes nothing: the list comes back as it was, the old file still in it.
+ */
+export function planCodeRunFileAdd<T extends { name: string; size: number }>(
+  existing: readonly T[],
+  added: T
+): { ok: true; files: T[] } | { ok: false; reason: "count" | "size" | "total"; files: T[] } {
+  const rest = existing.filter((file) => file.name !== added.name);
+  const refusal = checkCodeRunFileAdd(rest, added);
+  return refusal ? { ok: false, reason: refusal, files: [...existing] } : { ok: true, files: [...rest, added] };
+}
+
 export function CodeBlockRun({ preRef }: { preRef: RefObject<HTMLPreElement | null> }) {
   const { t } = useLanguage();
   const workspace = useChatArtifactWorkspace();
@@ -172,25 +186,22 @@ export function CodeBlockRun({ preRef }: { preRef: RefObject<HTMLPreElement | nu
   const addFiles = async (list: FileList | null) => {
     if (!list) return;
     let refused: string | null = null;
-    const next = [...files];
+    let next = [...files];
     for (const file of Array.from(list)) {
-      const refusal = checkCodeRunFileAdd(next, file);
-      if (refusal === "count") {
-        refused = t("chat.codeRunFileTooMany").replaceAll("{count}", String(CODE_RUN_LIMITS.maxFiles));
-        break;
-      }
-      if (refusal) {
+      const name = sanitizeCodeRunFileName(file.name);
+      // The size is known before the file is read, so a refused file is never read.
+      const plan = planCodeRunFileAdd(next, { id: "", name, size: file.size, data: new ArrayBuffer(0) });
+      if (!plan.ok) {
         refused =
-          refusal === "size"
-            ? t("chat.codeRunFileTooLarge").replaceAll("{name}", file.name).replaceAll("{size}", megabytes(CODE_RUN_LIMITS.maxFileBytes))
-            : t("chat.codeRunFilesTotalTooLarge").replaceAll("{size}", megabytes(CODE_RUN_LIMITS.maxTotalFileBytes));
+          plan.reason === "count"
+            ? t("chat.codeRunFileTooMany").replaceAll("{count}", String(CODE_RUN_LIMITS.maxFiles))
+            : plan.reason === "size"
+              ? t("chat.codeRunFileTooLarge").replaceAll("{name}", file.name).replaceAll("{size}", megabytes(CODE_RUN_LIMITS.maxFileBytes))
+              : t("chat.codeRunFilesTotalTooLarge").replaceAll("{size}", megabytes(CODE_RUN_LIMITS.maxTotalFileBytes));
         continue;
       }
-      const name = sanitizeCodeRunFileName(file.name);
       const data = await file.arrayBuffer();
-      const without = next.filter((existing) => existing.name !== name);
-      next.length = 0;
-      next.push(...without, { id: randomId(), name, size: data.byteLength, data });
+      next = planCodeRunFileAdd(next, { id: randomId(), name, size: data.byteLength, data }).files;
     }
     setNotice(refused);
     setFiles(next);
