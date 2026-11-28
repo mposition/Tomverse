@@ -15,8 +15,8 @@ export const nativeListName = "desktop_list_files";
 export const nativeTaskListName = "desktop_update_tasks";
 export const vibeReadFunction = "mcp_" + serverName + "." + nativeReadName;
 export const vibePatchFunction = "mcp_" + serverName + "." + nativePatchName;
-export const deepSeekReadFunction = "mcp__" + serverName + "__" + nativeReadName;
-export const deepSeekPatchFunction = "mcp__" + serverName + "__" + nativePatchName;
+export const directMcpReadFunction = "mcp__" + serverName + "__" + nativeReadName;
+export const directMcpPatchFunction = "mcp__" + serverName + "__" + nativePatchName;
 export const nativeReadInput = z.object({ path: z.string().min(1).max(4096),
   startLine: z.int().min(1).max(10_000_000).optional(), endLine: z.int().min(1).max(10_000_000).optional() }).strict();
 export const nativeListInput = z.object({ path: z.string().min(1).max(4096).optional() }).strict();

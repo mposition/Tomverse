@@ -40,7 +40,7 @@ import type { CodeOrchestration } from "./orchestrate-contract";
 import type { Language } from "../../../lib/language";
 import type { desktopNativeCopy } from "../../../locales/desktopNative";
 import { codeExecutionMode, type CliAccount, type CliLoginOpen, type CliPathCheck, type CliScan, type CliPaths, type CliProtocolCheck, type CliProvider,
-  type CodeExecutionMode, type claudeFixtureExecution, type codexFixtureExecution, type kimiFixtureExecution, type qwenFixtureExecution, type vibeFixtureExecution, type deepSeekFixtureExecution, type zCodeFixtureExecution, type zaiClaudeExecution, type miniMaxFixtureExecution, type grokFixtureExecution, type antigravityFixtureExecution,
+  type CodeExecutionMode, type claudeFixtureExecution, type codexFixtureExecution, type kimiFixtureExecution, type qwenFixtureExecution, type vibeFixtureExecution, type zaiClaudeExecution, type miniMaxFixtureExecution, type grokFixtureExecution, type antigravityFixtureExecution,
   type tomverseApiExecution } from "./code-execution";
 import type { CodeCliContinuation, CodeContinuation, CodeFallbackCliModels, CodeFallbackSettings, CodeFallbackUpdate } from "./code-fallback";
 import type { PermissionCommand, PermissionResult, PermissionsView } from "./permission-contract";
@@ -174,10 +174,9 @@ export type CodeEventEntry = { role: "event"; text: string; notice?: DesktopDeta
 /** turn: the position of a user message among the turns of a saved task, for rewinding and forking there. */
 export type Entry = { role: "user" | "assistant"; text: string; turn?: number } | { role: "plan" } | CodeEventEntry;
 export const kimiNativeSessionId = z.string().regex(/^session_[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i);
-export const zCodeNativeSessionId = z.string().regex(/^sess_[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i);
 export const miniMaxNativeSessionId = z.string().regex(/^mvs_[a-f\d]{32}$/);
 export const codeNativeAssignment = nativeTurn.extend({
-  model: nativeId, provider: z.enum(["anthropic", "qwen", "moonshot", "mistral", "deepseek", "zhipu", "minimax", "xai", "google"]).optional(), reportedModel: codeNativeReportedModel.optional(),
+  model: nativeId, provider: z.enum(["anthropic", "qwen", "moonshot", "mistral", "minimax", "xai", "google"]).optional(), reportedModel: codeNativeReportedModel.optional(),
 });
 export type CodeNativeAssignment = z.infer<typeof codeNativeAssignment>;
 export type CodeApiModelObservation = {
@@ -222,8 +221,6 @@ export type DeleteHistoryResult = "deleted" | "cancelled" | "locked" | "unavaila
 export type CodeNativeRecoverySummary = { turn: "running" | "completed" | "stopped" | "failed" | "unconfirmed"; passed: number; failed: number; unconfirmed: number };
 export type RecoveryResult = { status: "checked"; notes: string[]; native?: CodeNativeRecoverySummary } | { status: "locked" | "unavailable" };
 export type Verification = { id: string; tool: string; state: string; exitCode?: number };
-export const zCodeExtraUsageUnavailableCode = z.enum(["1316", "1317", "1318", "1319", "1320", "1321"]);
-export const zCodePlanQuotaCode = z.enum(["1308", "1310", ...zCodeExtraUsageUnavailableCode.options]);
 export const codeNativeQuota = z.discriminatedUnion("source", [
   nativeTurn.extend({ source: z.literal("codex"), reason: z.literal("usageLimitExceeded") }),
   nativeTurn.extend({ source: z.literal("claude_code"), reason: z.literal("credits_required"), threadId: z.uuid(), turnId: z.uuid(), eventId: z.uuid() }),
@@ -232,8 +229,6 @@ export const codeNativeQuota = z.discriminatedUnion("source", [
   nativeTurn.extend({ source: z.literal("qwen_code"), reason: z.literal("qwenSubscriptionUsageExhausted"),
     threadId: z.uuid(), turnId: z.uuid(), requestId: z.string().regex(/^[\w.-]{1,128}$/).optional(),
     resetAt: z.iso.datetime().optional() }),
-  nativeTurn.extend({ source: z.literal("zcode"), reason: z.literal("zCodePlanUsageExhausted"),
-    threadId: zCodeNativeSessionId, turnId: z.uuid(), eventId: z.uuid(), providerCode: zCodePlanQuotaCode }),
 ]);
 export type CodeQuotaEvidence =
   | { source: "tomverse_api"; reason: ApiQuotaReason; requestId: string; resetAt?: string }
@@ -248,8 +243,6 @@ export const codeNativeUsage = z.discriminatedUnion("source", [
   z.object({ source: z.literal("claude_turn"), inputTokens: tokenCount, outputTokens: tokenCount,
     cacheReadTokens: tokenCount.optional(), cacheWriteTokens: tokenCount.optional() }),
   z.object({ source: z.enum(Object.values(acpUsageSources)), inputTokens: tokenCount, outputTokens: tokenCount }),
-  z.object({ source: z.literal("zcode_turn"), nativeTurnId: nativeId, eventId: z.uuid(), reportedRequests: z.int().positive(),
-    inputTokens: tokenCount, outputTokens: tokenCount }),
   z.object({ source: z.literal("qwen_requests"), requestCount: z.int().min(1).max(MAX_QWEN_USAGE_REQUESTS),
     requests: z.array(qwenRequestUsage).min(1).max(MAX_QWEN_USAGE_REQUESTS),
   }).refine(({ requests, requestCount }) => requests.length <= requestCount &&
@@ -312,7 +305,7 @@ export type Task = {
   effort?: StartInput["effort"];
   actual?: StartInput["effort"];
   model?: string;
-  execution?: typeof tomverseApiExecution | typeof codexFixtureExecution | typeof claudeFixtureExecution | typeof qwenFixtureExecution | typeof kimiFixtureExecution | typeof vibeFixtureExecution | typeof deepSeekFixtureExecution | typeof zCodeFixtureExecution | typeof zaiClaudeExecution | typeof miniMaxFixtureExecution | typeof grokFixtureExecution | typeof antigravityFixtureExecution;
+  execution?: typeof tomverseApiExecution | typeof codexFixtureExecution | typeof claudeFixtureExecution | typeof qwenFixtureExecution | typeof kimiFixtureExecution | typeof vibeFixtureExecution | typeof zaiClaudeExecution | typeof miniMaxFixtureExecution | typeof grokFixtureExecution | typeof antigravityFixtureExecution;
   nativeSession?: CodeNativeAssignment;
   nativeRuns?: CodeNativeRunEvidence[];
   /** Run by the person's own provider CLI on this computer (no Tomverse API, no credits). */
@@ -415,8 +408,6 @@ export type Snapshot = {
   claudeFixtureModel?: string;
   qwenFixtureModel?: string;
   vibeFixtureModel?: string;
-  deepSeekFixtureModel?: string;
-  zCodeFixtureModel?: string;
   miniMaxFixtureModel?: string;
   grokFixtureModel?: string;
   antigravityFixtureModel?: string;

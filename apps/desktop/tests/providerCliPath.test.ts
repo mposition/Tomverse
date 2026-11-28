@@ -56,11 +56,8 @@ test("CLI path checks use only the selected file and leave unknown binaries unve
     assert.deepEqual(await inspectCliPath("anthropic", file), { status: "wrongFile" });
     assert.deepEqual(await inspectCliPath("openai", file), { status: "versionUnverified" });
     assert.deepEqual(await inspectCliPath("openai", `${file} --version`), { status: "wrongFile" });
-    const bundle = join(directory, "zcode.cjs");
-    await writeFile(bundle, "#!/usr/bin/env node\n");
-    assert.deepEqual(await inspectCliPath("zhipu", bundle), { status: supportsCliPath("zhipu") ? "versionUnverified" : "unsupportedPlatform" });
 
-    for (const [provider, version] of [["qwen", "0.28.4"], ["mistral", "3.1.4"], ["deepseek", "0.2.2-rc.2"]] as const) {
+    for (const [provider, version] of [["qwen", "0.28.4"], ["mistral", "3.1.4"]] as const) {
       const archiveName = releaseArchiveName(provider);
       if (!archiveName) continue;
       const archive = join(directory, archiveName);

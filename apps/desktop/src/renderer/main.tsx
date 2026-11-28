@@ -32,7 +32,7 @@ import type { AccountPreferences, AccountTheme } from "../account-settings-contr
 import { MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES, MAX_HANDOFF_EXCERPT_CHARACTERS, type ApprovalRequest, type CodeReference, type DesktopApi, type Snapshot,
   type CodeWorktreeChoice, type Model, type StartInput, type Task } from "../contract";
 import { liveCliFile, liveCliModelId, liveCliNames } from "../provider-cli-exec-contract";
-import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, cliProviders, codeRouteFor, kimiFixtureExecution, providerClis, qwenFixtureExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, type CliProvider } from "../code-execution";
+import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, cliProviders, codeRouteFor, kimiFixtureExecution, providerClis, qwenFixtureExecution, vibeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, type CliProvider } from "../code-execution";
 import { DraftDictation, useSpokenCommand } from "./DraftDictation";
 import { ChatDraftPlace } from "./ChatDraftLocation";
 import { TaskGithubPulls } from "./TaskGithubPulls";
@@ -500,10 +500,10 @@ function Desktop() {
   const task = snapshot?.task;
   const busy = snapshot?.busy || requesting;
   const attachmentScope = (snapshot?.draftNamespace ?? "") + ":" + (task?.id ?? "new");
-  const cliFixture = snapshot?.antigravityFixtureModel ? antigravityFixtureExecution : snapshot?.grokFixtureModel ? grokFixtureExecution : snapshot?.miniMaxFixtureModel ? miniMaxFixtureExecution : snapshot?.zCodeFixtureModel ? zCodeFixtureExecution : snapshot?.deepSeekFixtureModel ? deepSeekFixtureExecution : snapshot?.vibeFixtureModel ? vibeFixtureExecution : snapshot?.kimiFixtureModel ? kimiFixtureExecution : snapshot?.qwenFixtureModel ? qwenFixtureExecution :
+  const cliFixture = snapshot?.antigravityFixtureModel ? antigravityFixtureExecution : snapshot?.grokFixtureModel ? grokFixtureExecution : snapshot?.miniMaxFixtureModel ? miniMaxFixtureExecution : snapshot?.vibeFixtureModel ? vibeFixtureExecution : snapshot?.kimiFixtureModel ? kimiFixtureExecution : snapshot?.qwenFixtureModel ? qwenFixtureExecution :
     snapshot?.claudeFixtureModel ? claudeFixtureExecution : codexFixtureExecution;
   const cliFixtureModel = snapshot?.codeExecutionPreference === "provider_cli"
-    ? snapshot.antigravityFixtureModel ?? snapshot.grokFixtureModel ?? snapshot.miniMaxFixtureModel ?? snapshot.zCodeFixtureModel ?? snapshot.deepSeekFixtureModel ?? snapshot.vibeFixtureModel ?? snapshot.kimiFixtureModel ?? snapshot.qwenFixtureModel ?? snapshot.claudeFixtureModel ?? snapshot.codexFixtureModel : undefined;
+    ? snapshot.antigravityFixtureModel ?? snapshot.grokFixtureModel ?? snapshot.miniMaxFixtureModel ?? snapshot.vibeFixtureModel ?? snapshot.kimiFixtureModel ?? snapshot.qwenFixtureModel ?? snapshot.claudeFixtureModel ?? snapshot.codexFixtureModel : undefined;
   // The person's own Codex or Claude Code (the server's route is on, and the file is saved and trusted): each runs with its own default model.
   const liveCliModels: Model[] = !cliFixtureModel && snapshot?.codeExecutionPreference === "provider_cli"
     ? (snapshot.providerCliExec ?? []).map((provider) => ({ id: liveCliModelId(provider), name: cliName(liveCliNames[provider], language), provider: liveCliFile[provider], efforts: [] })) : [];

@@ -20,13 +20,13 @@ async function launchSettings(profile: string, timeout = 20_000) {
   if (!packagedExecutable) {
     return electron.launch({ executablePath, args: [desktopDir, `--user-data-dir=${profile}`], timeout });
   }
-  const executable = process.env.TOMVERSE_DESKTOP_DEEPSEEK_TASK_ARCHIVE;
-  assert.ok(executable, "Packaged settings tests require the pinned DeepSeek fixture archive.");
+  const executable = process.env.TOMVERSE_DESKTOP_VIBE_TASK_ARCHIVE;
+  assert.ok(executable, "Packaged settings tests require the pinned Mistral Vibe fixture archive.");
   const root = join(dirname(profile), "project");
   const descriptor = join(dirname(profile), "fixture.json");
   await mkdir(root, { recursive: true });
   await writeFile(descriptor, JSON.stringify({ root, profile, endpoint: "http://127.0.0.1:1/api/code/v1", key: TEST_KEY,
-    deepseek: { executable, version: "0.2.2-rc.2", model: "deepseek-desktop-fixture", origin: "http://127.0.0.1:1" },
+    vibe: { executable, version: "3.1.4", model: "vibe-desktop-fixture", origin: "http://127.0.0.1:1" },
   }));
   return launchNativeFixture(descriptor, timeout);
 }
@@ -61,12 +61,13 @@ test("Development CLIs check typed and selected paths and persist the requested 
     app = await launch();
     const page = await app.firstWindow();
     await openClis(page);
-    await expect(page.locator(".provider-cli-list li")).toHaveCount(10);
-    await expect(page.getByText("DeepSeek Harness · Preview")).toBeVisible();
+    await expect(page.locator(".provider-cli-list li")).toHaveCount(8);
+    await expect(page.getByText("DeepSeek Harness")).toHaveCount(0);
+    await expect(page.getByText("ZCode Agent")).toHaveCount(0);
     await expect(page.getByText("Cursor")).toHaveCount(0);
     const supported = (process.platform === "darwin" && process.arch === "arm64") ||
       (process.arch === "x64" && ["darwin", "win32", "linux"].includes(process.platform));
-    await expect(page.getByText("Unsupported on this platform", { exact: true })).toHaveCount(supported ? 0 : 10);
+    await expect(page.getByText("Unsupported on this platform", { exact: true })).toHaveCount(supported ? 0 : 8);
     if (!supported) {
       await expect(page.getByRole("button", { name: "Codex · Set path" })).toBeDisabled();
       assert.equal(await page.evaluate(() => window.desktop.chooseCliPath("openai")), null);
@@ -220,8 +221,6 @@ const expectedAuthGuides: Record<CliProvider, string> = {
   moonshot: "https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/guides/getting-started.md",
   mistral: "https://docs.mistral.ai/vibe/code/cli/install-setup",
   minimax: "https://code.minimax.io/docs/cli/quick-start",
-  deepseek: "https://github.com/deepseek-ai/deepseek-harness",
-  zhipu: "https://zcode.z.ai/en/docs/install",
 };
 
 test("Official CLI paths, sign-in guides and isolated account checks stay tied to their providers", {
@@ -291,14 +290,12 @@ test("Official CLI paths, sign-in guides and isolated account checks stay tied t
       } else await expect(checkSignIn).toHaveCount(0);
       await expect(account.getByText("Unknown", { exact: true })).toBeVisible();
       const options = { selected: entry.path, title: entry.pathLabel, kind: directory ? "openDirectory" as const : "openFile" as const,
-        extension: archive ? extname(entry.path).slice(1) : undefined,
-        packageDirectory: process.platform === "darwin" && entry.id === "zhipu" };
-      await app.evaluate(({ dialog }, { selected, title, kind, extension, packageDirectory }) => {
+        extension: archive ? extname(entry.path).slice(1) : undefined };
+      await app.evaluate(({ dialog }, { selected, title, kind, extension }) => {
         dialog.showOpenDialog = async (first: Electron.BaseWindow | Electron.OpenDialogOptions, second?: Electron.OpenDialogOptions) => {
           const actual = second ?? first as Electron.OpenDialogOptions;
           return {
             canceled: actual.title !== title || !actual.properties?.includes(kind) ||
-              Boolean(actual.properties?.includes("treatPackageAsDirectory")) !== packageDirectory ||
               Boolean(extension && actual.filters?.[0]?.extensions[0] !== extension),
             filePaths: [selected], bookmarks: [],
           };

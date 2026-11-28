@@ -151,7 +151,7 @@ function CliList({ language, paths, supportedPaths, goTo, list }: {
         const action = saved ? copy.change : copy.configure;
         const supported = supportedPaths.includes(id);
         return <li key={id}>
-          <span>{name}{id === "deepseek" && ` · ${copy.preview}`}</span>
+          <span>{name}</span>
           <small>{!supported ? copy.unsupportedPlatform : saved ? copy[saved.status] : copy.unconfigured}</small>
           <button className="soft" type="button" data-cli-provider={id} aria-label={`${name} · ${action}`}
             disabled={!supported && !saved} onClick={() => goTo(id)}>{action}</button>
@@ -242,8 +242,7 @@ function CliConnection({ provider, saved, supported, copy, accountCopy, protocol
   const archive = cliUsesReleaseArchive(provider);
   const installation = cliUsesInstallationFolder(provider);
   const pathLabel = installation ? copy.installationFolder : archive ? copy.releaseArchive : copy.path;
-  const pathDetails = provider === "zhipu" ? copy.zCodeInstallationDetails
-    : installation ? copy.miniMaxInstallationDetails : archive ? copy.releaseArchiveDetails : copy.details;
+  const pathDetails = installation ? copy.miniMaxInstallationDetails : archive ? copy.releaseArchiveDetails : copy.details;
   const invalidPath = result?.status === "invalidPath" || result?.status === "fileMissing" ||
     result?.status === "wrongFile" || result?.status === "windowsShim";
   let resultText = result ? copy[result.status] : "";
@@ -275,7 +274,7 @@ function CliConnection({ provider, saved, supported, copy, accountCopy, protocol
   }
 
   return <section className="settings provider-cli-settings">
-    <h2 ref={heading} tabIndex={-1}>{providerClis[provider]}{provider === "deepseek" && ` · ${copy.preview}`}</h2>
+    <h2 ref={heading} tabIndex={-1}>{providerClis[provider]}</h2>
     <p id="provider-cli-path-help">{pathDetails}</p>
     <form className="provider-cli-connection" onSubmit={check}>
       <label htmlFor="provider-cli-path">{pathLabel}</label>

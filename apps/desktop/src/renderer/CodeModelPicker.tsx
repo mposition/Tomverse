@@ -3,7 +3,7 @@ import { Sparkles } from "lucide-react";
 import { autoRoutingCopy } from "@/lib/autoRoutingCopy";
 import type { Language } from "@/lib/language";
 import { desktopShellCopy } from "../../../../locales/desktopShell";
-import { SMART_ADAPTIVE_MODEL_ID, codePickerModels } from "../code-model-catalog";
+import { SMART_ADAPTIVE_MODEL_ID, codePickerModels, creditFreeModelIds } from "../code-model-catalog";
 import type { Model } from "../contract";
 import { DesktopModelPicker } from "./DesktopModelPicker";
 
@@ -19,10 +19,12 @@ export function CodeModelPicker({ account, language, label, models, selectedId, 
 }) {
   const contextCopy = desktopShellCopy[language].codeModelContext;
   const manual = useMemo(() => codePickerModels(models, contextCopy), [models, contextCopy]);
+  // A provider CLI runs on the person's own subscription, so its rows show no Tomverse credit usage.
+  const creditFree = useMemo(() => creditFreeModelIds(models), [models]);
   const [lastManual, setLastManual] = useState<string>();
   const auto = selectedId === SMART_ADAPTIVE_MODEL_ID;
   const offered = manual.length > 0 && models.some(({ id }) => id === SMART_ADAPTIVE_MODEL_ID);
-  return <DesktopModelPicker account={account} language={language} label={label} models={manual} catalogueOnly scope=".code"
+  return <DesktopModelPicker account={account} language={language} label={label} models={manual} catalogueOnly creditFreeModelIds={creditFree} scope=".code"
     choices={!auto && manual.some(({ id }) => id === selectedId) ? [selectedId] : []} limit={1} singleModel plan="Max" disabled={disabled}
     mode={offered ? (auto ? "auto" : "manual") : undefined} autoOffered={offered}
     onModeChange={offered ? (next) => {
