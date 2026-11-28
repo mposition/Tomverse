@@ -543,7 +543,7 @@ let locationIntentLimitCalls = 0;
 let locationIntentLimitRefused = false;
 /** The pre-dispatch storage check: what it was asked, and whether the store is full. */
 let messageStoreFull = false;
-const messageCapacityChecks: Array<{ count: number; bytes: number }> = [];
+const messageCapacityChecks: Array<{ conversationId: string | null; count: number; bytes: number }> = [];
 class TestApiSecurityError extends Error {
   constructor(
     readonly status: number,
@@ -569,8 +569,8 @@ mock.module(mod("lib/apiSecurity.ts"), {
           )
         : null,
     assertMessageCapacity: async () => undefined,
-    checkMessageCapacity: async (_db: unknown, _userId: string, _conversationId: string, count: number, bytes: number) => {
-      messageCapacityChecks.push({ count, bytes });
+    checkMessageCapacity: async (_db: unknown, _userId: string, conversationId: string | null, count: number, bytes: number) => {
+      messageCapacityChecks.push({ conversationId, count, bytes });
       if (messageStoreFull) {
         throw new TestApiSecurityError(409, "MESSAGE_STORAGE_QUOTA_EXCEEDED", "Message storage quota exceeded.");
       }
@@ -2485,7 +2485,7 @@ test("a full message store is refused before the paid Router, the claim and the 
     assert.equal(ledger.accessAcquisitions, 0);
     assert.equal(attempts.length, 0);
     // One answer's worth, before any model is chosen: the stored-answer cap.
-    assert.deepEqual(messageCapacityChecks, [{ count: 1, bytes: 400_000 }]);
+    assert.deepEqual(messageCapacityChecks, [{ conversationId: CONVERSATION_ID, count: 1, bytes: 400_000 }]);
   } finally {
     messageStoreFull = false;
   }
@@ -2495,6 +2495,48 @@ test("a full message store is refused before the paid Router, the claim and the 
   await ask("answers", "claimed", 200, false);
   assert.equal(messageCapacityChecks.length, 1);
   assert.equal(llmRouterInputs.length, 1);
+});
+
+/*
+  Review finding (B3, 2026-11-28, fourth pass): the storage check ran before
+  the durable claim, so a POST that only reattaches to an answer already saved
+  was refused with 409 by a full message store -- the recovery path refused.
+*/
+test("a full message store refuses a new answer but lets a POST reattach to the one already bound", async () => {
+  messageStoreFull = true;
+  try {
+    peekedAttemptConversationId = CONVERSATION_ID;
+    messageCapacityChecks.length = 0;
+    const reattach = await ask("answers", "reattach", 200, false);
+    assert.equal(reattach.response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
+    assert.equal(messageCapacityChecks.length, 0, "a reattach writes no answer, so it is not checked");
+    assert.equal(durableClaimCalls, 1);
+
+    peekedAttemptConversationId = null;
+    messageCapacityChecks.length = 0;
+    const fresh = await ask("answers", "claimed", 409, false);
+    assert.equal((JSON.parse(fresh.body) as { code?: string }).code, "MESSAGE_STORAGE_QUOTA_EXCEEDED");
+    assert.equal(messageCapacityChecks.length, 1);
+    assert.equal(durableClaimCalls, 0);
+  } finally {
+    messageStoreFull = false;
+    peekedAttemptConversationId = null;
+  }
+});
+
+test("a conversation the owner-scoped read does not find is checked against the account alone", async () => {
+  // copilot (B3, fourth pass): without a conversation row the check still
+  // applies, on the account's limits only -- never counting a conversation
+  // this account was not shown to own. The ownership refusal follows as before.
+  contextConversationAccess = "missing";
+  messageCapacityChecks.length = 0;
+  try {
+    const { body } = await ask("answers", "claimed", 403, false);
+    assert.equal((JSON.parse(body) as { code?: string }).code, "CONVERSATION_FORBIDDEN");
+    assert.deepEqual(messageCapacityChecks, [{ conversationId: null, count: 1, bytes: 400_000 }]);
+  } finally {
+    contextConversationAccess = "owned";
+  }
 });
 
 test("a POST whose assistant id is already bound skips the paid Router and still reattaches at the claim", async () => {

@@ -2282,6 +2282,20 @@ async function handleChatPost(
             throw new ChatAccessError(410, TEMPORARY_CHAT_EXPIRED, "This temporary chat has ended.");
         }
         /*
+          Whether a response attempt is already bound to this assistant id in
+          this conversation. One owner-scoped primary-key read, used twice:
+          such a POST ends at the durable claim -- a reattach to that attempt,
+          or the generic 409 for a different request under the same id -- and
+          never writes an answer, so it is neither checked for storage below
+          nor routed (the paid Router call further down is skipped for it).
+          Only a Chat conversation can hold one: Review, continuation and
+          Deep Research turns never claim an attempt.
+        */
+        const attemptAlreadyBound = Boolean(session?.user?.id && conversationId && assistantMessageId) &&
+            conversationRouting?.productKey === "chat" &&
+            (await peekChatResponseAttempt(session!.user!.id!, assistantMessageId!))
+                ?.conversationId === conversationId;
+        /*
           An answer that could never be stored is refused before anything is
           paid for -- the Auto Router, the image classification beside it, the
           credit reservation, the provider. The Message write re-checks under
@@ -2290,17 +2304,19 @@ async function handleChatPost(
           charged, streamed and then lost at that write
           (docs/policy/credit-and-cost-limits.md, "완료 분기의 정산").
           The model is not chosen yet, so the room asked for is the most a
-          stored answer can take: its character cap at four bytes each. Only
-          for a conversation the owner-scoped read above found; only the
-          storage refusal stops the turn, and if the check itself fails, the
-          write decides as it always has.
+          stored answer can take: its character cap at four bytes each. The
+          conversation's own count only for one the owner-scoped read above
+          found; otherwise the account's limits alone. Not for a POST that
+          reattaches to an answer already there. Only the storage refusal stops
+          the turn, and if the check itself fails, the write decides as it
+          always has.
         */
-        if (session?.user?.id && conversationId && assistantMessageId && conversationRouting) {
+        if (session?.user?.id && conversationId && assistantMessageId && !attemptAlreadyBound) {
             try {
                 await checkMessageCapacity(
                     prisma,
                     session.user.id,
-                    conversationId,
+                    conversationRouting ? conversationId : null,
                     1,
                     MAX_STORED_MESSAGE_CHARACTERS * 4
                 );
@@ -2897,17 +2913,15 @@ async function handleChatPost(
           generic 409 for a different request under the same id -- and never
           dispatches. Neither outcome depends on what the Router picks, so the
           paid Router call (and the image classification riding on it) is not
-          made for a duplicate. One owner-scoped primary-key read, only when the
-          Router would be asked; the claim still makes the decision, under its
-          own locks. A location-consent turn keeps its own replay rule.
+          made for a duplicate (`attemptAlreadyBound`, read before the storage
+          check); the claim still makes the decision, under its own locks. A
+          location-consent turn keeps its own replay rule.
         */
         const routerSkippedForBoundAttempt =
             deterministicAutoSelection.routed &&
             !wantsFusion &&
             conversationRouting?.productKey === "chat" &&
-            Boolean(session?.user?.id && conversationId && assistantMessageId) &&
-            (await peekChatResponseAttempt(session!.user!.id!, assistantMessageId!))
-                ?.conversationId === conversationId;
+            attemptAlreadyBound;
         const imageRouting = createChatTurnImageRouting(autoImageTurnEligible && !routerSkippedForBoundAttempt
             ? { userId: session!.user!.id!, conversationId: conversationId!, text: profileTextFor(messages),
                 plan: accountPlan, traceId, request: req, attachedPhoto: latestUserTurnHasAttachments(autoRoutingMessages) }
