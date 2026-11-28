@@ -701,7 +701,9 @@ for (const [width, theme] of [[1600, "light"], [430, "dark"]] as const) {
     await page.getByTestId("composer-review-mode").getByRole("button", { name: "전문가", exact: true }).click();
     await page.getByTestId("chat-textarea").fill("Compare, then recover the failed provider.");
     await page.getByTestId("chat-send-button").click();
-    await page.getByRole("button", { name: "다시 시도", exact: true }).click();
+    // The disabled analysis entry can also read "다시 시도" once its read-only
+    // preparation has failed; the provider retry is the enabled one.
+    await page.getByRole("button", { name: "다시 시도", exact: true, disabled: false }).click();
     await expect(page.getByText("Recovered Studio answer.", { exact: true })).toBeVisible();
     const requestedModels = await page.evaluate(() => ((window as typeof window & {
       __chatModelStubRequests?: Array<{ modelId: string }>;
