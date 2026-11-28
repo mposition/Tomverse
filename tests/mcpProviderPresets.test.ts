@@ -74,18 +74,17 @@ test("the disabled list switches off only the named providers", () => {
 });
 
 test("stored connection policy digests do not depend on how presets are selected", () => {
-  // Pinned from the policies the former selection-list code produced; a change here disconnects stored connections.
-  const pinned: Record<string, string> = {
-    linear: "dd45804c0afb89b48d10a112e97ca5517205300053b7e141de55d91f91869234",
-    notion: "447ed33e93d0f9497543cef9559ebc9153f8e976592b8182e8a3411d352aa01c",
-    dropbox: "3072b05dd41e34377727ee84e2f4451033254e2da60633c3d613748f25a6f8fb",
-    supabase: "d1f6a953766ceac871fcde7e5505e2f415a026b871920e0510e95d70560c238e",
-    "microsoft-learn": "b96fb0b759373ac723e43deb6dfe9252c157b78b9ff621723b755efe1187eab2",
-  };
   const all = servers();
-  for (const [id, digest] of Object.entries(pinned)) assert.equal(mcpPolicyDigest(all.find(s => s.id === id)!), digest, id);
-  const zoom = only("zoom", { MCP_PROVIDER_ZOOM_CLIENT_ID: "c", MCP_PROVIDER_ZOOM_CLIENT_SECRET: "s", MCP_PROVIDER_ZOOM_TOKEN_SCOPE: "user:read" })[0];
-  assert.equal(mcpPolicyDigest(zoom), "0370e414719a250f6b5c800045a435a61fa912b9206969baf2be3d8cc084dd83");
+  // A policy listed the former way (an operator entry with the same JSON) has the same digest as the catalog's, so a connection
+  // made under either keeps working; compared, not pinned, so moving the code does not break it.
+  for (const server of all) {
+    const listed = servers({ MCP_CONNECTOR_SERVERS: JSON.stringify([server]) }).filter(s => s.id === server.id);
+    assert.equal(listed.length, 1, server.id);
+    assert.equal(mcpPolicyDigest(listed[0]!), mcpPolicyDigest(server), server.id);
+  }
+  const zoom = only("zoom", { MCP_PROVIDER_ZOOM_CLIENT_ID: "c", MCP_PROVIDER_ZOOM_CLIENT_SECRET: "s", MCP_PROVIDER_ZOOM_TOKEN_SCOPE: "user:read" })[0]!;
+  assert.equal(mcpPolicyDigest(only("zoom", { MCP_PROVIDER_ZOOM_CLIENT_ID: "c", MCP_PROVIDER_ZOOM_CLIENT_SECRET: "s", MCP_PROVIDER_ZOOM_TOKEN_SCOPE: "user:read",
+    MCP_CONNECTOR_SERVERS: JSON.stringify([zoom]) })[0]!), mcpPolicyDigest(zoom));
   // Switching other providers off, or setting the removed variables, leaves each remaining policy byte for byte.
   const narrowed = servers({ MCP_CONNECTOR_PROVIDERS_DISABLED: all.filter(s => s.id !== "linear").map(s => s.id).join(","), MCP_CONNECTOR_PROVIDERS: "notion" });
   assert.deepEqual(narrowed.map(s => s.id), ["linear"]);

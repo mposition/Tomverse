@@ -12,6 +12,11 @@ const REPOSITORY = "mposition/TomverseCode", REPOSITORY_ID = 1309523852;
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 type AppConfig = { clientId: string; clientSecret: string; slug: string; repository: string; repositoryId: number; encryptionKey: string; sessionSecret: string };
 
+/** The catalog presets this GitHub-only preview switches off: every one but `github`, the id the built-in GitHub profile is switched by. */
+export function githubPreviewDisabledProviders(profiles: ReadonlyArray<{ id: string }>) {
+  return profiles.map(profile => profile.id).filter(id => id !== "github").join(",");
+}
+
 export function githubPreviewManifest(suffix: string) {
   return { name: `Tomverse MCP Local ${suffix}`, url: "https://tomverse.app", public: false,
     description: "Local Tomverse MCP preview. Issue access is limited to the repository selected during installation.",
@@ -98,7 +103,7 @@ async function main() {
       NEXT_TRACE_SPAN_THRESHOLD_MS: String(Number.MAX_SAFE_INTEGER),
       PUBLIC_APP_URL: "http://127.0.0.1:3131", NEXT_PUBLIC_APP_URL: "http://127.0.0.1:3131", NEXT_PUBLIC_SHARE_BASE_URL: "http://127.0.0.1:3131",
       NEXTAUTH_URL: "http://127.0.0.1:3131", NEXTAUTH_SECRET: config.sessionSecret,
-      OAUTH_TOKEN_ENCRYPTION_KEY: config.encryptionKey, MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_PROVIDERS_DISABLED: catalog.profiles.map(profile => profile.id).join(","),
+      OAUTH_TOKEN_ENCRYPTION_KEY: config.encryptionKey, MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_PROVIDERS_DISABLED: githubPreviewDisabledProviders(catalog.profiles),
       MCP_GITHUB_OAUTH_CLIENT_ID: config.clientId, MCP_GITHUB_OAUTH_CLIENT_SECRET: config.clientSecret,
       MCP_GITHUB_REPOSITORY: REPOSITORY, MCP_GITHUB_REPOSITORY_ID: String(REPOSITORY_ID),
       MCP_CONNECTOR_SYNTHETIC_PORT: "", MCP_CONNECTOR_NATIVE_ENABLED: "false", E2E_AUTH_BYPASS: "false", E2E_DISABLE_DATABASE: "false" };
