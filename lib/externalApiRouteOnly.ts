@@ -8,6 +8,7 @@ import { externalApiRunnableModels } from "@/lib/externalApiCatalog";
 import { externalApiEnabled } from "@/lib/externalApiCatalogCore";
 import { externalApiErrorResponse, externalApiRefusal, positiveInteger } from "@/lib/externalApiInference";
 import { sha256Hex } from "@/lib/externalApiKeyCore";
+import { decodeImageDataUrl } from "@/lib/openAiChatProtocol";
 import {
     ROUTE_ONLY_EVENT,
     ROUTE_ONLY_MAX_BODY_BYTES,
@@ -77,6 +78,14 @@ export async function handleCodeRouteOnly(request: Request, deps: RouteOnlyDeps 
         if (completion.messages.at(-1)?.role !== "user") {
             return externalApiErrorResponse(400, "The route-only choice is made for a new task: the last message must be the person's.", "invalid_request", { requestId });
         }
+        // Images are checked as the completions route converts them (inline data URLs of a supported type and size), so a
+        // request that route would refuse is refused here too rather than given a model.
+        completion.messages.forEach((message, index) => {
+            if (message.role !== "user" || !Array.isArray(message.content)) return;
+            message.content.forEach((part, at) => {
+                if (part.type === "image_url") decodeImageDataUrl(part.image_url.url, `messages[${index}].content[${at}].image_url.url`);
+            });
+        });
 
         const runnable = await (deps.runnable ?? externalApiRunnableModels)(account.plan.tier, { surface: "coding", smartAdaptive: true });
         const routerAllowed = deps.routerAllowed ?? smartAdaptiveRouterAllowed;

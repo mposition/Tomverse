@@ -408,3 +408,19 @@ test("a choice writes no conversation memory: a later choice for the same task i
   assert.equal(second.model, "gpt-6-luna");
   assert.equal(second.routedBy, "router");
 });
+
+test("an image the completions route would refuse is refused here, even with a model that reads images", async () => {
+  reset();
+  const vision = runtimeModel("vision-x", "openai", "standard", { inputCapabilities: { image: true, nativePdf: false } });
+  const runnable = [{ model: vision, capabilities: externalApiModelCapabilities(vision, { maxInputTokens: 100_000, maxOutputTokens: 8_000, creditWeight: 4 }) }];
+  const ask = (url) => post({ messages: [{ role: "user", content: [{ type: "text", text: "What is this?" }, { type: "image_url", image_url: { url } }] }] });
+  for (const [url, code] of [["https://example.org/a.png", "unsupported_image_url"], ["data:image/png;base64,", "invalid_image"], ["data:image/tiff;base64,AAAA", "unsupported_image_type"]]) {
+    const response = await handleCodeRouteOnly(ask(url), makeDeps({ runnable }));
+    assert.equal(response.status, 400, url);
+    assert.equal((await response.json()).error.code, code, url);
+  }
+  // A valid inline image goes through to the model that reads it.
+  const ok = await handleCodeRouteOnly(ask("data:image/png;base64,iVBORw0KGgo="), makeDeps({ runnable }));
+  assert.equal(ok.status, 200);
+  assert.equal((await ok.json()).model, "vision-x");
+});

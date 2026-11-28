@@ -526,15 +526,15 @@ Default off (`EXTERNAL_API_ROUTE_ONLY_ENABLED`, section 2). Code:
   CLI running the task keeps its model for the whole task and the server never
   sees its tool calls. A pick that cannot take the request (its window, images
   or features) is answered 400 `unsupported_request`, never recommended, since
-  nothing after this route refuses it as the completions route would. The choice
+  nothing after this route refuses it as the completions route would. Images
+  are checked as that route converts them (inline data URLs of a supported type
+  and size; a remote URL is refused, never fetched). The choice
   writes no conversation memory: that is written only when admission accepts a
   request on a model.
 - **Nothing is run or charged.** No admission, no credit reservation, no
   settlement, no receipt and no provider call for the task. The router call is
   Smart Adaptive's own, held against the provider operational budget, never
-  the person's credits (owner decision 2026-11-28). The model picked is
-  remembered in process for the conversation, as after an admitted completion,
-  so later choices for it only move up.
+  the person's credits (owner decision 2026-11-28).
 - **Abuse bound.** A choice costs the person nothing, so it has its own request
   rate bucket per account (`external-api-route-only`, default 30 a minute and
   3 000 a day, whichever key or Desktop session asks), checked before the body
