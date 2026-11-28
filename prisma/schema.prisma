@@ -1829,7 +1829,9 @@ model ScheduledTaskRun {
   /// from it.
   startedAt          DateTime  @default(now()) @db.Timestamptz(3)
   finishedAt         DateTime? @db.Timestamptz(3)
-  /// When this run's result notice was queued. Set once, only while NULL.
+  /// When this run's result notice was settled: queued, or decided against
+  /// (none owed, email switch off, task or account switched it off). Set once,
+  /// only while NULL; NULL means one may still be owed (lib/scheduledTaskNotice.ts).
   noticeQueuedAt     DateTime? @db.Timestamptz(3)
 
   task ScheduledTask @relation(fields: [taskId], references: [id], onDelete: Cascade)

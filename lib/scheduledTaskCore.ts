@@ -520,6 +520,46 @@ export const scheduledRunNoticeKind = (input: {
 }): ScheduledRunNoticeKind | null =>
   input.status === "succeeded" ? "answered" : input.pausedTask ? "paused" : null;
 
+/**
+ * The notice recovery (lib/scheduledTaskNotice.ts, reconcileScheduledRunNotices):
+ * a finished run whose notice was owed but never settled -- the process died
+ * between the run's close and the enqueue, or the enqueue hit a passing
+ * database error -- is queued by a later tick. Only within this window after
+ * the run finished, and only while the email switch is on: a notice hours late
+ * is no longer news, and runs that finished while the switch was off were
+ * already settled as "no notice" when they closed.
+ */
+export const SCHEDULED_TASK_NOTICE_RECOVERY_WINDOW_MS = 6 * 60 * 60 * 1_000;
+/** At most this many unsettled runs per tick. */
+export const SCHEDULED_TASK_NOTICE_RECOVERY_BATCH = 50;
+
+/**
+ * Which notice an unsettled finished run owed, read back from what the run and
+ * its task say now -- the same answer `scheduledRunNoticeKind` gave when it
+ * closed. An answer is a `succeeded` run. A pause is the run that put its task
+ * there: the task is paused by the runner (not by its owner), at the revision
+ * this run was claimed for -- an edit, a resume or an owner's pause moves the
+ * revision -- and no later run of the task exists.
+ */
+export const recoveredNoticeKind = (input: {
+  runStatus: string;
+  runRevision: number;
+  taskStatus: string;
+  taskRevision: number;
+  pauseReason: string | null;
+  isLatestRun: boolean;
+}): ScheduledRunNoticeKind | null => {
+  if (input.runStatus === "succeeded") return "answered";
+  if (input.runStatus !== "failed" && input.runStatus !== "skipped") return null;
+  const pausedByThisRun =
+    input.taskStatus === "paused" &&
+    input.pauseReason !== null &&
+    input.pauseReason !== "user" &&
+    input.taskRevision === input.runRevision &&
+    input.isLatestRun;
+  return pausedByThisRun ? "paused" : null;
+};
+
 /** When a run ran, in the account's language and the task's zone, with the zone shown. */
 export const formatScheduledRunTime = (at: Date, timeZone: string, language: string) => {
   try {

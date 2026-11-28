@@ -8,7 +8,8 @@ import {
 } from "@/lib/emailTemplateDefinitions";
 import { prisma } from "@/lib/prisma";
 import { SCHEDULED_TASKS_FLAG_KEY } from "@/lib/scheduledTaskAccess";
-import { queueScheduledRunNotice } from "@/lib/scheduledTaskNotice";
+import { SCHEDULED_TASK_NOTICE_RECOVERY_WINDOW_MS } from "@/lib/scheduledTaskCore";
+import { queueScheduledRunNotice, reconcileScheduledRunNotices } from "@/lib/scheduledTaskNotice";
 import { scheduledTaskReservationGuard } from "@/lib/scheduledTaskReservationGuard";
 import { scheduledTaskRunSession } from "@/lib/scheduledTaskRunContext";
 import { runScheduledTasksTick, type ChatDispatch } from "@/lib/scheduledTaskRunner";
@@ -143,7 +144,8 @@ test("with the email switch off a finished run queues nothing", async () => {
   }
   const run = await prisma.scheduledTaskRun.findFirstOrThrow();
   assert.equal(run.status, "succeeded");
-  assert.equal(run.noticeQueuedAt, null);
+  // Settled as "no notice" when it closed, so turning the switch on later sends nothing for it.
+  assert.ok(run.noticeQueuedAt);
   assert.equal(await prisma.emailDelivery.count(), 0);
   assert.equal(await prisma.emailEvent.count(), 0);
 });
@@ -165,7 +167,7 @@ test("an answered run queues one notice, and the drain sends status and links bu
   assert.equal(queued[0].language, "ko");
 
   // Asked again -- a retried finish, a reconciliation -- it queues nothing.
-  assert.equal(await queueScheduledRunNotice({ runId: run.id, kind: "answered" }), "already_queued");
+  assert.equal(await queueScheduledRunNotice({ runId: run.id, kind: "answered" }), "already_settled");
   assert.equal(await prisma.emailDelivery.count(), 1);
 
   const sent: Array<Record<string, unknown>> = [];
@@ -208,7 +210,7 @@ test("a run that pauses the task queues the paused notice; a failure that will b
   const failed = await prisma.scheduledTaskRun.findFirstOrThrow({ where: { userId: failingUser } });
   assert.equal(failed.status, "failed");
   assert.equal((await prisma.scheduledTask.findFirstOrThrow({ where: { userId: failingUser } })).status, "active");
-  assert.equal(failed.noticeQueuedAt, null);
+  assert.ok(failed.noticeQueuedAt, "nothing owed: settled when it closed");
   assert.equal(await prisma.emailDelivery.count(), 1, "only the pause was notified");
 });
 
@@ -227,12 +229,13 @@ test("the task's own switch and the account's email purpose each queue nothing",
 
   const runs = await prisma.scheduledTaskRun.findMany({ orderBy: { userId: "asc" } });
   assert.equal(runs.length, 2);
-  assert.ok(runs.every((run) => run.status === "succeeded" && run.noticeQueuedAt === null));
+  // A refusal is a decision: the run is settled, not left for the recovery.
+  assert.ok(runs.every((run) => run.status === "succeeded" && run.noticeQueuedAt !== null));
   assert.equal(await prisma.emailDelivery.count(), 0);
   const taskOffRun = runs.find((run) => run.userId === taskOffUser)!;
   const purposeOffRun = runs.find((run) => run.userId === purposeOffUser)!;
-  assert.equal(await queueScheduledRunNotice({ runId: taskOffRun.id, kind: "answered" }), "task_off");
-  assert.equal(await queueScheduledRunNotice({ runId: purposeOffRun.id, kind: "answered" }), "preference_off");
+  assert.equal(await queueScheduledRunNotice({ runId: taskOffRun.id, kind: "answered" }), "already_settled");
+  assert.equal(await queueScheduledRunNotice({ runId: purposeOffRun.id, kind: "answered" }), "already_settled");
 });
 
 test("retried and concurrent queueing of one run writes one notice", async () => {
@@ -257,8 +260,8 @@ test("retried and concurrent queueing of one run writes one notice", async () =>
     Array.from({ length: 4 }, () => queueScheduledRunNotice({ runId: run.id, kind: "answered" }))
   );
   assert.equal(outcomes.filter((outcome) => outcome === "queued").length, 1, outcomes.join(","));
-  assert.ok(outcomes.every((outcome) => outcome === "queued" || outcome === "already_queued"), outcomes.join(","));
-  assert.equal(await queueScheduledRunNotice({ runId: run.id, kind: "paused" }), "already_queued");
+  assert.ok(outcomes.every((outcome) => outcome === "queued" || outcome === "already_settled"), outcomes.join(","));
+  assert.equal(await queueScheduledRunNotice({ runId: run.id, kind: "paused" }), "already_settled");
   assert.equal(await prisma.emailDelivery.count(), 1);
   assert.equal(await prisma.emailEvent.count(), 1);
 });
@@ -323,7 +326,7 @@ test("a switch turned off while the notice is being queued wins: nothing is queu
 
   assert.equal(await queued, "task_off");
   assert.equal(await prisma.emailDelivery.count(), 0);
-  assert.equal((await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id: run.id } })).noticeQueuedAt, null);
+  assert.ok((await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id: run.id } })).noticeQueuedAt, "decided, not left open");
 });
 
 test("a notice already queued is not sent once its task's switch is off", async () => {
@@ -394,4 +397,120 @@ test("an edit that does not name the email switch leaves it as it was", async ()
     >[2]
   );
   assert.equal(turnedOn.emailOnFinish, true);
+});
+
+/* ------------------------------------------------- recovering lost notices -- */
+
+const unsettledRun = (
+  userId: string,
+  task: { id: string; revision: number },
+  overrides: { status?: string; finishedAt?: Date; scheduledFor?: Date; noticeQueuedAt?: Date | null } = {}
+) =>
+  prisma.scheduledTaskRun.create({
+    data: {
+      taskId: task.id,
+      userId,
+      taskRevision: task.revision,
+      scheduledFor: overrides.scheduledFor ?? new Date(Date.now() - 30 * 60_000),
+      status: overrides.status ?? "succeeded",
+      outcome: "completed",
+      assistantMessageId: randomUUID(),
+      leaseExpiresAt: new Date(),
+      finishedAt: overrides.finishedAt ?? new Date(Date.now() - 10 * 60_000),
+      noticeQueuedAt: overrides.noticeQueuedAt ?? null,
+    },
+  });
+
+const noDispatch = async (): Promise<ChatDispatch> => async () => {
+  throw new Error("no task is due");
+};
+
+test("a notice whose enqueue failed after the run closed is queued once by a later tick", async () => {
+  switchOn();
+  const userId = await seedUser();
+  await seedTask(userId);
+  // The enqueue throws inside its transaction (no snapshot key), after the
+  // run's close committed: the run is answered and its notice is not queued.
+  delete process.env.EMAIL_SNAPSHOT_KEYS;
+  await runScheduledTasksTick({ dispatch: async () => completingChat() });
+  const run = await prisma.scheduledTaskRun.findFirstOrThrow();
+  assert.equal(run.status, "succeeded");
+  assert.equal(run.noticeQueuedAt, null, "owed and not settled");
+  assert.equal(await prisma.emailDelivery.count(), 0);
+
+  process.env.EMAIL_SNAPSHOT_KEYS = "v1:test-snapshot-key";
+  const next = await runScheduledTasksTick({ dispatch: noDispatch });
+  assert.equal(next.noticesRecovered, 1);
+  const queued = await deliveries();
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].templateVersion.template.key, SCHEDULED_TASK_RUN_ANSWERED_TEMPLATE);
+  assert.equal(queued[0].event.referenceId, run.id);
+  assert.ok((await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id: run.id } })).noticeQueuedAt);
+
+  assert.equal((await runScheduledTasksTick({ dispatch: noDispatch })).noticesRecovered, 0);
+  assert.equal(await prisma.emailDelivery.count(), 1, "queued exactly once");
+});
+
+test("a process that died between the close and the enqueue is recovered, and a concurrent recovery queues once", async () => {
+  switchOn();
+  const userId = await seedUser();
+  const task = await seedTask(userId);
+  const run = await unsettledRun(userId, task);
+  const results = await Promise.all([reconcileScheduledRunNotices(), reconcileScheduledRunNotices()]);
+  assert.equal(results.reduce((sum, result) => sum + result.queued, 0), 1);
+  assert.equal(await prisma.emailDelivery.count(), 1);
+  assert.ok((await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id: run.id } })).noticeQueuedAt);
+});
+
+test("the recovery leaves settled runs, runs outside its window, and everything while the switch is off", async () => {
+  const userId = await seedUser();
+  const task = await seedTask(userId);
+  const settled = await unsettledRun(userId, task, { noticeQueuedAt: new Date(), scheduledFor: new Date(Date.now() - 50 * 60_000) });
+  const old = await unsettledRun(userId, task, {
+    finishedAt: new Date(Date.now() - SCHEDULED_TASK_NOTICE_RECOVERY_WINDOW_MS - 60_000),
+    scheduledFor: new Date(Date.now() - 8 * 60 * 60_000),
+  });
+  const recent = await unsettledRun(userId, task);
+
+  // Off: nothing is read, nothing is queued, nothing is settled.
+  assert.deepEqual(await reconcileScheduledRunNotices(), { examined: 0, queued: 0, settled: 0, failed: 0 });
+  assert.equal((await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id: recent.id } })).noticeQueuedAt, null);
+
+  switchOn();
+  const recovered = await reconcileScheduledRunNotices();
+  assert.equal(recovered.examined, 1, "only the recent unsettled run");
+  assert.equal(recovered.queued, 1);
+  const queued = await deliveries();
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].event.referenceId, recent.id);
+  assert.equal((await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id: old.id } })).noticeQueuedAt, null);
+  assert.ok(settled.noticeQueuedAt);
+});
+
+test("the recovery honours the task's switch and owes a pause only to the run that caused it", async () => {
+  switchOn();
+  const offUser = await seedUser();
+  const offTask = await seedTask(offUser, { emailOnFinish: false });
+  const offRun = await unsettledRun(offUser, offTask);
+
+  const pausedUser = await seedUser();
+  const pausedTask = await seedTask(pausedUser, { status: "paused", pauseReason: "repeated_failures", nextRunAt: null });
+  const pausingRun = await unsettledRun(pausedUser, pausedTask, { status: "failed" });
+
+  const retriedUser = await seedUser();
+  const activeTask = await seedTask(retriedUser);
+  const retriedRun = await unsettledRun(retriedUser, activeTask, { status: "failed" });
+
+  const recovered = await reconcileScheduledRunNotices();
+  assert.equal(recovered.examined, 3);
+  assert.equal(recovered.queued, 1);
+  const queued = await deliveries();
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].templateVersion.template.key, SCHEDULED_TASK_PAUSED_TEMPLATE);
+  assert.equal(queued[0].event.referenceId, pausingRun.id);
+  // Both others are settled without mail, so the next tick does not look again.
+  for (const id of [offRun.id, retriedRun.id]) {
+    assert.ok((await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id } })).noticeQueuedAt, id);
+  }
+  assert.equal((await reconcileScheduledRunNotices()).examined, 0);
 });

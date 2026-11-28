@@ -1440,13 +1440,35 @@ authority는 그와 별개로 **여전히 필요합니다.** 호주의 `inferred
 - **수신 거부**: service는 unsubscribe가 선택입니다(`EmailTemplate_unsubscribe_check`).
   one-click 링크 대신 본문에 알림 설정 링크를 둡니다(`requiresUnsubscribe: false`).
 - **발송 경계** (`lib/scheduledTaskNotice.ts`): `SCHEDULED_TASK_EMAIL_ENABLED`가
-  정확히 `true`일 때만 큐에 넣습니다. 꺼져 있으면 아무것도 읽거나 쓰지 않습니다.
-  **실행 한 번에 한 통**: `ScheduledTaskRun.noticeQueuedAt`을 NULL일 때만 outbox 행과
-  같은 transaction에서 표시합니다. 재시도·재조정·중복 종료는 표시를 보고 아무것도
-  넣지 않습니다. **같은 transaction 안에서** 작업 행을 잠근 채 작업 토글을 읽고
+  정확히 `true`일 때만 큐에 넣습니다. 꺼져 있으면 발송 큐와 메일 테이블에 아무것도
+  쓰지 않습니다.
+  **실행 한 번에 한 통**: `ScheduledTaskRun.noticeQueuedAt`은 "이 실행의 알림이
+  결정된 시각"입니다(큐에 넣음 또는 보내지 않기로 함). NULL일 때만, outbox 행과 같은
+  transaction에서 표시합니다. 재시도·재조정·중복 종료는 표시를 보고 아무것도 넣지
+  않습니다. **같은 transaction 안에서** 작업 행을 잠근 채 작업 토글을 읽고
   (`lib/scheduledTaskNoticeGate.ts`, 설정 저장과 직렬화), purpose를
-  `consentGateVerdict`로 판정합니다. 어느 하나라도 거절하면 표시도 함께 되돌아갑니다.
-  실행 종료는 알림 실패와 무관하게 먼저 commit됩니다.
+  `consentGateVerdict`로 판정합니다. 거절은 결정이므로 표시를 남기고, DB 오류만
+  표시를 되돌립니다. 실행 종료는 알림 실패와 무관하게 먼저 commit됩니다.
+- **실행 종료 때의 표시**: 알림 대상이 아니거나(다시 시도될 실패, 일시정지하지 않은
+  건너뜀, 결과 불명) 그때 발송 스위치가 꺼져 있으면, 실행 종료 transaction이 바로
+  "알림 없음"으로 표시합니다. 그래서 스위치가 꺼져 있던 동안 끝난 실행은 나중에
+  스위치를 켜도 보내지 않습니다. NULL로 남는 것은 알림을 보내야 하는데 아직 큐에 못
+  넣은 실행뿐입니다.
+- **복구(재조정)**: 큐 등록 전에 프로세스가 죽었거나 등록이 DB 오류로 실패하면 표시가
+  NULL로 남습니다. 예약 작업 tick(15분마다, 기존 lease 재조정 바로 뒤)의
+  `reconcileScheduledRunNotices`가 이를 찾아 같은 판정 경로(스위치, 표시 claim, 작업
+  토글 행 잠금, purpose)로 큐에 넣습니다.
+  - **시간 창: 실행이 끝난 뒤 6시간**(`SCHEDULED_TASK_NOTICE_RECOVERY_WINDOW_MS`).
+    그보다 오래된 실행은 복구하지 않습니다. 몇 시간 늦은 결과 알림은 더 이상 소식이
+    아니기 때문입니다.
+  - 스위치가 켜져 있을 때만 돌고, tick마다 최대 50건(`SCHEDULED_TASK_NOTICE_RECOVERY_BATCH`)을
+    오래된 것부터 처리합니다.
+  - 어떤 알림이었는지는 실행 행의 기존 값으로 다시 판별합니다(`recoveredNoticeKind`).
+    `succeeded`면 답변 알림입니다. `failed`·`skipped`면 작업이 runner 때문에(사용자가
+    아니라) 일시정지돼 있고, 같은 revision이며, 그 작업의 가장 최근 실행일 때만
+    일시정지 알림입니다. 어느 쪽도 아니면 메일 없이 표시만 남깁니다.
+  - 예약 작업 기능 스위치(`feature.scheduledTasksEnabled`)가 꺼지면 tick이 돌지 않으므로
+    복구도 멈춥니다.
 - **발송 직전 재확인**: drain이 purpose 판정 바로 뒤에서 작업 토글을 다시 읽습니다.
   큐에 든 뒤 토글이 꺼졌거나 작업이 삭제됐으면 보내지 않고 `skipped`로 닫습니다.
   `skipReason`은 닫힌 목록이라 새 값을 만들지 않고 `no_consent`를 쓰며, 구분된 이유

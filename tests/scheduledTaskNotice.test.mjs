@@ -87,3 +87,17 @@ test("the run time is written in the task's zone and says which zone", () => {
   // An unusable zone falls back to UTC rather than failing the notice.
   assert.equal(formatScheduledRunTime(at, "Not/A_Zone", "en"), "2026-11-28 22:00 UTC");
 });
+
+test("an unsettled run's notice is read back from the run and its task", async () => {
+  const { recoveredNoticeKind } = await import("../lib/scheduledTaskCore.ts");
+  const paused = { runStatus: "failed", runRevision: 2, taskStatus: "paused", taskRevision: 2, pauseReason: "repeated_failures", isLatestRun: true };
+  assert.equal(recoveredNoticeKind({ ...paused, runStatus: "succeeded" }), "answered");
+  assert.equal(recoveredNoticeKind(paused), "paused");
+  assert.equal(recoveredNoticeKind({ ...paused, runStatus: "skipped", pauseReason: "insufficient_credits" }), "paused");
+  // Not this run's pause: the owner paused it, it was edited or resumed since, a later run exists.
+  assert.equal(recoveredNoticeKind({ ...paused, pauseReason: "user" }), null);
+  assert.equal(recoveredNoticeKind({ ...paused, taskRevision: 3 }), null);
+  assert.equal(recoveredNoticeKind({ ...paused, isLatestRun: false }), null);
+  assert.equal(recoveredNoticeKind({ ...paused, taskStatus: "active", pauseReason: null }), null);
+  assert.equal(recoveredNoticeKind({ ...paused, runStatus: "unknown" }), null);
+});

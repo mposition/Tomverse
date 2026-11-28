@@ -23,11 +23,12 @@ import {
   planRunsScheduledTasks,
   SCHEDULED_TASK_LIMITS,
   scheduledRunNoticeKind,
+  scheduledTaskEmailEnabled,
   scheduledTasksHostProblem,
   type RunClassification,
   type ScheduledTaskSchedule,
 } from "@/lib/scheduledTaskCore";
-import { queueScheduledRunNoticeQuietly } from "@/lib/scheduledTaskNotice";
+import { queueScheduledRunNoticeQuietly, reconcileScheduledRunNoticesQuietly } from "@/lib/scheduledTaskNotice";
 import { runAsScheduledTask } from "@/lib/scheduledTaskRunContext";
 import { isScheduledTasksEnabled } from "@/lib/scheduledTaskSettings";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
@@ -57,6 +58,8 @@ export type ChatDispatch = (request: Request) => Promise<Response>;
 export type ScheduledTaskTickResult = {
   enabled: boolean;
   reconciled: number;
+  /** Result emails queued for runs that finished earlier without one (lib/scheduledTaskNotice.ts). */
+  noticesRecovered: number;
   resumed: number;
   claimed: number;
   skippedLate: number;
@@ -193,12 +196,24 @@ async function finalizeRun(
         data: { updatedAt: new Date() },
       });
     }
-    return { closed: true, notice: scheduledRunNoticeKind({ status: classification.status, pausedTask }) };
+    const owed = scheduledRunNoticeKind({ status: classification.status, pausedTask });
+    // The run's notice, settled with the close when there is nothing to send:
+    // none is owed, or the email switch is off now. Settled here, a run that
+    // finished while the switch was off is never sent later, when somebody
+    // turns it on. Left NULL only when a notice is owed and may be sent, which
+    // is what the recovery in lib/scheduledTaskNotice.ts looks for.
+    const notice = owed && scheduledTaskEmailEnabled(process.env) ? owed : null;
+    if (!notice) {
+      await tx.scheduledTaskRun.update({ where: { id: run.id }, data: { noticeQueuedAt: new Date() } });
+    }
+    return { closed: true, notice };
   });
   // After the close has committed, and never able to undo it: the run is
   // finished whether or not its email can be queued. Closing happens once per
   // run (the conditional update above), and the notice claims the run's own
-  // marker, so a second close attempt queues nothing either way.
+  // marker, so a second close attempt queues nothing either way. If this
+  // process dies here, or the enqueue fails, the marker stays NULL and a later
+  // tick's recovery queues it (reconcileScheduledRunNotices).
   if (result.notice) await queueScheduledRunNoticeQuietly({ runId: run.id, kind: result.notice });
   return result.closed;
 }
@@ -696,7 +711,7 @@ export async function runScheduledTasksTick(input: {
   scanLimit?: number;
 }): Promise<ScheduledTaskTickResult> {
   const result: ScheduledTaskTickResult = {
-    enabled: false, reconciled: 0, resumed: 0, claimed: 0, skippedLate: 0, skippedTooSoon: 0, deferred: 0,
+    enabled: false, reconciled: 0, noticesRecovered: 0, resumed: 0, claimed: 0, skippedLate: 0, skippedTooSoon: 0, deferred: 0,
     examined: 0, stoppedForTime: false, stoppedAtLimit: null, stoppedBySwitch: false, executed: {},
   };
   const enabled = input.enabled ?? isScheduledTasksEnabled;
@@ -711,6 +726,10 @@ export async function runScheduledTasksTick(input: {
   const clock = input.now ?? (() => new Date());
   const reconciliation = await reconcileExpiredScheduledRuns(clock());
   result.reconciled = reconciliation.reconciled;
+  // Notices owed by runs that already finished but were never queued (a
+  // process that died after a close, a failed enqueue). Bounded and never
+  // throwing; off while the email switch is off.
+  result.noticesRecovered = (await reconcileScheduledRunNoticesQuietly()).queued;
 
   // Due tasks are read oldest first, a page at a time, behind a cursor on
   // (nextRunAt, id) as read. A claimed, late or too-soon task leaves the due
