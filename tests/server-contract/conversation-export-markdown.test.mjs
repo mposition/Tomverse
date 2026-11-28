@@ -98,7 +98,7 @@ test("?format=md returns the same conversation as a Markdown file", async () => 
 
 test("the default and an unknown format stay a text download", async () => {
   reset();
-  for (const query of ["", "?format=txt", "?format=pdf"]) {
+  for (const query of ["", "?format=txt", "?format=docx"]) {
     const response = await call(query);
     assert.equal(response.headers.get("content-type"), "text/plain; charset=utf-8", query);
     assert.match(response.headers.get("content-disposition"), /\.txt/);
@@ -106,8 +106,34 @@ test("the default and an unknown format stay a text download", async () => {
   }
 });
 
-test("Markdown is refused exactly where the text export is refused", async () => {
-  for (const query of ["", "?format=md"]) {
+test("?format=pdf returns the same conversation as a PDF, read in the export's one order", async () => {
+  reset();
+  const response = await call("?format=pdf");
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "application/pdf");
+  assert.match(response.headers.get("content-disposition"), /\.pdf/);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  assert.equal(new TextDecoder().decode(bytes.slice(0, 5)), "%PDF-");
+  // The lock is read again after rendering, before any byte is released.
+  assert.equal(reads.length, 2);
+});
+
+test("a PDF the font cannot draw, or one too long, is refused with a reason the menu can explain", async () => {
+  reset();
+  storedMessages = [{ id: "m1", role: "user", content: "مرحبا بالعالم هذا نص عربي ".repeat(40), modelId: null, createdAt: new Date() }];
+  const unsupported = await call("?format=pdf");
+  assert.equal(unsupported.status, 422);
+  assert.equal((await unsupported.json()).code, "UNSUPPORTED_CHARACTERS");
+
+  reset();
+  storedMessages = Array.from({ length: 1_001 }, (_, index) => ({ id: `m${index}`, role: "user", content: "x", modelId: null, createdAt: new Date() }));
+  const tooLong = await call("?format=pdf");
+  assert.equal(tooLong.status, 413);
+  assert.equal((await tooLong.json()).code, "EXPORT_TOO_LARGE");
+});
+
+test("Markdown and PDF are refused exactly where the text export is refused", async () => {
+  for (const query of ["", "?format=md", "?format=pdf"]) {
     reset();
     plan = { allowDownloads: false };
     assert.equal((await call(query)).status, 403, `plan ${query}`);

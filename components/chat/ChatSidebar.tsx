@@ -122,7 +122,7 @@ type ChatSidebarProps = {
     onUnlock?: (id: string) => void;
     onShare: (id: string, title: string) => void;
     onRevokeShare: (id: string) => void;
-    onDownload: (id: string, title: string, options?: { includeSource?: boolean; format?: "markdown" }) => void;
+    onDownload: (id: string, title: string, options?: { includeSource?: boolean; format?: "markdown" | "pdf" }) => void;
     currentModelId?: string | null;
     attachmentCount?: number;
     isMobileDrawer?: boolean;
@@ -2902,6 +2902,27 @@ export function ChatSidebar({
                                             <span className="flex min-w-0 items-start gap-2">
                                                 <Download className={menuIconClass} />
                                                 <span>{chatTurnToolsCopy[lang].exportMarkdown}</span>
+                                            </span>
+                                            {!canDownload && <Crown className={crownClass} />}
+                                        </button>
+                                        {/* The same route and checks again, rendered as a PDF. */}
+                                        <button
+                                            type="button"
+                                            data-testid="conversation-download-pdf"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (canDownload) {
+                                                    onDownload(conv.id, conv.title, { format: "pdf" });
+                                                    setOpenMenuId(null);
+                                                }
+                                            }}
+                                            disabled={!canDownload}
+                                            className={`${menuItemBase} ${!canDownload ? menuItemDisabled : menuItemEnabled}`}
+                                            title={isGuestMode ? t("sidebar.loginRequired") : !canDownload ? t("modelStatusReasons.upgradeRequired") : ""}
+                                        >
+                                            <span className="flex min-w-0 items-start gap-2">
+                                                <Download className={menuIconClass} />
+                                                <span>{toolsCopy.downloadPdf}</span>
                                             </span>
                                             {!canDownload && <Crown className={crownClass} />}
                                         </button>

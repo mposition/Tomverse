@@ -298,7 +298,7 @@ export type DesktopChatShellProps = {
   onUnlock: (id: string) => void;
   onShare: (id: string, title: string) => void;
   onRevokeShare: (id: string) => void;
-  onDownload: (id: string, title: string, options?: { includeSource?: boolean; format?: "markdown" }) => void;
+  onDownload: (id: string, title: string, options?: { includeSource?: boolean; format?: "markdown" | "pdf" }) => void;
   onToggleModel: (modelId: string) => boolean;
   onSwapModel: (removeModelId: string, addModelId: string) => boolean;
   /** Threaded to the composer; see `ChatInput`'s own prop docs. */

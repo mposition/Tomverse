@@ -228,7 +228,9 @@ test("every request whose response names a continuation sends the zone hint", ()
         const source = code(path);
         const at = source.indexOf(needle);
         assert.ok(at >= 0, `${path}: ${needle}`);
-        assert.match(source.slice(at, at + 400), headers, `${path} sends the hint with ${needle}`);
+        // The request's own options, not a fixed distance: the URL may grow.
+        const call = source.slice(at, source.indexOf("});", at) + 3);
+        assert.match(call, headers, `${path} sends the hint with ${needle}`);
     }
 });
 

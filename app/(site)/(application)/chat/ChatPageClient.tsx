@@ -19,6 +19,7 @@ import {
   type ConversationProjectChangedDetail,
 } from "@/lib/projectWorkspaceUi";
 import { CONVERSATIONS_CHANGED_EVENT, type ConversationsChangedDetail } from "@/lib/conversationBulkActions";
+import { conversationToolsCopy } from "@/locales/conversationTools";
 import { parseProjectWorkspaceRoute, projectWorkspaceSearch, type ProjectWorkspaceRoute } from "@/lib/projectWorkspaceRoute";
 import { ProjectChatScopeProvider, useProjectChatScopeState } from "@/components/projects/ProjectChatScope";
 import { ProjectComposerBar } from "@/components/projects/ProjectComposerBar";
@@ -9576,7 +9577,7 @@ export function ChatPageClient({
         // The sidebar passes the row title it already has; the file is named by
         // the server from the same row, so it is accepted and ignored here.
         _title?: string,
-        options: { includeSource?: boolean; format?: "markdown" } = {}
+        options: { includeSource?: boolean; format?: "markdown" | "pdf" } = {}
     ) => {
         if (isGuestMode) return;
         // Fetched and saved from here rather than navigated to. Assigning
@@ -9585,7 +9586,7 @@ export function ChatPageClient({
         // navigated to, with the chat gone. See lib/browserDownload.ts.
         try {
             const response = await fetch(
-                `/api/conversations/${convId}/export${options.includeSource ? "?include=source" : options.format === "markdown" ? "?format=md" : ""}`,
+                `/api/conversations/${convId}/export${options.includeSource ? "?include=source" : options.format === "markdown" ? "?format=md" : options.format === "pdf" ? "?format=pdf" : ""}`,
                 {
                     cache: "no-store",
                     // The file is named with the date and words the list shows
@@ -9601,6 +9602,16 @@ export function ChatPageClient({
                     .json()
                     .then((body: { code?: unknown }) => body?.code)
                     .catch(() => undefined);
+                if (options.format === "pdf" && (code === "EXPORT_TOO_LARGE" || code === "UNSUPPORTED_CHARACTERS")) {
+                    // Both say what to do instead: the Markdown file has neither limit.
+                    showToast(
+                        code === "EXPORT_TOO_LARGE"
+                            ? conversationToolsCopy[lang].pdfTooLarge
+                            : conversationToolsCopy[lang].pdfUnsupportedCharacters,
+                        "error"
+                    );
+                    return;
+                }
                 showToast(
                     t(
                         code === "EXPORT_SOURCE_LOCKED"
@@ -9624,7 +9635,10 @@ export function ChatPageClient({
                 }
                 return;
             }
-            await saveResponseAsFile(response, options.format === "markdown" ? "conversation.md" : "conversation.txt");
+            await saveResponseAsFile(
+                response,
+                options.format === "markdown" ? "conversation.md" : options.format === "pdf" ? "conversation.pdf" : "conversation.txt"
+            );
         } catch {
             showToast(t("sidebar.downloadFailed"), "error");
         }
