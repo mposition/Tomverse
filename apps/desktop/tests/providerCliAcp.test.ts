@@ -5,10 +5,10 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { permissionModes } from "../src/permission-contract";
-import { acpArguments, acpSafety, acpSecretPath, classifyAcpPermission, insideProject, namesCredential, realPathOf, trackToolCall, type TrackedCall } from "../src/host/provider-cli-acp";
+import { acpArguments, acpSafety, acpSecretPath, classifyAcpPermission, commandNamesCredential, insideProject, namesCredential, realPathOf, trackToolCall, type TrackedCall } from "../src/host/provider-cli-acp";
 import { cliExecEnvironment, runProviderCli, type CliApproval, type ExecEvent, type ExecRun } from "../src/host/provider-cli-exec";
 import { desktopNativeCopy } from "../../../locales/desktopNative";
-import { acpOwnRules, cliRunsOwnRules, cliPermissionPlan, liveAcpProviders, liveCliFile, liveCliNames, liveCliProviderForModel, liveCliProviders, liveCliRunnable, providerConfigFolders,
+import { acpOwnRules, CLI_READ_ONLY_REFUSAL, cliReadOnlyRefused, cliRunsOwnRules, cliPermissionPlan, liveAcpProviders, liveCliFile, liveCliNames, liveCliProviderForModel, liveCliProviders, liveCliRunnable, providerConfigFolders,
   type LiveAcpProvider } from "../src/provider-cli-exec-contract";
 
 const fakeAgent = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-acp-agent.mjs");
@@ -576,10 +576,12 @@ test("Every CLI that starts in a mode that approves on its own is put in one tha
       xai: { read_only: none, ask: none },
       moonshot: { read_only: { modes: ["plan"], configs: [] }, ask: { modes: ["default"], configs: [] } },
       mistral: { read_only: { modes: ["ask"], configs: [] }, ask: { modes: ["ask"], configs: [] } },
-      minimax: { read_only: permission, ask: permission },
+      minimax: { read_only: { modes: ["plan"], configs: permission.configs }, ask: permission },
       google: { read_only: { modes: ["default"], configs: [] }, ask: { modes: ["default"], configs: [] } },
     };
     for (const provider of liveAcpProviders) for (const mode of ["read_only", "ask"] as const) {
+      // Antigravity edits without asking and has no read-only mode: a Read only task on it is refused before the process starts.
+      if (cliReadOnlyRefused(provider, mode)) continue;
       const record = join(directory, "..", `acp-record-${provider}-${mode}-${Date.now()}.json`);
       const result = await runProviderCli(acpRun(directory, { scenario: "simple", record, session: unsafeSession[provider] }, { provider, mode, approve: async () => false }));
       const seen = await seenIn(record);
@@ -618,7 +620,7 @@ test("A mode that cannot be confirmed as one that asks ends the run before any t
     await fails({ modes: { current: "accept-edits", available: ["accept-edits", "auto-approve"] } }, "mistral", /cannot switch to "ask"/);
     await fails({ ...unsafeSession.mistral, setMode: "error" }, "mistral", /refused to switch/);
     // A set_mode success with an empty answer is the switch, as ACP defines it (the real Vibe, Kimi and Antigravity answer {}).
-    for (const [session, provider, mode, target] of [[unsafeSession.mistral, "mistral", "ask", "ask"], [unsafeSession.google, "google", "read_only", "default"]] as const) {
+    for (const [session, provider, mode, target] of [[unsafeSession.mistral, "mistral", "ask", "ask"], [unsafeSession.google, "google", "ask", "default"]] as const) {
       const quiet = await attempt({ ...session, setMode: "silent" }, provider, mode);
       assert.equal(quiet.result.status, "completed", provider);
       assert.deepEqual(quiet.seen.modeSets, [target], provider);
@@ -737,11 +739,12 @@ test("Each ACP provider runs through the same adapter", async () => {
   await withProject(async (directory) => {
     for (const provider of liveAcpProviders as readonly LiveAcpProvider[]) {
       const record = join(directory, "..", `acp-record-${provider}-${Date.now()}.json`);
-      const result = await runProviderCli(acpRun(directory, { scenario: "script", record }, { provider }));
+      const mode = cliReadOnlyRefused(provider, "read_only") ? "ask" : "read_only";
+      const result = await runProviderCli(acpRun(directory, { scenario: "script", record }, { provider, mode, approve: async () => false }));
       const seen = await seenIn(record);
       await rm(record, { force: true });
       assert.equal(result.status, "completed", provider);
-      assert.deepEqual(seen.args, acpArguments(provider, "read_only"), provider);
+      assert.deepEqual(seen.args, acpArguments(provider, mode), provider);
     }
   });
 });
@@ -818,4 +821,112 @@ test("The note about a CLI's own rules is for the CLIs seen to read, edit or run
   const body = runner.slice(start, runner.indexOf("async function approveNativePatch"));
   assert.equal(body.match(/cliOwnRules/g)?.length, 1);
   assert.match(body, /if \(cliRunsOwnRules\(command\.provider\)\) leading\.push\(desktopCodeNotice\("cliOwnRules"\)\);/);
+});
+
+test("A Read only task on Antigravity is refused before it starts, with the reason in every language; the other CLIs are not", async () => {
+  assert.equal(cliReadOnlyRefused("google", "read_only"), true);
+  for (const mode of ["ask", "auto_review", "allow_all"] as const) assert.equal(cliReadOnlyRefused("google", mode), false, mode);
+  // MiniMax Code edits without asking too, but has a plan mode to run in; the others hold Read only in a mode of their own.
+  for (const provider of ["qwen", "xai", "moonshot", "mistral", "minimax", "openai", "anthropic", "zai"] as const) assert.equal(cliReadOnlyRefused(provider, "read_only"), false, provider);
+  assert.equal(CLI_READ_ONLY_REFUSAL, "Antigravity cannot run a Read only task: it edits and reads without asking. Use Ask, or another CLI.");
+  assert.equal(desktopNativeCopy.en.cliNoReadOnly, CLI_READ_ONLY_REFUSAL);
+  for (const language of Object.keys(desktopNativeCopy) as Array<keyof typeof desktopNativeCopy>) {
+    assert.ok(desktopNativeCopy[language].cliNoReadOnly.includes("Antigravity"), language);
+    if (language !== "en") assert.notEqual(desktopNativeCopy[language].cliNoReadOnly, CLI_READ_ONLY_REFUSAL, language);
+  }
+  await withProject(async (directory) => {
+    const record = join(directory, "..", `acp-record-refused-${Date.now()}.json`);
+    const refused = await runProviderCli(acpRun(directory, { scenario: "script", record, session: safeSession.google }, { provider: "google", mode: "read_only" }));
+    assert.equal(refused.status, "failed");
+    assert.equal(refused.error, CLI_READ_ONLY_REFUSAL);
+    assert.equal(refused.exitCode, null);
+    await assert.rejects(readFile(record, "utf8"), { code: "ENOENT" }, "the process was never started");
+    // MiniMax Code in Read only is held to its plan mode.
+    const plan = await runProviderCli(acpRun(directory, { scenario: "simple", record, session: { ...safeSession.minimax, modes: modesOf("minimax", "default") } }, { provider: "minimax", mode: "read_only" }));
+    assert.equal(plan.status, "completed", plan.error);
+    assert.deepEqual((await seenIn(record)).modeSets, ["plan"]);
+    await rm(record, { force: true });
+  });
+  // The task shows the reason as a note of its own, and no second "could not start" line.
+  const runner = await readFile(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "host", "runner-process.ts"), "utf8");
+  const body = runner.slice(runner.indexOf("async function executeProviderCli"), runner.indexOf("async function approveNativePatch"));
+  assert.match(body, /if \(cliReadOnlyRefused\(command\.provider, command\.permission\)\) \{/);
+  assert.match(body, /desktopCodeNotice\("cliNoReadOnly"\)/);
+  assert.match(body, /!refusedReadOnly &&/);
+});
+
+test("A command that names a link or a folder leading to a credential store is refused, in every mode", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tomverse-acp-cmd-"));
+  try {
+    const cwd = join(root, "project");
+    const home = join(root, "home");
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await mkdir(join(home, ".qwen"), { recursive: true });
+    await writeFile(join(home, ".env"), "SECRET=1");
+    await writeFile(join(home, ".qwen", "settings.json"), "{}");
+    await writeFile(join(cwd, "notes.txt"), "n");
+    const { symlink } = await import("node:fs/promises");
+    const made: string[] = [];
+    try { await symlink(join(home, ".env"), join(cwd, "link"), "file"); made.push("file"); } catch { /* not allowed here */ }
+    try { await symlink(join(home, ".qwen"), join(cwd, "cfg"), process.platform === "win32" ? "junction" : "dir"); made.push("folder"); } catch { /* not allowed here */ }
+    if (made.length === 0) { t.skip("This system does not allow links."); return; }
+    const commands = [...(made.includes("file") ? ["cat link", "head -n 1 ./link", "cp link /tmp/x"] : []), ...(made.includes("folder") ? ["cat cfg/settings.json", "ls -la cfg", "grep -r key cfg/"] : [])];
+    for (const command of commands) {
+      for (const mode of ["ask", "auto_review", "allow_all"] as const) {
+        const decision = classifyAcpPermission(request({ kind: "execute", title: "Run", rawInput: { command } }), { cwd, plan: cliPermissionPlan("qwen", mode) });
+        assert.deepEqual([decision.verdict, decision.approval.refused], ["refuse", true], `${mode}: ${command}`);
+      }
+      assert.equal(classifyAcpPermission(request({ kind: "execute", title: "Run", rawInput: { command } }), { cwd, plan: cliPermissionPlan("qwen", "read_only") }).verdict, "deny", command);
+      assert.ok(commandNamesCredential(command, cwd), command);
+    }
+    // Words that lead nowhere, or to ordinary files, are judged by their names alone.
+    for (const command of ["cat notes.txt", "ls docs", "echo hello world", "cat docs/not/yet.md", "git status --short"]) {
+      assert.equal(commandNamesCredential(command, cwd), false, command);
+      assert.equal(classifyAcpPermission(request({ kind: "execute", title: "Run", rawInput: { command } }), { cwd, plan: cliPermissionPlan("qwen", "ask") }).verdict, "ask", command);
+    }
+  } finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+});
+
+test("A request that holds more than is looked at in part is refused, not judged on its first part", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "tomverse-acp-limits-"));
+  try {
+    const places = (count: number) => Array.from({ length: count }, (_, index) => ({ path: join(cwd, `file-${index}.ts`) }));
+    const diffs = (count: number) => Array.from({ length: count }, (_, index) => ({ type: "diff", path: join(cwd, `file-${index}.ts`), oldText: "a", newText: "b" }));
+    const decide = (toolCall: object, mode: "read_only" | "ask" | "allow_all", tracked?: TrackedCall) => classifyAcpPermission(request({ kind: "edit", title: "Edit", ...toolCall }), { cwd, plan: cliPermissionPlan("moonshot", mode), tracked });
+    const tooMany: Array<[string, object]> = [
+      ["65 locations", { locations: places(65) }],
+      ["65 diffs", { content: diffs(65) }],
+      ["65 paths in a list", { rawInput: { paths: places(65).map(({ path }) => path) } }],
+      ["65 entries of any kind", { rawInput: { items: Array.from({ length: 65 }, () => 1), path: join(cwd, "a.ts") } }],
+      ["a path nested too deep", { rawInput: { a: { b: { c: { d: { path: "/home/p/.qwen/x" } } } } } }],
+      ["a path longer than 4096", { locations: [{ path: join(cwd, "x".repeat(4_200)) }] }],
+      ["an oversized rawInput text", { rawInput: JSON.stringify({ path: join(cwd, "a.ts"), content: "x".repeat(70_000) }) + " ".repeat(10) }],
+      ["an oversized rawInput", { rawInput: { path: join(cwd, "a.ts"), content: "x".repeat(70_000) } }],
+    ];
+    for (const [name, toolCall] of tooMany) {
+      for (const mode of ["ask", "allow_all"] as const) {
+        const decision = decide(toolCall, mode);
+        assert.deepEqual([decision.verdict, decision.approval.refused], ["refuse", true], `${name} ${mode}`);
+      }
+      assert.equal(decide(toolCall, "read_only").verdict, "deny", name);
+    }
+    // At the limit, the request is looked at whole.
+    assert.equal(decide({ locations: places(64) }, "ask").verdict, "ask");
+    assert.equal(decide({ locations: places(64) }, "allow_all").verdict, "allow");
+    // A command with too many words is refused too, and so is one the CLI streamed too much of.
+    const words = Array.from({ length: 300 }, (_, index) => `w${index}`).join(" ");
+    assert.equal(decide({ kind: "execute", rawInput: { command: `echo ${words}` } }, "ask").verdict, "refuse");
+    assert.equal(decide({ kind: "execute", rawInput: { command: "echo hi" } }, "ask").verdict, "ask");
+    const calls = new Map<string, TrackedCall>();
+    trackToolCall(calls, "big", { title: "Write", kind: "edit", content: diffs(65) });
+    assert.equal(calls.get("big")?.limited, true);
+    assert.equal(classifyAcpPermission({ sessionId: "s", options, toolCall: { toolCallId: "big" } }, { cwd, plan: cliPermissionPlan("moonshot", "allow_all"), tracked: calls.get("big") }).verdict, "refuse");
+    trackToolCall(calls, "text", { title: "Write", kind: "edit" });
+    trackToolCall(calls, "text", chunk("x".repeat(40_000)));
+    trackToolCall(calls, "text", chunk("y".repeat(40_000)));
+    assert.equal(calls.get("text")?.limited, true);
+    assert.equal(classifyAcpPermission({ sessionId: "s", options, toolCall: { toolCallId: "text" } }, { cwd, plan: cliPermissionPlan("moonshot", "ask"), tracked: calls.get("text") }).verdict, "refuse");
+    trackToolCall(calls, "manyLocations", { title: "Edit", kind: "edit", locations: places(65) });
+    assert.equal(calls.get("manyLocations")?.limited, true);
+  } finally { await rm(cwd, { recursive: true, force: true }); }
 });

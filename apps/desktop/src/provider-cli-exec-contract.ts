@@ -56,6 +56,20 @@ export const acpOwnRules: Record<LiveAcpProvider, AcpOwnRules> = {
   moonshot: { readsWithoutAsking: false, editsWithoutAsking: false, safeCommandsWithoutAsking: false },
   xai: { readsWithoutAsking: false, editsWithoutAsking: false, safeCommandsWithoutAsking: false },
 };
+/**
+ * The mode that holds each CLI to reading and refusing in Read only, or null when it has none. Antigravity has none: in "default" it
+ * reads and edits without asking, and "plan" cannot read (measured), so a Read only task on it is not started. MiniMax Code
+ * edits without asking in "default" but has "plan", so it runs in that mode (whether plan blocks edits is the CLI's own rule,
+ * not something Desktop can check). Owner decision 2026-11-28 ("tell, then use"): in Ask, Auto review and Allow all, Antigravity
+ * (and MiniMax Code) still edit project files without a card; that is shown to the person as the `cliOwnRules` note, not blocked.
+ */
+export const acpReadOnlyHold: Record<LiveAcpProvider, string | null> = { qwen: "dontAsk", xai: "dontAsk", moonshot: "plan", mistral: "ask", minimax: "plan", google: null };
+/** Whether a Read only task on this CLI is refused before it starts: it edits without asking and has no mode that stops that. */
+export const cliReadOnlyRefused = (provider: LiveCliProvider, mode: PermissionModeId) =>
+  mode === "read_only" && isLiveAcpProvider(provider) && acpOwnRules[provider].editsWithoutAsking && acpReadOnlyHold[provider] === null;
+/** What the refused task says (the locale `cliNoReadOnly` has this text in English). */
+export const CLI_READ_ONLY_REFUSAL = "Antigravity cannot run a Read only task: it edits and reads without asking. Use Ask, or another CLI.";
+
 /** Whether a task on this route runs something under the CLI's own rules that Desktop cannot ask about. */
 export const cliRunsOwnRules = (provider: LiveCliProvider) => isLiveAcpProvider(provider) && Object.values(acpOwnRules[provider]).some(Boolean);
 

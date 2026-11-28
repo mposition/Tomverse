@@ -33,7 +33,7 @@ import { createReviewWorker } from "./review-worker";
 import { createGitDraftWorker } from "./git-draft-worker";
 import { runProviderCli } from "./provider-cli-exec";
 import { approvalRequestFor, createTranscript, holdsText, withoutKey } from "./provider-cli-transcript";
-import { cliPermissionPlan, cliRunsOwnRules, liveCliExecution } from "../provider-cli-exec-contract";
+import { cliPermissionPlan, cliReadOnlyRefused, cliRunsOwnRules, liveCliExecution } from "../provider-cli-exec-contract";
 import { startCodeSandbox } from "./code-sandbox";
 import { composeLaunch, type SandboxRuntime } from "../../../tomverse-cli/src/sandbox.js";
 import type { RemoteWorkspace } from "../../../tomverse-cli/src/remote-workspace.js";
@@ -589,6 +589,7 @@ async function executeProviderCli(command: Extract<WorkerCommand, { type: "start
   let unlockProject: (() => void) | undefined;
   let lock: string | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let refusedReadOnly = false;
   const transcript = createTranscript(clean);
   const leading: Task["entries"] = [...task.entries];
   const refresh = () => {
@@ -606,6 +607,14 @@ async function executeProviderCli(command: Extract<WorkerCommand, { type: "start
     unlockProject = lockProject(command.project);
     lock = claimNativeHistory(command.history);
     assertProjectRoot(command.project);
+    // A CLI that edits without asking and has no mode that stops it: a Read only task is not started, and the task says why.
+    if (cliReadOnlyRefused(command.provider, command.permission)) {
+      refusedReadOnly = true;
+      leading.push(desktopCodeNotice("cliNoReadOnly"));
+      task.status = "failed";
+      task.entries = [...leading];
+      return;
+    }
     let text = command.prompt;
     if (task.references?.length) {
       const workspace = new Workspace(command.project.path, protectedRoots(command.protectedRoot));
@@ -665,7 +674,7 @@ async function executeProviderCli(command: Extract<WorkerCommand, { type: "start
     try { if (lock) unlinkSync(lock); } catch { /* An unavailable lock cannot authorize another run. */ }
     unlockProject?.();
     if (task.status === "unknown") task.entries.push(desktopCodeNotice("runUnknown"));
-    if (task.status === "failed" && !task.entries.some((entry) => entry.role === "event" && entry.notice === "workspaceBusy")) {
+    if (task.status === "failed" && !refusedReadOnly && !task.entries.some((entry) => entry.role === "event" && entry.notice === "workspaceBusy")) {
       task.entries.push(desktopCodeNotice("runtimeFailed"));
     }
     active = undefined;

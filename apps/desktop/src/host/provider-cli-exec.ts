@@ -6,7 +6,7 @@ import { StringDecoder } from "node:string_decoder";
 import { killTree, killTreeSync } from "../../../tomverse-cli/src/commands.js";
 import { isSecretPath } from "../../../tomverse-cli/src/workspace.js";
 import type { PermissionModeId } from "../permission-contract";
-import { cliPermissionPlan, isLiveAcpProvider, LIVE_CLI_LIMITS, ZAI_ANTHROPIC_BASE_URL, type CliPermissionPlan, type LiveCliProvider } from "../provider-cli-exec-contract";
+import { CLI_READ_ONLY_REFUSAL, cliPermissionPlan, cliReadOnlyRefused, isLiveAcpProvider, LIVE_CLI_LIMITS, ZAI_ANTHROPIC_BASE_URL, type CliPermissionPlan, type LiveCliProvider } from "../provider-cli-exec-contract";
 import { codeProcessLaunch } from "./code-process-launch";
 import { ACP_EXIT_GRACE_MS, acpArguments, createAcpClient } from "./provider-cli-acp";
 
@@ -382,6 +382,8 @@ export async function runProviderCli(run: ExecRun): Promise<ExecResult> {
     ({ status, exitCode, plan, skipped, stderr: stderrTail, ...extra });
   let skipped = 0;
   let stderrTail = "";
+  // A CLI that edits without asking and has no mode that stops it cannot honour Read only: the task is not started.
+  if (cliReadOnlyRefused(run.provider, run.mode)) return result("failed", null, { error: CLI_READ_ONLY_REFUSAL });
   // Codex changes files without asking in the write modes, so the credential files it may read are made read-only first.
   let readOnlyPaths: string[] = [];
   try { if (run.provider === "openai" && plan.grants !== "read_only") readOnlyPaths = await credentialPathsIn(run.cwd); } catch {

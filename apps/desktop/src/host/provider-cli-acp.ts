@@ -83,10 +83,12 @@ export const acpSafety: Record<LiveAcpProvider, Safety> = {
   xai: { known: [], readOnly: [], interactive: [] },
   moonshot: { known: ["default", "plan", "auto", "yolo"], readOnly: ["plan", "default"], interactive: ["default"] },
   mistral: { known: ["ask", "accept-edits", "smart-approve", "auto-approve"], readOnly: ["ask"], interactive: ["ask"] },
-  minimax: { known: ["default", "plan"], readOnly: ["plan", "default"], interactive: ["default"],
+  // MiniMax Code edits without asking in "default": Read only is held to its plan mode only (whether plan blocks edits is the CLI's own rule).
+  minimax: { known: ["default", "plan"], readOnly: ["plan"], interactive: ["default"],
     config: [{ id: "permissionMode", known: ["default", "auto", "bypassPermissions"], accepted: ["default"] }] },
   // Antigravity's plan mode cannot read files at all (checked 2026-11-28), so Read only runs in default, where every write and
   // command comes as a permission request that Read only refuses.
+  // Antigravity edits and reads without asking in "default", so a Read only task on it is refused before it starts (cliReadOnlyRefused); this list is for the write modes.
   google: { known: ["default", "accept-edits", "plan"], readOnly: ["default", "plan"], interactive: ["default"] },
 };
 
@@ -110,7 +112,10 @@ export function acpSecretPath(path: string): boolean {
 }
 
 const commandWords = (command: string) => command.split(/[\s"'=,;<>|&()`]+/).filter(Boolean);
-const commandNamesCredential = (command: string) => commandNamesSecretPath(command, { everyWord: true }) || commandWords(command).some(acpSecretPath);
+/** More words than this in one command, or more places in one request, are not looked at in part: the request is refused. */
+const MAX_WORDS = 256;
+const MAX_PLACES = 64;
+const MAX_INPUT = 64 * 1024;
 
 const windows = process.platform === "win32";
 const fold = (value: string) => (windows ? value.toLowerCase() : value);
@@ -158,14 +163,28 @@ export function insideProject(path: string, cwd: string): boolean {
  * itself lives under a folder such as `.claude` is not refused as a whole. A path that cannot be resolved counts as one.
  */
 export function namesCredential(path: string, cwd: string): boolean {
+  return judgeCredential(path, cwd, true);
+}
+
+function judgeCredential(path: string, cwd: string, whenUnresolved: boolean): boolean {
   const root = projectRoot(cwd);
   const real = realPathOf(path, cwd);
-  if (real === null) return true;
+  if (real === null) return whenUnresolved || acpSecretPath(path);
   const judged = (value: string) => {
     for (const base of [root, cwd]) if (base && within(value, base)) return acpSecretPath(relative(base, value) || ".");
     return acpSecretPath(value);
   };
   return judged(resolve(cwd, path)) || judged(real);
+}
+
+/**
+ * Whether a shell command names a credential store. Every word is judged by its name, and then as a path from the project: a word
+ * that leads somewhere (a link in the project to a `.env` or to `~/.qwen/...`, a folder that is one) is judged by where it really
+ * leads. The command is never run to find out; a word that is not a path, or leads nowhere, is judged by its name alone.
+ */
+export function commandNamesCredential(command: string, cwd: string): boolean {
+  if (commandNamesSecretPath(command, { everyWord: true })) return true;
+  return commandWords(command).some((word) => acpSecretPath(word) || (word.length <= 4_096 && judgeCredential(word, cwd, false)));
 }
 
 // ---------------------------------------------------------------- permissions
@@ -204,20 +223,25 @@ function commandOf(source: Json | undefined): string | undefined {
   return Array.isArray(value) && value.length > 0 && value.every((word) => typeof word === "string") ? value.join(" ") : undefined;
 }
 
-function collectPaths(value: unknown, into: string[], depth = 0) {
-  if (depth > 3 || !isRecord(value)) return;
+/** Collects the places a request's arguments name. False when it could not look at all of them (too many, or nested too deep). */
+function collectPaths(value: unknown, into: string[], depth = 0): boolean {
+  if (!isRecord(value)) return true;
+  if (depth > 3) return false;
+  let complete = true;
   for (const [key, item] of Object.entries(value)) {
     const name = key.toLowerCase();
     if (pathKeys.has(name) && typeof item === "string") {
       into.push(item);
     } else if (Array.isArray(item)) {
-      for (const entry of item.slice(0, 64)) {
-        if (typeof entry === "string") { if (listKeys.has(name)) into.push(entry); } else collectPaths(entry, into, depth + 1);
+      if (item.length > MAX_PLACES) complete = false;
+      for (const entry of item.slice(0, MAX_PLACES)) {
+        if (typeof entry === "string") { if (listKeys.has(name)) into.push(entry); } else complete = collectPaths(entry, into, depth + 1) && complete;
       }
     } else {
-      collectPaths(item, into, depth + 1);
+      complete = collectPaths(item, into, depth + 1) && complete;
     }
   }
+  return complete && into.length <= MAX_PLACES;
 }
 
 type Diff = { path: string; oldText?: string | null; newText: string };
@@ -227,8 +251,8 @@ type Diff = { path: string; oldText?: string | null; newText: string };
  * earlier `tool_call`); Kimi streams the call's arguments as JSON text in `tool_call_update` content before it asks, and only
  * reports `rawInput` and `locations` afterwards; MiniMax Code reports `rawInput` in an update after the call.
  */
-export type TrackedCall = { kind?: string; title?: string; rawInput?: unknown; diffs: unknown[]; locations: unknown[]; streamed: string; lastChunk: string };
-const STREAM_LIMIT = 64 * 1024;
+export type TrackedCall = { kind?: string; title?: string; rawInput?: unknown; diffs: unknown[]; locations: unknown[]; streamed: string; lastChunk: string; limited?: boolean };
+const STREAM_LIMIT = MAX_INPUT;
 
 /** Adds what a `tool_call` or `tool_call_update` says to what is known of that call. */
 export function trackToolCall(calls: Map<string, TrackedCall>, id: string, update: Json) {
@@ -241,14 +265,17 @@ export function trackToolCall(calls: Map<string, TrackedCall>, id: string, updat
   known.kind = text(update.kind, 40) ?? known.kind;
   known.title = text(update.title, 300) ?? known.title;
   if (update.rawInput !== undefined && update.rawInput !== null) known.rawInput = update.rawInput;
-  if (Array.isArray(update.locations) && update.locations.length > 0) known.locations = update.locations.slice(0, 64);
+  // Too much to look at is remembered, and a request about the call is refused.
+  if (Array.isArray(update.locations) && update.locations.length > MAX_PLACES) known.limited = true;
+  if (Array.isArray(update.content) && update.content.length > MAX_PLACES) known.limited = true;
+  if (Array.isArray(update.locations) && update.locations.length > 0) known.locations = update.locations.slice(0, MAX_PLACES);
   if (Array.isArray(update.content)) {
-    const diffs = update.content.slice(0, 64).filter((entry) => isRecord(entry) && entry.type === "diff");
+    const diffs = update.content.slice(0, MAX_PLACES).filter((entry) => isRecord(entry) && entry.type === "diff");
     if (diffs.length > 0) known.diffs = diffs;
-    for (const entry of update.content.slice(0, 64)) {
+    for (const entry of update.content.slice(0, MAX_PLACES)) {
       if (!isRecord(entry) || entry.type !== "content" || !isRecord(entry.content) || typeof entry.content.text !== "string") continue;
       known.lastChunk = entry.content.text.slice(0, STREAM_LIMIT);
-      if (known.streamed.length + known.lastChunk.length <= STREAM_LIMIT) known.streamed += known.lastChunk;
+      if (known.streamed.length + known.lastChunk.length <= STREAM_LIMIT) known.streamed += known.lastChunk; else known.limited = true;
     }
   }
 }
@@ -265,26 +292,36 @@ function streamedInput(tracked: TrackedCall | undefined): Json | undefined {
   return undefined;
 }
 
-type Facts = { kind?: string; title?: string; raw?: Json; paths: string[]; diffs: Diff[]; command?: string; named: boolean };
+type Facts = { kind?: string; title?: string; raw?: Json; paths: string[]; diffs: Diff[]; command?: string; named: boolean; limited: boolean };
 
-/** What one description of a tool call (the request's own, or the tracked one) says. */
+/** What one description of a tool call (the request's own, or the tracked one) says. `limited`: it holds more than is looked at in part. */
 function factsOf(call: Json, tracked?: TrackedCall): Facts {
   const paths: string[] = [];
   const diffs: Diff[] = [];
+  let limited = tracked?.limited === true;
+  const oversized = (value: unknown) => typeof value === "string" && value.length > MAX_INPUT;
+  if (oversized(call.rawInput) || oversized(call.args)) limited = true;
   const raw = parsedInput(call.rawInput) ?? (tracked ? streamedInput(tracked) : undefined) ?? parsedInput(call.args);
-  for (const location of Array.isArray(call.locations) ? call.locations.slice(0, 64) : []) {
-    const path = isRecord(location) ? text(location.path, 4_096) : undefined;
-    if (path) paths.push(path);
+  if (raw && JSON.stringify(raw).length > MAX_INPUT) limited = true;
+  const locations = Array.isArray(call.locations) ? call.locations : [];
+  const content = Array.isArray(call.content) ? call.content : [];
+  if (locations.length > MAX_PLACES || content.length > MAX_PLACES) limited = true;
+  for (const location of locations.slice(0, MAX_PLACES)) {
+    const path = isRecord(location) ? location.path : undefined;
+    if (typeof path === "string") { if (path.length > 4_096) limited = true; paths.push(path); }
   }
-  for (const entry of Array.isArray(call.content) ? call.content.slice(0, 64) : []) {
+  for (const entry of content.slice(0, MAX_PLACES)) {
     if (!isRecord(entry) || entry.type !== "diff" || typeof entry.path !== "string") continue;
+    if (entry.path.length > 4_096) limited = true;
     paths.push(entry.path);
     diffs.push({ path: entry.path, oldText: typeof entry.oldText === "string" ? entry.oldText : null, newText: typeof entry.newText === "string" ? entry.newText : "" });
   }
-  collectPaths(raw, paths);
+  if (!collectPaths(raw, paths) || paths.length > MAX_PLACES) limited = true;
   const kind = text(call.kind, 40);
   const title = text(call.title, 300);
-  return { kind, title, raw, paths, diffs, command: commandOf(raw), named: kind !== undefined || title !== undefined || raw !== undefined || paths.length > 0 };
+  const command = commandOf(raw);
+  if (command !== undefined && commandWords(command).length > MAX_WORDS) limited = true;
+  return { kind, title, raw, paths, diffs, command, named: kind !== undefined || title !== undefined || raw !== undefined || paths.length > 0, limited };
 }
 
 const unique = (values: readonly string[]) => [...new Set(values)];
@@ -337,6 +374,8 @@ export function classifyAcpPermission(params: unknown, context: { cwd: string; p
   const commands = [own.command, earlier?.command].filter((value): value is string => value !== undefined);
   const commandMissing = kind === "execute" && command === undefined;
   const blank = !own.named && !earlier?.named;
+  // More than is looked at in part is not judged in part: it is refused.
+  const limited = own.limited || earlier?.limited === true;
 
   // The card, from the arguments the CLI will run with; the title is a description and is never taken for them.
   const known = new Set([...commandNames, ...afterNames, ...beforeNames, ...pathNames]);
@@ -361,13 +400,13 @@ export function classifyAcpPermission(params: unknown, context: { cwd: string; p
     approval = { id, tool: title ?? kind, input: { kind, ...(title ? { title } : {}), ...(paths.length ? { paths } : {}), ...(raw ? { rawInput: raw } : {}) } };
   }
 
-  const secret = paths.some((path) => namesCredential(path, context.cwd)) || commands.some(commandNamesCredential);
+  const secret = paths.some((path) => namesCredential(path, context.cwd)) || commands.some((text) => commandNamesCredential(text, context.cwd));
   const inside = paths.every((path) => insideProject(path, context.cwd));
   const result = (verdict: AcpPermission["verdict"], marked = approval): AcpPermission => ({ verdict, approval: marked, allowOption, rejectOption });
   if (context.plan.approvals === "none") {
-    return result(!blank && !secret && !commandMissing && inside && readKinds.has(kind) && paths.length > 0 && !command && allowOption ? "allow" : "deny");
+    return result(!blank && !limited && !secret && !commandMissing && inside && readKinds.has(kind) && paths.length > 0 && !command && allowOption ? "allow" : "deny");
   }
-  if (secret || commandMissing || blank) return result("refuse", { ...approval, refused: true });
+  if (secret || commandMissing || blank || limited) return result("refuse", { ...approval, refused: true });
   if (context.plan.grants === "allow_all" && kind === "edit" && paths.length > 0 && inside && !command && allowOption) return result("allow");
   return result("ask");
 }
@@ -413,7 +452,7 @@ export function createAcpClient(options: AcpClientOptions) {
   let messages = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   /** What the CLI last reported of its modes and options, from the session, its answers and its notifications. */
-  const observed: { mode?: string; modeOption?: string; config: Map<string, string> } = { config: new Map() };
+  const observed: { mode?: string; modeOption?: string; config: Map<string, string>; overflow?: boolean } = { config: new Map() };
   let enforced = false;
   const rule = acpSafety[options.provider];
   const accepted = options.plan.grants === "read_only" ? rule.readOnly : rule.interactive;
@@ -454,14 +493,16 @@ export function createAcpClient(options: AcpClientOptions) {
     // The mode option of the session repeats the mode: a new mode makes the old option stale until the CLI reports it again.
     if (mode !== undefined && mode !== observed.mode) observed.modeOption = undefined;
     if (mode !== undefined) observed.mode = mode;
-    for (const option of Array.isArray(source.configOptions) ? source.configOptions.slice(0, 64) : []) {
+    // More options than are read means the mode may be among those not read: it is not confirmed.
+    if (Array.isArray(source.configOptions) && source.configOptions.length > MAX_PLACES) observed.overflow = true;
+    for (const option of Array.isArray(source.configOptions) ? source.configOptions.slice(0, MAX_PLACES) : []) {
       if (!isRecord(option) || typeof option.id !== "string" || typeof option.currentValue !== "string") continue;
       if (option.id === "mode") observed.modeOption = option.currentValue;
       else observed.config.set(option.id.slice(0, 80), option.currentValue.slice(0, 80));
     }
     for (const watcher of [...watchers]) watcher();
   }
-  const modeOk = () => (observed.mode === undefined ? rule.known.length === 0 : accepted.includes(observed.mode)) &&
+  const modeOk = () => !observed.overflow && (observed.mode === undefined ? rule.known.length === 0 : accepted.includes(observed.mode)) &&
     (observed.modeOption === undefined || accepted.includes(observed.modeOption));
   const configOk = () => (rule.config ?? []).every(({ id, accepted: values }) => { const value = observed.config.get(id); return value !== undefined && values.includes(value); });
   /** Waits until the check holds on what the CLI reports, or the time is up. */
@@ -481,6 +522,7 @@ export function createAcpClient(options: AcpClientOptions) {
     observed.mode = undefined;
     observed.modeOption = undefined;
     observed.config.clear();
+    observed.overflow = false;
     observe(session);
     const modes = isRecord(session.modes) ? session.modes : undefined;
     const available = Array.isArray(modes?.availableModes) ? modes.availableModes.flatMap((mode) => (isRecord(mode) && typeof mode.id === "string" ? [mode.id] : [])) : [];
@@ -488,6 +530,7 @@ export function createAcpClient(options: AcpClientOptions) {
     for (const value of [observed.mode, observed.modeOption] as Array<string | undefined>) {
       if (value !== undefined && !rule.known.includes(value)) throw fail(`The CLI is in permission mode "${value.slice(0, 40)}", which is not one Desktop knows.`);
     }
+    if (observed.overflow) throw fail("The CLI reported more options than Desktop reads.");
     if (rule.known.length > 0 && observed.mode === undefined) throw fail("The CLI did not report its permission mode.");
     if (!modeOk()) {
       const target = accepted[0]!;
