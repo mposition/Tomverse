@@ -70,16 +70,20 @@ const READ_ONLY_PATHS_CHARACTERS = 24_000;
 
 /**
  * The files and folders under `root` that can hold credentials (isSecretPath), as absolute paths with forward slashes; a
- * folder is given as `<folder>/**`. Nothing under a protected folder or `node_modules` is listed, and no link is followed.
+ * folder is given as `<folder>/**`. Nothing under a protected folder is listed, and no link is followed. Folders are read
+ * several at a time, so a large project is listed in seconds.
+ *
+ * `node_modules` is not searched, deliberately: it holds installed packages, not the person's credentials, and `npm install`
+ * deletes and rewrites it. Packages ship files with these names (an `.npmrc`, test keys such as `*.pem`); made read-only,
+ * they would stop an install on macOS and Linux, where a read-only file cannot be removed or replaced.
  */
 export async function credentialPathsIn(root: string): Promise<string[]> {
   const found: string[] = [];
   const base = root.replaceAll("\\", "/").replace(/\/+$/, "");
   const pending = [""];
-  while (pending.length) {
-    const relative = pending.pop()!;
+  const visit = async (relative: string) => {
     let entries: Dirent[];
-    try { entries = await readdir(relative ? `${base}/${relative}` : base, { withFileTypes: true }); } catch { continue; }
+    try { entries = await readdir(relative ? `${base}/${relative}` : base, { withFileTypes: true }); } catch { return; }
     for (const entry of entries) {
       const path = relative ? `${relative}/${entry.name}` : entry.name;
       if (entry.isDirectory()) {
@@ -87,7 +91,10 @@ export async function credentialPathsIn(root: string): Promise<string[]> {
         else if (entry.name.toLowerCase() !== "node_modules") pending.push(path);
       } else if (isSecretPath(entry.name)) found.push(`${base}/${path}`);
     }
-  }
+  };
+  const worker = async () => { for (let next = pending.pop(); next !== undefined; next = pending.pop()) await visit(next); };
+  // A worker that finds the list empty while others are still reading ends; the loop starts more while work remains.
+  for (let running: Promise<void>[] = []; pending.length; await Promise.all(running)) running = Array.from({ length: 32 }, worker);
   return found.sort();
 }
 
