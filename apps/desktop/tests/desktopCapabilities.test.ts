@@ -121,3 +121,14 @@ test("connecting Google or Microsoft is offered only for the providers the serve
   const unknown = await load();
   assert.deepEqual([unknown?.socialLink, unknown?.chatWrite], [[], true]);
 });
+
+test("Running a Code task with the person's own CLI is offered only where the server names it", async (t) => {
+  let body: Record<string, unknown> = { autoSelection: { offered: false } };
+  t.mock.method(globalThis, "fetch", async () => Response.json(body));
+  const load = () => readDesktopCapabilities("fixture-access", new AbortController().signal, "http://127.0.0.1");
+  assert.equal((await load())?.providerCliExec, false, "an older server names nothing");
+  body = { ...body, desktopProviderCliExec: false };
+  assert.equal((await load())?.providerCliExec, false);
+  body = { ...body, desktopProviderCliExec: true };
+  assert.equal((await load())?.providerCliExec, true);
+});
