@@ -115,14 +115,14 @@ test("Desktop read tokens reach shared routes while native Chat and parity are e
 });
 
 test("Desktop Code's session is verified at the edge on the engine's coding paths, and a key request is untouched", async () => {
-  const flags = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_CODE_SESSION_ENABLED"];
+  const flags = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_CODE_SESSION_ENABLED", "EXTERNAL_API_ROUTE_ONLY_ENABLED"];
   const originalFlags = flags.map((name) => process.env[name]);
   for (const name of flags) process.env[name] = "true";
   try {
     const desktop = { origin: DESKTOP_APP_ORIGIN, authorization: validBearer("desktop-code") };
     const key = { authorization: "Bearer tvk_abcdefgh_" + "A".repeat(43) };
     const calls = [["GET", "/api/code/v1/models"], ["GET", "/api/code/v1/usage"], ["GET", "/api/code/v1/requests/status"],
-      ["POST", "/api/code/v1/chat/completions"], ["POST", "/api/code/v1/web-search"]];
+      ["POST", "/api/code/v1/chat/completions"], ["POST", "/api/code/v1/web-search"], ["POST", "/api/code/v1/route"]];
     for (const [method, path] of calls) {
       const url = "https://tomverse.app" + path;
       const send = (headers) => (method === "GET" ? get(headers, url) : post(headers, url));

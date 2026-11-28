@@ -11,7 +11,7 @@ the address alone, on one key, one plan check (Pro or Max) and one ledger:
   browsers and apps: Aside, Brave Leo, Raycast, BrowserOS and other
   OpenAI-compatible apps. It always offers the chat registry's models.
 - **The coding API** -- `/api/code/v1/*` (`chat/completions`, `responses`,
-  `models`, `usage`, `requests/status`) and `/api/code/anthropic/v1/*`
+  `models`, `usage`, `requests/status`, and the route-only `route`, section 5.3) and `/api/code/anthropic/v1/*`
   (`messages`, `messages/count_tokens`, `models`) -- for Claude Code, Codex,
   Cursor, the tomverse CLI, VS Code (GitHub Copilot Chat's custom endpoint,
   a coding assistant) and JetBrains AI Assistant (OpenAI-compatible provider,
@@ -74,6 +74,7 @@ All default off. Server-side; hiding UI is never the gate.
 | `TOMVERSE_DESKTOP_CODE_SESSION_ENABLED` | Exactly `true` (with `TOMVERSE_DESKTOP_AUTH_ENABLED`) lets Desktop Code's agent engine use the signed-in Desktop session instead of an API key on its five coding API calls (section 11.2), and makes Desktop's capabilities say `desktopCodeSession`. Off: those calls take a key as before, and a Desktop session token is refused there. |
 | `TOMVERSE_CLI_GUIDE_ENABLED` | Exactly `true` shows the Tomverse CLI install and connect card in Settings > Developer and Settings > API keys (section 11). Off until the package is published, so the page never points at a package that is not on the registry. It turns nothing on in the API. |
 | `EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED` | Exactly `true` lets Smart Adaptive (section 5.1) ask Chat's router model which candidate answers. Off by default, because each routed request adds one router call, held against the provider operational budget rather than the user's credits. Off, `smart-adaptive` still works and every request goes to the default model (on a native protocol, that provider's default, section 10.6). |
+| `EXTERNAL_API_ROUTE_ONLY_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on `POST /api/code/v1/route`, the choice without a run (section 5.3), and lets a Desktop Code session call it. Off by default: 503 `feature_unavailable`, and a Desktop session is not admitted to the path at all. `EXTERNAL_API_ROUTE_ONLY_PER_MINUTE` (default 30) and `EXTERNAL_API_ROUTE_ONLY_PER_DAY` (default 3 000) set its own per-account request-rate bucket. |
 
 **Kill switch.** The Admin operational pause for AI chat
 (`feature.aiChatEnabled`) stops every new external dispatch at once (503
@@ -490,6 +491,64 @@ improved by its own optimizer, as Chat's router is.
     `CODING_TASK_EVAL_ISOLATED_RUNNER=true` (default off). Anywhere else, a
     coding cycle skips the evaluation and records
     `taskEvaluationStop: runner_not_isolated`.
+
+### 5.3 Route-only choice (`POST /api/code/v1/route`)
+
+Owner decision 2026-11-28 (chat). Desktop Code's provider-CLI mode is a hybrid:
+Smart Adaptive picks the model for each task, and the pick's provider decides
+where it runs -- on that provider's CLI when it is connected and trusted on the
+person's PC (their own subscription, no Tomverse credits), otherwise on the
+Tomverse API. This route is only the server half: it chooses, and runs nothing.
+Default off (`EXTERNAL_API_ROUTE_ONLY_ENABLED`, section 2). Code:
+`lib/externalApiRouteOnly.ts`, `lib/externalApiRouteOnlyCore.ts`.
+
+- **Request.** `{ messages: Chat Completions messages, localClis?: string[] }`,
+  strict. `messages` go through Chat Completions' own parser (its message
+  shapes and limits) and the route's own 2 MiB body limit. `localClis` lists the
+  providers whose CLI Desktop has connected and trusts on this PC, each at most
+  once, from `openai`, `anthropic`, `zhipu` (Z.ai), `qwen`, `xai`, `moonshot`,
+  `mistral`, `minimax`; any other value is a 400, never ignored. Missing or empty
+  means no CLI.
+- **Answer.** `{ model, provider, providerModel?, routedBy, execution }`: the
+  Tomverse model id, its provider, the provider's own model id when there is
+  one, `routedBy` as in 5.1 (`router`, `default`, `continued`), and
+  `execution` -- `cli` when `provider` is in `localClis`, `api` otherwise (the
+  CLI first).
+- **The same choice.** The pool is the models the key's or session's plan can
+  run on the coding API (the same list Smart Adaptive routes among), and the
+  pick is `routeSmartAdaptive`'s: the same candidates, coding guidance,
+  conversation only-moves-up rule and default-model fallback. The router call goes through the same gate
+  (`smartAdaptiveRouterAllowed`: router switch, AI chat pause, key cap, recent
+  refusal); a closed gate makes no router call and picks by the default rule.
+  With no model Smart Adaptive may default to, the answer is 404
+  `model_not_found`.
+- **Once per task.** The last message must be the person's (400
+  `invalid_request` otherwise): a tool round is never routed here, because the
+  CLI running the task keeps its model for the whole task and the server never
+  sees its tool calls. A pick that cannot take the request (its window, images
+  or features) is answered 400 `unsupported_request`, never recommended, since
+  nothing after this route refuses it as the completions route would. The
+  completions route's own request checks then run for the pick (images: inline
+  data URLs, type, size and count; tools; options), so a request it would
+  refuse is refused here with the same error. The choice
+  writes no conversation memory: that is written only when admission accepts a
+  request on a model.
+- **Nothing is run or charged.** No admission, no credit reservation, no
+  settlement, no receipt and no provider call for the task. The router call is
+  Smart Adaptive's own, held against the provider operational budget, never
+  the person's credits (owner decision 2026-11-28).
+- **Abuse bound.** A choice costs the person nothing, so it has its own request
+  rate bucket per account (`external-api-route-only`, default 30 a minute and
+  3 000 a day, whichever key or Desktop session asks), checked before the body
+  is read or the router is called. It does not share completions' bucket.
+- **Caller.** A Bearer key, or the Desktop Code session's token on the same
+  condition as the other enrolled calls (section 11.2) while this route's switch
+  is on. The Origin exemption is the exact path, on the Bearer-only condition
+  (`tests/externalApiBoundary.test.mjs`).
+- **Log.** One `external_api_route_only` line per choice (request id, caller
+  source, `routedBy`, model, provider, `execution`, the number of
+  `localClis`), plus Smart Adaptive's own `external_api_smart_adaptive_routed`
+  line with `protocol: route_only`. Never the request's text.
 
 ## 6. Data
 
