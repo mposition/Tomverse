@@ -102,6 +102,13 @@ export type ChatTurnSystemBlocksInput = {
    */
   appManagedSearchEnabled: boolean;
   turnAttachments: readonly TurnAttachmentDescriptor[];
+  /**
+   * Whether this turn carries `read_url` (`chatUrlReadOffered`). A turn that
+   * cannot search but can read a pasted link says so instead of declaring the
+   * web unreachable. Defaults to false, so a caller that does not know quotes
+   * the shorter block.
+   */
+  urlReadAvailable?: boolean;
   /** `feature.imageGenerationEnabled`, read from the cached snapshot. */
   imageGenerationFlagEnabled: boolean;
   /** `planAllowsImageGeneration(tier)` for this caller. */
@@ -233,7 +240,9 @@ export const buildChatTurnSystemBlocks = (
     appManagedSearchEnabled: input.appManagedSearchEnabled,
   });
   const webSearchCapabilityPrompt =
-    buildWebSearchCapabilitySystemPrompt(webSearchTurnState);
+    buildWebSearchCapabilitySystemPrompt(webSearchTurnState, {
+      urlReadAvailable: input.urlReadAvailable === true,
+    });
   const currentDatePrompt = buildChatCurrentDatePrompt(input.now);
 
   const systemMessages: { role: "system"; content: string }[] = [

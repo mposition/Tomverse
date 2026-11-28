@@ -53,7 +53,7 @@ mock.module(mod("lib/apiSecurity.ts"), {
 });
 
 const history = await import(mod("lib/chatHistoryReference.ts"));
-const { withChatReadTools } = await import(mod("lib/chatReadTools.ts"));
+const { withChatReadTools, chatUrlReadOffered } = await import(mod("lib/chatReadTools.ts"));
 const { ChatToolLoopError } = await import(mod("lib/chatToolLoop.ts"));
 const { messageText } = await import(mod("lib/chatReadTools.ts"));
 const { UNTRUSTED_TOOL_MARKERS } = await import(mod("lib/untrustedToolText.ts"));
@@ -330,4 +330,24 @@ test("a pasted link is found whether the user message is a string or a list of c
   assert.equal(messageText({ nope: true }), "");
   const offer = await withChatReadTools(context({ userMessages: [[{ type: "text", text: "summarise https://news.example.org/story/42" }]], env: { CHAT_URL_READING_ENABLED: "true" } }));
   assert.deepEqual(names(offer), ["read_url"]);
+});
+
+test("chatUrlReadOffered agrees with withChatReadTools on whether read_url is on the turn", async () => {
+  reset();
+  const cases = [
+    {},
+    { userMessages: [LINK] },
+    { userMessages: [LINK], nativeSearch: true },
+    { userMessages: [LINK], otherToolOwner: true },
+    { userMessages: [LINK], researchTurn: true },
+    { userMessages: [LINK], productKey: "code" },
+    { userMessages: [LINK], userId: null },
+    { userMessages: [LINK], env: {} },
+  ];
+  for (const extra of cases) {
+    const ctx = context({ env: { CHAT_URL_READING_ENABLED: "true" }, ...extra });
+    const offered = names(await withChatReadTools(ctx)).includes("read_url");
+    assert.equal(chatUrlReadOffered(ctx), offered, JSON.stringify(extra));
+  }
+  assert.equal(chatUrlReadOffered(context({ userMessages: [LINK] })), true);
 });

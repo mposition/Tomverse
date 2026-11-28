@@ -249,3 +249,20 @@ test("a turn just under a threshold can cross it once the blocks are priced", ()
     assert.ok(getInputCreditMultiplier(withBlocks) > getInputCreditMultiplier(justUnder));
   }
 });
+
+test("a turn that cannot search but can read a pasted link carries the read_url exception", () => {
+  const plain = build();
+  const withUrl = build({ urlReadAvailable: true });
+  const text = withUrl.webSearchCapabilityPrompt;
+  assert.ok(text.includes("# Current information"), "the limitation block is still there");
+  assert.ok(text.includes("read_url"), "and names the tool the turn really has");
+  // The exception is where the 're-send' ban is reconciled with a refused link.
+  assert.ok(/ask the user to paste the link/.test(text));
+  assert.equal(plain.webSearchCapabilityPrompt.includes("read_url"), false);
+  assert.ok(withUrl.promptTokens > plain.promptTokens, "the extra text is priced");
+});
+
+test("a searching turn gets no limitation block, with or without read_url", () => {
+  const blocks = build({ nativeSearchEnabled: true, urlReadAvailable: true });
+  assert.equal(blocks.webSearchCapabilityPrompt, "");
+});

@@ -407,7 +407,7 @@ import {
     projectToolsAvailable,
     PROJECT_TOOL_MAX_STEPS,
 } from "@/lib/projectChatTools";
-import { withChatReadTools } from "@/lib/chatReadTools";
+import { chatUrlReadOffered, withChatReadTools } from "@/lib/chatReadTools";
 import type { ChatToolSlot } from "@/lib/chatToolLoop";
 import { projectReceiptSources } from "@/lib/projectSourceAccess";
 import { resolveConversationProjectScope } from "@/lib/projectWorkspaceService";
@@ -4146,8 +4146,21 @@ async function handleChatPost(
                 selected: req.headers.has(PASSAGE_HEADER), outcome: isResearchPreview || isDeepResearchTurn ? "unsupported" : finalContinuation.outcome,
                 plan: continuationSeed ? finalContinuation.seed?.plan : null });
         }
+        // Same gate and link scan withChatReadTools applies below, asked first so a turn that
+        // can read a pasted link is not also told the web is out of reach.
+        const urlReadAvailable = chatUrlReadOffered({
+            userId: session?.user?.id,
+            conversationId,
+            productKey: conversationProductKey,
+            model: modelConfig,
+            nativeSearch: nativeSearchEnabled,
+            otherToolOwner: Boolean(mcpConnectionId),
+            researchTurn: isResearchPreview || isDeepResearchTurn,
+            userMessages: messages.filter((m) => m.role === "user").map((m) => m.content),
+        });
         const turnSystemBlocks = buildChatTurnSystemBlocks({
             currentLocation,
+            urlReadAvailable,
             modelId: modelConfig.id,
             provider: modelConfig.provider,
             usageClass: modelConfig.usageClass,
